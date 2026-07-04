@@ -1,0 +1,41 @@
+# Contexto de produto — Nuki & módulo Planner
+
+> Condensado das fontes de contexto da Nuki. Fonte completa:
+> `../../Nuki-Planner-v1/uploads/nuki-modulo-produto-fluxo-v3.md` e o contexto da empresa.
+
+## A Nuki
+Plataforma SaaS B2B para construtoras/incorporadoras que centraliza o ciclo completo de
+personalização de acabamentos das unidades — do planejamento de custos à validação em obra.
+Três módulos: **Planner** (antes da venda) → **Personaliza** (durante a venda) → **Inspetor**
+(após a obra). Modelo de recorrência por empreendimento ativo.
+
+## O módulo Planner
+Ponto de entrada do ciclo. Digitaliza a definição de materiais, composição de custos e
+formação de preços de personalização — hoje feito em planilhas ao longo de 3–4 meses. Ao
+publicar, alimenta automaticamente o módulo Personaliza (fase 02).
+
+### Atores
+- **Incorporadora** (autenticada): configura catálogo, tipologias, kits, taxas; valida custos e publica.
+- **Terceiro** (construtora/orçamentista, via link tokenizado sem login): preenche custos de
+  material e mão de obra por item, conforme o escopo do link.
+- **Admin Nuki** (autenticado): suporte/visualização; não participa do fluxo.
+
+### Jornada
+```
+CONFIGURAÇÃO  → Config base → Tipologias ⇄ Visualizador (canvas) ; Grupos de unidades ; Catálogo
+CUSTOS        → Revisão de custos (opcional: link p/ terceiro; versionamento) → Orçamento por tipologia
+PUBLICAÇÃO    → Publicar → alimenta a fase 02
+```
+
+### Conceitos-chave do domínio
+- **Empreendimento (Project)** — torres, taxas globais, colunas de preço, status.
+- **Grupo de unidades (UnitGroup)** — números de apartamentos compatíveis, por torre; vinculado a tipologias.
+- **Tipologia (Blueprint)** — variação de planta: ambientes, características, imagem da planta.
+- **Ambiente (Room)** — ícone, imagem base, local na planta; pode ser compartilhado entre tipologias.
+- **Componente (Component)** — unidade, quantidade, tolerância RT; material/kit padrão + upgrades; flag fantasma.
+- **Material** / **Kit** (kit = soma de materiais avulsos; quantitativos por tipologia).
+- **Orçamento por tipologia** — colunas configuráveis com fórmulas livres; recálculo em tempo real no cliente.
+- **Versão do orçamento (BudgetVersion)**, **Comentário**, **Post-it (CanvasNote)**, **MediaAsset**.
+
+### Fora de escopo (v1 do produto)
+Integração com ERPs · aprovação multinível · render 3D · comparação multi-fornecedor · módulo de obra.

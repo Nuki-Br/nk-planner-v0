@@ -1,0 +1,34 @@
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --nk-bg-page: #f5f5f5;
+  --nk-bg-surface: #ffffff;
+}
+
+html,
+body {
+  font-family: "Manrope", sans-serif;
+  background: var(--nk-bg-page);
+  color: #262626;
+}
+
+/* Custom scrollbar — matches nk-admin-portal */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f2f2f2;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #bdbdbd;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #6e6e6e;
+}

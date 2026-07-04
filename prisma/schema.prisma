@@ -1,0 +1,44 @@
+// Nuki Planner — Prisma schema (STUB).
+// This is a minimal, valid starting point so `prisma generate` produces a typed
+// client for the app skeleton. The full domain model (Project, Tower, UnitGroup,
+// Material, Kit, Blueprint, Room, Component, ComponentItem, PriceColumn,
+// BudgetVersion, Comment, CanvasNote, MediaAsset, fill-link, ...) is designed in
+// Phase 5 → docs/api-plan.md, following the module doc §4.
+//
+// Tenancy: every domain row is org-scoped via `organizationId` so beta users from
+// different organizations are isolated (kept intentionally simple).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Organization {
+  id        String       @id @default(uuid())
+  name      String
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  members   Membership[]
+
+  @@map("organizations")
+}
+
+/// Links a Supabase Auth user (authUserId) to an Organization.
+model Membership {
+  id             String       @id @default(uuid())
+  authUserId     String       @map("auth_user_id")
+  email          String
+  role           String       @default("member")
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+
+  @@unique([authUserId, organizationId])
+  @@index([organizationId])
+  @@map("memberships")
+}
