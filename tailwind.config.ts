@@ -36,6 +36,10 @@ const config = {
         "xs-p-bold": ["0.75rem", { fontWeight: "700" }],
       },
       colors: {
+        // Nuki numeric scale (1-8, nk-admin-portal convention). The extra
+        // 50-900/DEFAULT/foreground keys keep HeroUI's semantic classes
+        // (bg-primary, text-primary-foreground, ...) alive: this object
+        // shadows the heroui() plugin's `primary`, so it must include them.
         primary: {
           1: "#E6FAFA",
           2: "#B3EFEF",
@@ -45,6 +49,18 @@ const config = {
           6: "#049494",
           7: "#047676",
           8: "#025259",
+          50: "#E6FAFA",
+          100: "#B3EFEF",
+          200: "#82E6E6",
+          300: "#06CECE",
+          400: "#05B1B1",
+          500: "#049494",
+          600: "#047676",
+          700: "#047676",
+          800: "#025259",
+          900: "#025259",
+          DEFAULT: "#047676",
+          foreground: "#ffffff",
         },
         secondary: {
           1: "#FDF1EC",
@@ -53,8 +69,11 @@ const config = {
           4: "#ED8D65",
           5: "#E8713F",
           6: "#D5653C",
+          DEFAULT: "#E8713F",
+          foreground: "#ffffff",
         },
         background: {
+          DEFAULT: "#ffffff",
           standard: "#f5f5f5",
           modal: "#444444",
         },
@@ -81,6 +100,23 @@ const config = {
           "gray-12": "#141414",
           "gray-13": "#000000",
         },
+        // Pastel bg/fg pairs used by status badges and category chips
+        // (mirrors STATUS_CFG/CAT_COLORS from the prototype).
+        tint: {
+          blue: { bg: "#dbeafe", fg: "#1d4ed8" },
+          violet: { bg: "#ede9fe", fg: "#7c3aed" },
+          pink: { bg: "#fce7f3", fg: "#be185d" },
+          amber: { bg: "#fef3c7", fg: "#92400e" },
+          emerald: { bg: "#d1fae5", fg: "#065f46" },
+          sky: { bg: "#e0f2fe", fg: "#0369a1" },
+          red: { bg: "#fee2e2", fg: "#dc2626" },
+          orange: { fg: "#d97706" },
+        },
+      },
+      borderRadius: {
+        // Nuki radius tokens beyond the Tailwind scale (tokens.js: xl=14, 2xl=20)
+        "nk-xl": "14px",
+        "nk-2xl": "20px",
       },
       keyframes: {
         "accordion-down": {
@@ -98,7 +134,38 @@ const config = {
       },
     },
   },
-  plugins: [require("tailwindcss-animate"), heroui()],
+  plugins: [
+    require("tailwindcss-animate"),
+    // HeroUI semantic colors: brand teal as `primary` (actions use primary7
+    // #047676, as in the prototype's `teal` button), functional palette mapped
+    // to success/warning/danger.
+    heroui({
+      themes: {
+        light: {
+          colors: {
+            primary: {
+              50: "#E6FAFA",
+              100: "#B3EFEF",
+              200: "#82E6E6",
+              300: "#06CECE",
+              400: "#05B1B1",
+              500: "#049494",
+              600: "#047676",
+              700: "#047676",
+              800: "#025259",
+              900: "#025259",
+              DEFAULT: "#047676",
+              foreground: "#ffffff",
+            },
+            success: { DEFAULT: "#047676", foreground: "#ffffff" },
+            warning: { DEFAULT: "#faad14", foreground: "#262626" },
+            danger: { DEFAULT: "#E45F61", foreground: "#ffffff" },
+            focus: "#047676",
+          },
+        },
+      },
+    }),
+  ],
 } satisfies Config;
 
 export default config;
