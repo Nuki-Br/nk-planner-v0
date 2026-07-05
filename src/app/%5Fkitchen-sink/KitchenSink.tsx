@@ -24,6 +24,11 @@ import {
   type ButtonVariant,
   type DataTableColumn,
 } from "@/components/ui";
+import { useCreateMaterial, useMateriais } from "@/lib/hooks/useMateriais";
+import { useKits } from "@/lib/hooks/useKits";
+import { usePendingItems } from "@/lib/hooks/usePendingItems";
+import { useProjects } from "@/lib/hooks/useProjects";
+import { useTipologias } from "@/lib/hooks/useTipologias";
 import { fmtBRL, fmtNum, parseBR } from "@/lib/utils";
 import { CAT_COLORS, CATEGORIAS } from "@/shared/constants/categorias";
 import { STATUS_KEYS } from "@/shared/constants/status";
@@ -90,6 +95,69 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+// Prova viva da camada de dados mock (Fase 1): hooks React Query lendo o
+// seed e uma mutation com invalidation refletindo na contagem.
+function DataLayerSection() {
+  const projects = useProjects();
+  const materiais = useMateriais();
+  const kits = useKits();
+  const tipologias = useTipologias();
+  const pendentes = usePendingItems();
+  const createMaterial = useCreateMaterial();
+
+  const stats = [
+    { label: "Empreendimentos", value: projects.data?.length },
+    { label: "Materiais", value: materiais.data?.length },
+    { label: "Kits", value: kits.data?.length },
+    { label: "Tipologias", value: tipologias.data?.length },
+    { label: "Itens pendentes", value: pendentes.data?.size },
+  ];
+
+  return (
+    <Section title="Camada de dados (mock) — hooks React Query">
+      <Card>
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap gap-2">
+            {stats.map((s) => (
+              <Chip key={s.label} tone="teal">
+                {s.label}: {s.value ?? "…"}
+              </Chip>
+            ))}
+          </div>
+          <p className="text-[13px] text-neutral-gray-11">
+            Projeto ativo do seed: <strong>{projects.data?.[0]?.nome ?? "carregando…"}</strong>{" "}
+            <span className="text-neutral-gray-7">
+              ({projects.data?.[0]?.itensPreenchidos}/{projects.data?.[0]?.totalItens} itens
+              preenchidos)
+            </span>
+          </p>
+          <div>
+            <Button
+              variant="bordered"
+              size="sm"
+              icon="plus"
+              isLoading={createMaterial.isPending}
+              onPress={() =>
+                createMaterial.mutate({
+                  codigo: "TST-KS",
+                  nome: "Material de teste (kitchen-sink)",
+                  fabricante: "Nuki",
+                  categoria: "Piso",
+                  unidade: "m²",
+                  custoMat: 10,
+                  custoMO: 5,
+                })
+              }
+            >
+              Adicionar material de teste
+            </Button>
+          </div>
+        </div>
+      </Card>
+    </Section>
+  );
+}
+
 export function KitchenSink() {
   const [modalOpen, setModalOpen] = React.useState(false);
   const [categoria, setCategoria] = React.useState("");
@@ -112,6 +180,8 @@ export function KitchenSink() {
           </>
         }
       />
+
+      <DataLayerSection />
 
       <Section title="StepNav">
         <StepNav steps={WORKFLOW_STEPS} currentKey="materials-catalog" />
