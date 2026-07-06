@@ -10,6 +10,13 @@
 | Banco/Auth | Supabase Postgres + Supabase Auth (`@supabase/ssr`). |
 | Localização do projeto | `Lab/nk-planner-v0` (irmão do protótipo `Nuki-Planner-v1`). |
 
+## Decisões travadas (Fase 4, 2026-07-06)
+| Tema | Decisão |
+|------|---------|
+| Custos no cadastro de material | **Sem custos no modal** (fiel ao protótipo): só identificação (código, categoria, especificação, fabricante, unidade). Material nasce com `custoMat`/`custoMO` = 0 e conta como pendente até a Revisão de custos (Fase 8) ou o preenchimento via link. |
+| Importação CSV | **Real com PapaParse**: upload de arquivo .csv, mapeamento de colunas auto-sugerido (sinônimos PT-BR), pré-visualização com linhas descartadas e motivo, gravação em lote no store. Linhas sem especificação ou com categoria desconhecida são descartadas; unidade desconhecida vira `und`; custos vazios viram 0 (pendentes). |
+| Backend | **Colocalizado no Next.js** (route handlers `/api/*` + Prisma/Supabase na Fase 10). Sem repositório separado para o backend do MVP. |
+
 ## Questões em aberto (do módulo doc §7 — resolver quando pesarem)
 | # | Questão | Impacto | Resolver em |
 |---|---------|---------|-------------|

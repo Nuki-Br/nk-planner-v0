@@ -129,6 +129,13 @@ export async function createMaterial(input: MaterialInput): Promise<Material> {
   return clone(mat);
 }
 
+/** Criação em lote (importação CSV) — na Fase 10 vira um único POST. */
+export async function createMateriais(inputs: MaterialInput[]): Promise<Material[]> {
+  const created = inputs.map((input): Material => ({ id: genId("mat"), ...clone(input) }));
+  db.materiais.push(...created);
+  return clone(created);
+}
+
 export async function updateMaterial(
   id: string,
   patch: Partial<MaterialInput>
