@@ -60,14 +60,16 @@ export function Sidebar() {
   );
 
   // Espelha o navigate() do protótipo: entrar no fluxo sem projeto ativa o
-  // p001 (THE_PROJECT); voltar ao dashboard limpa a seleção.
+  // p001 (THE_PROJECT); voltar ao dashboard limpa a seleção. Reage APENAS à
+  // mudança de rota (ler o id via getState evita apagar uma seleção feita
+  // no próprio dashboard, ex.: "Abrir" antes de navegar).
   React.useEffect(() => {
     if (pathname === "/dashboard") {
-      if (activeProjectId !== null) clearSelection();
-    } else if (!isDashboardMode && activeProjectId === null) {
+      clearSelection();
+    } else if (!isDashboardMode && useSelection.getState().activeProjectId === null) {
       setActiveProject(SEED_ACTIVE_PROJECT_ID);
     }
-  }, [pathname, isDashboardMode, activeProjectId, setActiveProject, clearSelection]);
+  }, [pathname, isDashboardMode, setActiveProject, clearSelection]);
 
   const { data: project } = useProject(activeProjectId);
   const inProject = !isDashboardMode && !!project;
