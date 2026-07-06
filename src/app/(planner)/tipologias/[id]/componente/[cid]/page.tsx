@@ -2,12 +2,12 @@
 
 import React from "react";
 
-import { UnderConstruction } from "@/components/layout/UnderConstruction";
-import { useTipologia } from "@/lib/hooks/useTipologias";
+import { MaterialsConfigScreen } from "@/features/materials-config/components/MaterialsConfigScreen";
 import { useSelection } from "@/lib/store/selection";
 
-// Tela 7 — Configuração de materiais por componente. Rota carrega os
-// parâmetros vivos ([id] tipologia, [cid] componente) e sincroniza a seleção.
+// Tela 7 — Configuração de materiais por componente. Os parâmetros vivos do
+// protótipo ([id] tipologia, [cid] componente) vêm da rota; a seleção é
+// sincronizada no store.
 export default function ComponentePage({
   params,
 }: {
@@ -20,33 +20,5 @@ export default function ComponentePage({
     setSelectedComponent(params.cid);
   }, [params.id, params.cid, setSelectedTipologia, setSelectedComponent]);
 
-  const { data: tipologia, isLoading } = useTipologia(params.id);
-  const match = tipologia?.ambientes
-    .flatMap((amb) => amb.componentes.map((comp) => ({ amb, comp })))
-    .find(({ comp }) => comp.id === params.cid);
-
-  const nomeTip = tipologia?.nome ?? (isLoading ? "…" : "Tipologia não encontrada");
-  const nomeComp = match
-    ? `${match.amb.nome} — ${match.comp.nome}`
-    : isLoading
-      ? "…"
-      : "Componente não encontrado";
-
-  return (
-    <UnderConstruction
-      title="Configuração de materiais"
-      subtitle={
-        match
-          ? `${nomeComp} · ${match.comp.qtd} ${match.comp.unidade}${match.comp.rt > 0 ? ` · RT ${match.comp.rt}%` : ""}`
-          : nomeComp
-      }
-      breadcrumb={[
-        { label: "Empreendimentos", href: "/dashboard" },
-        { label: "Tipologias", href: "/tipologias" },
-        { label: nomeTip },
-        { label: match?.comp.nome ?? "Componente" },
-      ]}
-      fase={5}
-    />
-  );
+  return <MaterialsConfigScreen tipologiaId={params.id} componenteId={params.cid} />;
 }

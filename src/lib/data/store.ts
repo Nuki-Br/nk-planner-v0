@@ -258,6 +258,13 @@ export async function deleteAmbiente(tipologiaId: string, ambienteId: string): P
   const idx = tip.ambientes.findIndex((a) => a.id === ambienteId);
   if (idx === -1) throw new Error("Ambiente não encontrado.");
   tip.ambientes.splice(idx, 1);
+  // Desvincula esta tipologia do grupo compartilhado, se houver.
+  const sid = db.ambShared[ambienteId];
+  if (sid !== undefined) {
+    delete db.ambShared[ambienteId];
+    const reg = db.sharedReg[sid];
+    if (reg) reg.tips = reg.tips.filter((id) => id !== tipologiaId);
+  }
 }
 
 export async function cloneAmbiente(
@@ -289,7 +296,7 @@ export async function reorderAmbientes(
 // ─── Componentes ──────────────────────────────────────────────────────
 
 export type ComponenteInput = Pick<Componente, "nome" | "unidade" | "qtd" | "rt"> &
-  Partial<Pick<Componente, "ghost" | "ordem">>;
+  Partial<Pick<Componente, "ghost" | "ordem" | "padrao">>;
 
 export async function createComponente(
   tipologiaId: string,
@@ -297,10 +304,11 @@ export async function createComponente(
   input: ComponenteInput
 ): Promise<Componente> {
   const amb = findAmbiente(tipologiaId, ambienteId);
+  const { padrao, ...rest } = input;
   const comp: Componente = {
     id: genId("c"),
-    ...clone(input),
-    padrao: null,
+    ...clone(rest),
+    padrao: padrao ?? null,
     upgrades: [],
     taxaEspecifica: null,
   };
@@ -388,6 +396,48 @@ export async function setKitQtds(
   const comp = findComponente(tipologiaId, ambienteId, componenteId);
   comp.kitQtds = { ...comp.kitQtds, [kitId]: clone(qtds) };
   return clone(comp);
+}
+
+// ─── Compartilhamento de ambientes entre tipologias ──────────────────
+// Fase 5 do plano: ao vincular, clona os componentes e registra o grupo
+// (sincronização real de edições fica para depois — §12).
+
+export interface SharedInfo {
+  /** shareId → tipologias participantes. */
+  sharedReg: Record<string, { tips: string[] }>;
+  /** ambienteId → shareId. */
+  ambShared: Record<string, string>;
+}
+
+export async function getSharedInfo(): Promise<SharedInfo> {
+  return clone({ sharedReg: db.sharedReg, ambShared: db.ambShared });
+}
+
+/**
+ * Vincula um ambiente de outra tipologia à tipologia alvo: clona o ambiente
+ * (ids novos) e registra ambos no grupo compartilhado do ambiente fonte.
+ */
+export async function linkAmbiente(
+  targetTipologiaId: string,
+  srcTipologiaId: string,
+  srcAmbienteId: string
+): Promise<Ambiente> {
+  const target = findTipologia(targetTipologiaId);
+  const srcAmb = findAmbiente(srcTipologiaId, srcAmbienteId);
+  const sid = db.ambShared[srcAmbienteId] ?? `sh-${srcAmbienteId}`;
+
+  const copy = clone(srcAmb);
+  copy.id = genId("amb");
+  copy.componentes = copy.componentes.map((c) => ({ ...c, id: genId("c") }));
+  target.ambientes.push(copy);
+
+  db.ambShared[copy.id] = sid;
+  db.ambShared[srcAmbienteId] = sid;
+  const reg = db.sharedReg[sid] ?? { tips: [] };
+  reg.tips = Array.from(new Set([...reg.tips, srcTipologiaId, targetTipologiaId]));
+  db.sharedReg[sid] = reg;
+
+  return clone(copy);
 }
 
 // ─── Unit groups / Torres ─────────────────────────────────────────────

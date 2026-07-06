@@ -26,6 +26,10 @@ export interface SeedData {
   unitGroups: UnitGroup[];
   /** Chaves `${compId}-${optId}` / `${compId}-${kitId}-${matId}` (Set no protótipo; array p/ sobreviver a JSON na Fase 10). */
   pendingItems: string[];
+  /** Grupos de ambientes compartilhados entre tipologias: shareId → tipologias participantes. */
+  sharedReg: Record<string, { tips: string[] }>;
+  /** ambienteId → shareId do grupo compartilhado a que pertence. */
+  ambShared: Record<string, string>;
   versions: BudgetVersion[];
   /** projects[0] (p001) já vem enriquecido com os extras do THE_PROJECT do protótipo. */
   projects: Project[];
@@ -359,6 +363,17 @@ export function createSeed(): SeedData {
     ],
   };
 
+  // Demonstração do protótipo: "Sala/Living" já compartilhada entre as três
+  // tipologias (paleta roxa na tela de tipologias).
+  const sharedReg: Record<string, { tips: string[] }> = {
+    "sh-sala": { tips: ["t1", "t2", "t3"] },
+  };
+  const ambShared: Record<string, string> = {
+    "a1-1": "sh-sala",
+    "a2-1": "sh-sala",
+    "a3-1": "sh-sala",
+  };
+
   return {
     materiais,
     kits,
@@ -366,6 +381,8 @@ export function createSeed(): SeedData {
     torres,
     unitGroups,
     pendingItems,
+    sharedReg,
+    ambShared,
     versions,
     projects,
     comments,

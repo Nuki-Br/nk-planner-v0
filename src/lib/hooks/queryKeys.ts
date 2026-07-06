@@ -10,6 +10,7 @@ export const queryKeys = {
   unitGroups: ["unit-groups"] as const,
   torres: ["torres"] as const,
   budgetColumns: (projectId: string) => ["budget-columns", projectId] as const,
+  sharedAmbientes: ["shared-ambientes"] as const,
   versions: ["versions"] as const,
   comments: (rowKey: string) => ["comments", rowKey] as const,
   pendingItems: ["pending-items"] as const,

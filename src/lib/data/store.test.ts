@@ -3,8 +3,12 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   addPendingItem,
   appendComment,
+  createComponente,
   createMaterial,
   createTipologia,
+  deleteAmbiente,
+  getSharedInfo,
+  linkAmbiente,
   createVersion,
   deleteMaterial,
   duplicateTipologia,
@@ -140,6 +144,56 @@ describe("store — versões, comentários e pendências", () => {
     expect(await listPendingItems()).toHaveLength(6);
     await removePendingItem("c1-1-1-piso-002");
     expect(await listPendingItems()).toHaveLength(5);
+  });
+});
+
+describe("store — compartilhamento de ambientes", () => {
+  it("seed traz a Sala/Living compartilhada entre as 3 tipologias", async () => {
+    const { sharedReg, ambShared } = await getSharedInfo();
+    expect(sharedReg["sh-sala"]?.tips).toEqual(["t1", "t2", "t3"]);
+    expect(ambShared["a2-1"]).toBe("sh-sala");
+  });
+
+  it("linkAmbiente clona com ids novos e registra os dois lados", async () => {
+    // Vincula a Cozinha da t2 (a2-2) na t1
+    const novo = await linkAmbiente("t1", "t2", "a2-2");
+    expect(novo.id).not.toBe("a2-2");
+    expect(novo.nome).toBe("Cozinha");
+    expect(novo.componentes).toHaveLength(3);
+    expect(novo.componentes.map((c) => c.id)).not.toContain("c2-2-1");
+
+    const { sharedReg, ambShared } = await getSharedInfo();
+    expect(ambShared[novo.id]).toBe("sh-a2-2");
+    expect(ambShared["a2-2"]).toBe("sh-a2-2");
+    expect(sharedReg["sh-a2-2"]?.tips.sort()).toEqual(["t1", "t2"]);
+  });
+
+  it("deleteAmbiente desvincula a tipologia do grupo", async () => {
+    await deleteAmbiente("t3", "a3-1"); // Sala/Living da t3 (sh-sala)
+    const { sharedReg, ambShared } = await getSharedInfo();
+    expect(ambShared["a3-1"]).toBeUndefined();
+    expect(sharedReg["sh-sala"]?.tips.sort()).toEqual(["t1", "t2"]);
+  });
+});
+
+describe("store — createComponente com padrão", () => {
+  it("aceita padrao opcional e nasce sem upgrades", async () => {
+    const comp = await createComponente("t1", "a1-1", {
+      nome: "Nicho decorativo",
+      unidade: "und",
+      qtd: 2,
+      rt: 0,
+      padrao: "piso-001",
+    });
+    expect(comp.padrao).toBe("piso-001");
+    expect(comp.upgrades).toEqual([]);
+    const semPadrao = await createComponente("t1", "a1-1", {
+      nome: "Outro",
+      unidade: "m²",
+      qtd: 1,
+      rt: 0,
+    });
+    expect(semPadrao.padrao).toBeNull();
   });
 });
 

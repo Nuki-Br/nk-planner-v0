@@ -1,12 +1,6 @@
-import { UnderConstruction } from "@/components/layout/UnderConstruction";
+import { TypologiesScreen } from "@/features/typologies/components/TypologiesScreen";
 
+// Tela 3 — Tipologias e componentes (inclui o drawer de Grupos de unidades, tela 5).
 export default function TipologiasPage() {
-  return (
-    <UnderConstruction
-      title="Tipologias e componentes"
-      subtitle="Plantas, ambientes, componentes e grupos de unidades"
-      breadcrumb={[{ label: "Empreendimentos", href: "/dashboard" }, { label: "Tipologias" }]}
-      fase={5}
-    />
-  );
+  return <TypologiesScreen />;
 }
