@@ -12,6 +12,12 @@ import type {
   UnitGroup,
 } from "@/shared/types/domain";
 
+/**
+ * Projeto ativo do mock (THE_PROJECT do protótipo): navegar para dentro do
+ * fluxo sem projeto selecionado ativa o p001, como o navigate() original.
+ */
+export const SEED_ACTIVE_PROJECT_ID = "p001";
+
 export interface SeedData {
   materiais: Material[];
   kits: Kit[];

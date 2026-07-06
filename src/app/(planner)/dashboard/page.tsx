@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Card, CardBody, CardHeader } from "@heroui/react";
 
 const SUMMARY = [
@@ -34,7 +35,11 @@ export default function DashboardPage() {
 
       <Card shadow="sm" className="border border-neutral-gray-4">
         <CardBody className="py-16 text-center text-sm-p text-neutral-gray-6">
-          Skeleton pronto. As telas do protótipo serão migradas nas próximas fases.
+          A tabela de empreendimentos chega na Fase 3.{" "}
+          <Link href="/tipologias" className="text-primary-7 underline underline-offset-2">
+            Abrir o projeto do seed
+          </Link>{" "}
+          para navegar pelo fluxo.
         </CardBody>
       </Card>
     </div>
