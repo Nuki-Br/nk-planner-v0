@@ -16,6 +16,7 @@ import {
   linkAmbiente,
   removeUpgrade,
   reorderAmbientes,
+  replaceUpgrade,
   reorderComponentes,
   setKitQtds,
   setPadrao,
@@ -193,6 +194,19 @@ export function useSetPadrao() {
 export function useAddUpgrade() {
   return useTreeMutation(({ tipologiaId, ambienteId, componenteId, upgradeId }: CompPath & { upgradeId: string }) =>
     addUpgrade(tipologiaId, ambienteId, componenteId, upgradeId)
+  );
+}
+
+export function useReplaceUpgrade() {
+  return useTreeMutation(
+    ({
+      tipologiaId,
+      ambienteId,
+      componenteId,
+      oldId,
+      newId,
+    }: CompPath & { oldId: string; newId: string }) =>
+      replaceUpgrade(tipologiaId, ambienteId, componenteId, oldId, newId)
   );
 }
 

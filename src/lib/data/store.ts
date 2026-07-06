@@ -373,6 +373,22 @@ export async function addUpgrade(
   return clone(comp);
 }
 
+/** Troca o material de uma opção preservando a posição no array (ups[i] = novo). */
+export async function replaceUpgrade(
+  tipologiaId: string,
+  ambienteId: string,
+  componenteId: string,
+  oldId: string,
+  newId: string
+): Promise<Componente> {
+  const comp = findComponente(tipologiaId, ambienteId, componenteId);
+  const i = comp.upgrades.indexOf(oldId);
+  if (i >= 0) comp.upgrades[i] = newId;
+  else if (!comp.upgrades.includes(newId)) comp.upgrades.push(newId);
+  if (comp.kitQtds && oldId !== newId) delete comp.kitQtds[oldId];
+  return clone(comp);
+}
+
 export async function removeUpgrade(
   tipologiaId: string,
   ambienteId: string,

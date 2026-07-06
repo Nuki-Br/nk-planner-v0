@@ -22,6 +22,7 @@ import {
   listVersions,
   removePendingItem,
   reorderComponentes,
+  replaceUpgrade,
   resetStore,
   restoreVersion,
   setKitQtds,
@@ -194,6 +195,20 @@ describe("store — createComponente com padrão", () => {
       rt: 0,
     });
     expect(semPadrao.padrao).toBeNull();
+  });
+});
+
+describe("store — replaceUpgrade", () => {
+  it("troca preservando a posição e limpa kitQtds do antigo", async () => {
+    // c1-1-1 tem upgrades [piso-002, piso-003, kit-piso-barcelona] e kitQtds do kit
+    const comp = await replaceUpgrade("t1", "a1-1", "c1-1-1", "kit-piso-barcelona", "piso-004");
+    expect(comp.upgrades).toEqual(["piso-002", "piso-003", "piso-004"]);
+    expect(comp.kitQtds?.["kit-piso-barcelona"]).toBeUndefined();
+  });
+
+  it("id antigo inexistente adiciona ao final sem duplicar", async () => {
+    const comp = await replaceUpgrade("t1", "a1-1", "c1-1-2", "nao-existe", "rod-002");
+    expect(comp.upgrades).toEqual(["rod-002"]); // rod-002 já era o único upgrade
   });
 });
 
