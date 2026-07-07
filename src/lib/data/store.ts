@@ -538,6 +538,11 @@ export async function getComments(rowKey: string): Promise<Comment[]> {
   return clone(db.comments[rowKey] ?? []);
 }
 
+/** Todas as threads (contadores de comentário por linha nas tabelas). */
+export async function listCommentThreads(): Promise<Record<string, Comment[]>> {
+  return clone(db.comments);
+}
+
 export async function appendComment(rowKey: string, input: CommentInput): Promise<Comment> {
   const comment: Comment = { ...clone(input), data: nowBR() };
   const thread = db.comments[rowKey];

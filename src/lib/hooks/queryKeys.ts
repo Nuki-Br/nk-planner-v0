@@ -13,5 +13,6 @@ export const queryKeys = {
   sharedAmbientes: ["shared-ambientes"] as const,
   versions: ["versions"] as const,
   comments: (rowKey: string) => ["comments", rowKey] as const,
+  commentThreads: ["comments"] as const,
   pendingItems: ["pending-items"] as const,
 };
