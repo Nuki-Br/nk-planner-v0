@@ -18,6 +18,7 @@ import { useCreateVersion, useRestoreVersion, useVersions } from "@/lib/hooks/us
 import { useSelection } from "@/lib/store/selection";
 import { cn, fmtBRL, fmtNum } from "@/lib/utils";
 import { CommentThreadPanel, type ThreadRow } from "@/features/construtor-shared/CommentThreadPanel";
+import { LinkFillModal } from "@/features/construtor-shared/LinkFillModal";
 import type { BudgetColumn, BudgetVersion, ColumnKind } from "@/shared/types/domain";
 
 import {
@@ -189,6 +190,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   const [dragTarget, setDragTarget] = React.useState<string | null>(null);
   const [collapsedKits, setCollapsedKits] = React.useState<Set<string>>(new Set());
   const [showDrawer, setShowDrawer] = React.useState(false);
+  const [showLinkModal, setShowLinkModal] = React.useState(false);
   const [showSaveModal, setShowSaveModal] = React.useState(false);
   const [saveSummary, setSaveSummary] = React.useState("");
   const [restoreTarget, setRestoreTarget] = React.useState<BudgetVersion | null>(null);
@@ -449,11 +451,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
         subtitle="Custos base e preço final no mesmo lugar · preencha custos pendentes na linha ou alterne para a visão de custos base · cálculo em tempo real"
         action={
           <>
-            <Button
-              variant="bordered"
-              icon="share"
-              onPress={() => fireToast("Geração de link de preenchimento chega na Fase 8")}
-            >
+            <Button variant="bordered" icon="share" onPress={() => setShowLinkModal(true)}>
               Gerar link de preenchimento
             </Button>
             <Button variant="bordered" onPress={() => setShowDrawer(true)}>
@@ -1220,6 +1218,8 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
           </div>
         </>
       )}
+
+      <LinkFillModal open={showLinkModal} onClose={() => setShowLinkModal(false)} />
 
       <VersionToast msg={toastMsg} />
     </div>

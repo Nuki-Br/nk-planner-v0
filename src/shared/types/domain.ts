@@ -136,6 +136,35 @@ export interface BudgetVersion {
   changes: VersionChanges;
 }
 
+/** Campos que o terceiro pode preencher via link (config do LinkFillModal). */
+export interface FillLinkCampos {
+  mat: boolean;
+  mo: boolean;
+  comment: boolean;
+}
+
+/** Link tokenizado de preenchimento de custos (token real no servidor: Fase 10). */
+export interface FillLink {
+  id: string;
+  /** Segmento da URL /portal/[token]. */
+  token: string;
+  tipologiaIds: string[];
+  campos: FillLinkCampos;
+  /** "DD/MM/AAAA" ou null (opcional). */
+  prazo: string | null;
+  /** Senha em claro no mock — hash/validação no servidor entram na Fase 10. */
+  senha: string | null;
+  /** "DD/MM/AAAA HH:mm". */
+  criadoEm: string;
+}
+
+/** Preenchimento do terceiro por material (strings de input, como BaseCosts). */
+export interface PortalFill {
+  mat: string;
+  mo: string;
+  comment: string;
+}
+
 export type ProjectStatus =
   | "rascunho"
   | "em_preenchimento"

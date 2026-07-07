@@ -15,4 +15,6 @@ export const queryKeys = {
   comments: (rowKey: string) => ["comments", rowKey] as const,
   commentThreads: ["comments"] as const,
   pendingItems: ["pending-items"] as const,
+  fillLink: (token: string) => ["fill-links", token] as const,
+  portalFills: ["portal-fills"] as const,
 };

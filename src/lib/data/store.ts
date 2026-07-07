@@ -9,15 +9,17 @@ import type {
   BudgetVersion,
   Comment,
   Componente,
+  FillLink,
   Kit,
   Material,
+  PortalFill,
   Project,
   Tipologia,
   UnitGroup,
   VersionChanges,
 } from "@/shared/types/domain";
 
-import { createSeed, type SeedData } from "./seed";
+import { createSeed, SEED_ACTIVE_PROJECT_ID, type SeedData } from "./seed";
 
 let db: SeedData = createSeed();
 
@@ -549,6 +551,56 @@ export async function appendComment(rowKey: string, input: CommentInput): Promis
   if (thread) thread.push(comment);
   else db.comments[rowKey] = [comment];
   return clone(comment);
+}
+
+// ─── Links de preenchimento + portal do terceiro (Fase 8) ─────────────
+// Token e senha resolvidos no cliente contra o mock; a resolução no servidor
+// (e o hash da senha) entram na Fase 10.
+
+export type FillLinkInput = Pick<FillLink, "tipologiaIds" | "campos" | "prazo" | "senha">;
+
+export async function createFillLink(input: FillLinkInput): Promise<FillLink> {
+  const link: FillLink = {
+    id: genId("fl"),
+    token: Math.random().toString(36).slice(2, 10),
+    criadoEm: nowBR(),
+    ...clone(input),
+  };
+  db.fillLinks.push(link);
+  return clone(link);
+}
+
+export async function getFillLinkByToken(token: string): Promise<FillLink | null> {
+  const link = db.fillLinks.find((l) => l.token === token);
+  return link ? clone(link) : null;
+}
+
+export async function getPortalFills(): Promise<Record<string, PortalFill>> {
+  return clone(db.portalFills);
+}
+
+/**
+ * "Enviar preenchimento" do portal: grava os fills, aplica os custos com
+ * material preenchido ao catálogo, limpa as pendências relacionadas e move o
+ * projeto ativo para "em_revisao". Retorna quantos materiais foram aplicados.
+ */
+export async function submitPortalFills(fills: Record<string, PortalFill>): Promise<number> {
+  db.portalFills = clone(fills);
+  let applied = 0;
+  for (const [matId, fill] of Object.entries(db.portalFills)) {
+    const custoMat = parseFloat(fill.mat);
+    if (!(custoMat > 0)) continue;
+    const mat = db.materiais.find((m) => m.id === matId);
+    if (!mat) continue;
+    mat.custoMat = custoMat;
+    mat.custoMO = parseFloat(fill.mo) > 0 ? parseFloat(fill.mo) : 0;
+    applied += 1;
+    // Chaves `${compId}-${matId}` e sub-itens `${compId}-${kitId}-${matId}`.
+    db.pendingItems = db.pendingItems.filter((k) => !k.endsWith(`-${matId}`));
+  }
+  const p = db.projects.find((x) => x.id === SEED_ACTIVE_PROJECT_ID);
+  if (p && applied > 0) p.status = "em_revisao";
+  return applied;
 }
 
 // ─── Pending items ────────────────────────────────────────────────────

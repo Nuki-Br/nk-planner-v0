@@ -4,9 +4,12 @@ import {
   addPendingItem,
   appendComment,
   createComponente,
+  createFillLink,
   createMaterial,
   createTipologia,
   deleteAmbiente,
+  getFillLinkByToken,
+  getPortalFills,
   getSharedInfo,
   linkAmbiente,
   createVersion,
@@ -27,6 +30,7 @@ import {
   restoreVersion,
   setKitQtds,
   setPadrao,
+  submitPortalFills,
   updateBudgetColumns,
   updateProject,
 } from "./store";
@@ -209,6 +213,53 @@ describe("store — replaceUpgrade", () => {
   it("id antigo inexistente adiciona ao final sem duplicar", async () => {
     const comp = await replaceUpgrade("t1", "a1-1", "c1-1-2", "nao-existe", "rod-002");
     expect(comp.upgrades).toEqual(["rod-002"]); // rod-002 já era o único upgrade
+  });
+});
+
+describe("store — fill links (Fase 8)", () => {
+  it("createFillLink gera token resolvível; token desconhecido → null", async () => {
+    const link = await createFillLink({
+      tipologiaIds: ["t1", "t2"],
+      campos: { mat: true, mo: true, comment: false },
+      prazo: "20/06/2026",
+      senha: "abc123",
+    });
+    expect(link.token).toMatch(/^[a-z0-9]{6,}$/);
+    expect(link.criadoEm).toMatch(/^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/);
+
+    const found = await getFillLinkByToken(link.token);
+    expect(found?.id).toBe(link.id);
+    expect(found?.tipologiaIds).toEqual(["t1", "t2"]);
+    expect(found?.senha).toBe("abc123");
+    expect(await getFillLinkByToken("nao-existe")).toBeNull();
+  });
+});
+
+describe("store — portal do terceiro (Fase 8)", () => {
+  it("submitPortalFills aplica custos, limpa pendências e move o projeto para em_revisao", async () => {
+    await updateProject("p001", { status: "em_preenchimento" });
+    // piso-004 está pendente na Planta C (c3-1-1-piso-004)
+    const applied = await submitPortalFills({
+      "piso-004": { mat: "340", mo: "55", comment: "Cotação atualizada" },
+      "rev-003": { mat: "", mo: "10", comment: "" }, // sem custo mat → não aplica
+    });
+    expect(applied).toBe(1);
+
+    const mat = (await listMateriais()).find((m) => m.id === "piso-004");
+    expect(mat?.custoMat).toBe(340);
+    expect(mat?.custoMO).toBe(55);
+
+    const pendentes = await listPendingItems();
+    expect(pendentes).not.toContain("c3-1-1-piso-004");
+    expect(pendentes).toContain("c3-2-2-rev-003");
+
+    expect((await getProject("p001"))?.status).toBe("em_revisao");
+    expect((await getPortalFills())["piso-004"]?.comment).toBe("Cotação atualizada");
+  });
+
+  it("sub-item de kit pendente é limpo quando o material recebe custo", async () => {
+    await submitPortalFills({ "rt-bcn": { mat: "180", mo: "0", comment: "" } });
+    expect(await listPendingItems()).not.toContain("c3-1-1-kit-piso-barcelona-rt-bcn");
   });
 });
 

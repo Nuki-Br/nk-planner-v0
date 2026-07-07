@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { useRouter } from "next/navigation";
 import { Input as HeroInput } from "@heroui/react";
 
 import {
@@ -34,6 +35,7 @@ type TypeFilter = "" | "Material" | "Kit";
 
 // Tela 6 — Catálogo de materiais e kits (protótipo: MaterialsCatalogScreen).
 export function CatalogScreen() {
+  const router = useRouter();
   const { data: materiais = [] } = useMateriais();
   const { data: kits = [] } = useKits();
   const { data: tipologias = [] } = useTipologias();
@@ -197,6 +199,9 @@ export function CatalogScreen() {
         subtitle={`${materiais.length} materiais · ${kits.length} kits · organizados por categoria`}
         action={
           <>
+            <Button variant="bordered" icon="send" onPress={() => router.push("/enviar")}>
+              Enviar para construtora
+            </Button>
             <Button variant="bordered" icon="upload" onPress={() => setShowCsv(true)}>
               Importar CSV
             </Button>

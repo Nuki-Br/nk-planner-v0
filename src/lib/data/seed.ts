@@ -5,8 +5,10 @@ import { TAX_COLUMNS_DEFAULT } from "@/shared/constants/budget";
 import type {
   BudgetVersion,
   Comment,
+  FillLink,
   Kit,
   Material,
+  PortalFill,
   Project,
   Tipologia,
   UnitGroup,
@@ -35,6 +37,10 @@ export interface SeedData {
   projects: Project[];
   /** rowKey (`${compId}-${optId}`) → thread. */
   comments: Record<string, Comment[]>;
+  /** Links de preenchimento gerados (Fase 8; token real no servidor: Fase 10). */
+  fillLinks: FillLink[];
+  /** matId → custos/comentário preenchidos pelo terceiro no portal. */
+  portalFills: Record<string, PortalFill>;
 }
 
 /** Retorna uma estrutura NOVA a cada chamada (sem referências compartilhadas). */
@@ -386,5 +392,7 @@ export function createSeed(): SeedData {
     versions,
     projects,
     comments,
+    fillLinks: [],
+    portalFills: {},
   };
 }
