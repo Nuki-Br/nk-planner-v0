@@ -15,6 +15,6 @@ export const queryKeys = {
   comments: (rowKey: string) => ["comments", rowKey] as const,
   commentThreads: ["comments"] as const,
   pendingItems: ["pending-items"] as const,
-  fillLink: (token: string) => ["fill-links", token] as const,
-  portalFills: ["portal-fills"] as const,
+  /** Payload público do portal — muda com o token e com a senha fornecida. */
+  portal: (token: string, senha: string | null) => ["portal", token, senha ?? ""] as const,
 };

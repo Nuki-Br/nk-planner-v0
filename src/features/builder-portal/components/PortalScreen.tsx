@@ -5,19 +5,10 @@ import { useRouter } from "next/navigation";
 
 import { Button, EmptyState, Icon, ProgressBar } from "@/components/ui";
 import { getMaterial } from "@/lib/data/entities";
-import { SEED_ACTIVE_PROJECT_ID } from "@/lib/data/seed";
-import { useFillLink } from "@/lib/hooks/useFillLinks";
-import { useMateriais } from "@/lib/hooks/useMateriais";
-import { usePortalFills, useSubmitPortalFills } from "@/lib/hooks/usePortalFills";
-import { useProject } from "@/lib/hooks/useProjects";
-import { useTipologias } from "@/lib/hooks/useTipologias";
+import { usePortalData, useSubmitPortalFills } from "@/lib/hooks/usePortalFills";
 import { cn } from "@/lib/utils";
-import type {
-  FillLink,
-  Material,
-  PortalFill,
-  Tipologia,
-} from "@/shared/types/domain";
+import type { PortalData } from "@/shared/types/api";
+import type { Material, PortalFill, Tipologia } from "@/shared/types/domain";
 
 type Fills = Record<string, PortalFill>;
 
@@ -48,13 +39,49 @@ function BrandBlock() {
 }
 
 // Tela 9 — Portal do terceiro (protótipo: BuilderPortalScreen), acessada por
-// link tokenizado, sem shell nem login. Escopo (tipologias/campos/prazo/senha)
-// vem do FillLink; a resolução no servidor entra na Fase 10.
+// link tokenizado, sem shell nem login. O escopo (tipologias/campos/prazo) e
+// a senha são resolvidos NO SERVIDOR via /api/portal/[token] (Fase 10).
 export function PortalScreen({ token }: { token: string }) {
-  const { data: link, isLoading } = useFillLink(token);
+  const router = useRouter();
+  // senha validada (vai na query do GET); null enquanto o gate não liberou.
+  const [senha, setSenha] = React.useState<string | null>(null);
+  const [senhaInput, setSenhaInput] = React.useState("");
+  const [senhaError, setSenhaError] = React.useState(false);
+  const { data, isLoading, error } = usePortalData(token, senha);
+
+  const [activeTipId, setActiveTipId] = React.useState<string | null>(null);
+  const [costs, setCosts] = React.useState<Fills | null>(null);
+  const [submitted, setSubmitted] = React.useState(false);
+  const [openComment, setOpenComment] = React.useState<string | null>(null);
+  const submitFills = useSubmitPortalFills(token, senha);
+
+  // Senha errada: o servidor rejeita o GET — volta ao gate com o aviso.
+  React.useEffect(() => {
+    if (error && senha !== null) {
+      setSenha(null);
+      setSenhaError(true);
+    }
+  }, [error, senha]);
+
+  // Inicializa o rascunho quando o payload liberado chega: fills já enviados
+  // sobrepõem os custos do catálogo.
+  React.useEffect(() => {
+    if (costs !== null || !data || data.protegido) return;
+    const init: Fills = {};
+    for (const tip of data.tipologias) {
+      for (const m of tipMateriais(tip, data.materiais)) {
+        init[m.id] = data.fills[m.id] ?? {
+          mat: m.custoMat > 0 ? String(m.custoMat) : "",
+          mo: m.custoMO > 0 ? String(m.custoMO) : "",
+          comment: "",
+        };
+      }
+    }
+    setCosts(init);
+  }, [costs, data]);
 
   if (isLoading) return null;
-  if (!link) {
+  if (!data) {
     return (
       <div className="mx-auto max-w-3xl px-6 py-16">
         <div className="rounded-lg border border-neutral-gray-5 bg-white">
@@ -67,75 +94,9 @@ export function PortalScreen({ token }: { token: string }) {
       </div>
     );
   }
-  return <PortalContent link={link} />;
-}
 
-function PortalContent({ link }: { link: FillLink }) {
-  const router = useRouter();
-  const { data: project } = useProject(SEED_ACTIVE_PROJECT_ID);
-  const { data: tipologias = [] } = useTipologias();
-  const { data: materiais = [] } = useMateriais();
-  const { data: savedFills, isSuccess: fillsLoaded } = usePortalFills();
-  const submitFills = useSubmitPortalFills();
-
-  const [unlocked, setUnlocked] = React.useState(link.senha === null);
-  const [senhaInput, setSenhaInput] = React.useState("");
-  const [senhaError, setSenhaError] = React.useState(false);
-  const [activeTipId, setActiveTipId] = React.useState<string | null>(null);
-  const [costs, setCosts] = React.useState<Fills | null>(null);
-  const [submitted, setSubmitted] = React.useState(false);
-  const [openComment, setOpenComment] = React.useState<string | null>(null);
-
-  const scopeTips = tipologias.filter((t) => link.tipologiaIds.includes(t.id));
-  const scopeMats = React.useMemo(() => {
-    const byId = new Map<string, Material>();
-    for (const tip of scopeTips) {
-      for (const m of tipMateriais(tip, materiais)) byId.set(m.id, m);
-    }
-    return Array.from(byId.values());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tipologias, materiais, link.tipologiaIds.join(",")]);
-
-  // Inicializa o rascunho: fills já enviados > custos do catálogo.
-  React.useEffect(() => {
-    if (costs !== null || !fillsLoaded || scopeMats.length === 0) return;
-    const init: Fills = {};
-    for (const m of scopeMats) {
-      init[m.id] = savedFills?.[m.id] ?? {
-        mat: m.custoMat > 0 ? String(m.custoMat) : "",
-        mo: m.custoMO > 0 ? String(m.custoMO) : "",
-        comment: "",
-      };
-    }
-    setCosts(init);
-  }, [costs, fillsLoaded, savedFills, scopeMats]);
-
-  const tip = scopeTips.find((t) => t.id === activeTipId) ?? scopeTips[0] ?? null;
-  if (!tip || costs === null) return null;
-
-  const { campos } = link;
-  const isFilled = (c: PortalFill | undefined): boolean => {
-    if (!c) return false;
-    const v = campos.mat ? c.mat : campos.mo ? c.mo : "";
-    return v !== "" && v !== "0";
-  };
-  const setCostField = (matId: string, fld: keyof PortalFill, val: string) =>
-    setCosts((p) => {
-      const prev = p ?? {};
-      const cur = prev[matId] ?? { mat: "", mo: "", comment: "" };
-      return { ...prev, [matId]: { ...cur, [fld]: val } };
-    });
-
-  const allFilled = scopeMats.filter((m) => isFilled(costs[m.id])).length;
-  const tipMats = tipMateriais(tip, materiais);
-  const filled = tipMats.filter((m) => isFilled(costs[m.id])).length;
-  const canSubmit = allFilled >= scopeMats.length * 0.5;
-
-  const submit = () =>
-    submitFills.mutate(costs, { onSuccess: () => setSubmitted(true) });
-
-  // ── Gate de senha ──
-  if (!unlocked) {
+  // ── Gate de senha (validação no servidor) ──
+  if (data.protegido) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background-standard px-6">
         <div className="w-full max-w-sm rounded-xl border border-neutral-gray-4 bg-white p-8 text-center">
@@ -149,8 +110,9 @@ function PortalContent({ link }: { link: FillLink }) {
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              if (senhaInput === link.senha) setUnlocked(true);
-              else setSenhaError(true);
+              if (senhaInput === "") return;
+              setSenhaError(false);
+              setSenha(senhaInput);
             }}
           >
             <input
@@ -178,6 +140,80 @@ function PortalContent({ link }: { link: FillLink }) {
       </div>
     );
   }
+
+  return (
+    <PortalContent
+      data={data}
+      costs={costs}
+      setCosts={setCosts}
+      activeTipId={activeTipId}
+      setActiveTipId={setActiveTipId}
+      openComment={openComment}
+      setOpenComment={setOpenComment}
+      submitted={submitted}
+      setSubmitted={setSubmitted}
+      isSubmitting={submitFills.isPending}
+      onSubmit={(fills) => submitFills.mutate(fills, { onSuccess: () => setSubmitted(true) })}
+      onBackToPlatform={() => router.push("/revisao-custos")}
+    />
+  );
+}
+
+function PortalContent({
+  data,
+  costs,
+  setCosts,
+  activeTipId,
+  setActiveTipId,
+  openComment,
+  setOpenComment,
+  submitted,
+  setSubmitted,
+  isSubmitting,
+  onSubmit,
+  onBackToPlatform,
+}: {
+  data: PortalData;
+  costs: Fills | null;
+  setCosts: React.Dispatch<React.SetStateAction<Fills | null>>;
+  activeTipId: string | null;
+  setActiveTipId: (id: string) => void;
+  openComment: string | null;
+  setOpenComment: (id: string | null) => void;
+  submitted: boolean;
+  setSubmitted: (v: boolean) => void;
+  isSubmitting: boolean;
+  onSubmit: (fills: Fills) => void;
+  onBackToPlatform: () => void;
+}) {
+  const { campos, tipologias: scopeTips, materiais } = data;
+  const scopeMats = React.useMemo(() => {
+    const byId = new Map<string, Material>();
+    for (const tip of scopeTips) {
+      for (const m of tipMateriais(tip, materiais)) byId.set(m.id, m);
+    }
+    return Array.from(byId.values());
+  }, [scopeTips, materiais]);
+
+  const tip = scopeTips.find((t) => t.id === activeTipId) ?? scopeTips[0] ?? null;
+  if (!tip || costs === null) return null;
+
+  const isFilled = (c: PortalFill | undefined): boolean => {
+    if (!c) return false;
+    const v = campos.mat ? c.mat : campos.mo ? c.mo : "";
+    return v !== "" && v !== "0";
+  };
+  const setCostField = (matId: string, fld: keyof PortalFill, val: string) =>
+    setCosts((p) => {
+      const prev = p ?? {};
+      const cur = prev[matId] ?? { mat: "", mo: "", comment: "" };
+      return { ...prev, [matId]: { ...cur, [fld]: val } };
+    });
+
+  const allFilled = scopeMats.filter((m) => isFilled(costs[m.id])).length;
+  const tipMats = tipMateriais(tip, materiais);
+  const filled = tipMats.filter((m) => isFilled(costs[m.id])).length;
+  const canSubmit = allFilled >= scopeMats.length * 0.5;
 
   // ── Estado de sucesso ──
   if (submitted) {
@@ -210,9 +246,9 @@ function PortalContent({ link }: { link: FillLink }) {
           <div className="flex items-center gap-4">
             <BrandBlock />
             <div className="border-l border-neutral-gray-4 pl-4">
-              <p className="text-sm font-bold text-neutral-gray-11">{project?.nome ?? ""}</p>
+              <p className="text-sm font-bold text-neutral-gray-11">{data.projectNome}</p>
               <p className="text-[11px] text-neutral-gray-7">
-                Preenchimento de custos{link.prazo ? ` · Prazo: ${link.prazo}` : ""}
+                Preenchimento de custos{data.prazo ? ` · Prazo: ${data.prazo}` : ""}
               </p>
             </div>
           </div>
@@ -225,7 +261,11 @@ function PortalContent({ link }: { link: FillLink }) {
                 <ProgressBar value={allFilled} max={scopeMats.length} />
               </div>
             </div>
-            <Button onPress={submit} isDisabled={!canSubmit} isLoading={submitFills.isPending}>
+            <Button
+              onPress={() => onSubmit(costs)}
+              isDisabled={!canSubmit}
+              isLoading={isSubmitting}
+            >
               Enviar preenchimento
             </Button>
           </div>
@@ -262,10 +302,7 @@ function PortalContent({ link }: { link: FillLink }) {
         </div>
 
         {tip.ambientes.map((amb) => {
-          const ambMats = tipMateriais(
-            { ...tip, ambientes: [amb] },
-            materiais
-          );
+          const ambMats = tipMateriais({ ...tip, ambientes: [amb] }, materiais);
           if (ambMats.length === 0) return null;
           return (
             <div
@@ -401,11 +438,15 @@ function PortalContent({ link }: { link: FillLink }) {
         })}
 
         <div className="mt-2 flex justify-end gap-3">
-          {/* router.push (SPA) — um <a> recarregaria a página e resetaria o store mock. */}
-          <Button variant="bordered" onPress={() => router.push("/revisao-custos")}>
+          {/* router.push (SPA) — navegação para a plataforma autenticada. */}
+          <Button variant="bordered" onPress={onBackToPlatform}>
             ← Voltar à plataforma
           </Button>
-          <Button onPress={submit} isDisabled={!canSubmit} isLoading={submitFills.isPending}>
+          <Button
+            onPress={() => onSubmit(costs)}
+            isDisabled={!canSubmit}
+            isLoading={isSubmitting}
+          >
             Enviar preenchimento
           </Button>
         </div>

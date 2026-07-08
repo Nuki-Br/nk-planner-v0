@@ -1,8 +1,8 @@
-// Store mock em memória — a camada de dados da Fase 1. Todas as funções são
-// async e clonam dados nas bordas (structuredClone) para simular a fronteira
-// de serialização: na Fase 10 estas MESMAS assinaturas passam a chamar as
-// rotas /api/* via httpGet/httpSend, sem tocar nas telas.
-import { TAX_COLUMNS_DEFAULT } from "@/shared/constants/budget";
+// Camada de dados do cliente (Fase 10) — as MESMAS assinaturas do store mock
+// das fases 1–9, agora chamando as rotas /api/* via httpGet/httpSend. Hooks
+// React Query e telas permanecem intocados; a organização vem da sessão no
+// servidor (o cliente nunca envia org).
+import { httpGet, httpSend } from "@/lib/api/http";
 import type {
   Ambiente,
   BudgetColumn,
@@ -12,72 +12,12 @@ import type {
   FillLink,
   Kit,
   Material,
-  PortalFill,
   Project,
   Tipologia,
+  TipologiaStatus,
   UnitGroup,
   VersionChanges,
 } from "@/shared/types/domain";
-
-import { createSeed, SEED_ACTIVE_PROJECT_ID, type SeedData } from "./seed";
-
-let db: SeedData = createSeed();
-
-/** Restaura o seed original (uso em testes). */
-export function resetStore(): void {
-  db = createSeed();
-}
-
-function genId(prefix: string): string {
-  return `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
-}
-
-function clone<T>(value: T): T {
-  return structuredClone(value);
-}
-
-function findTipologia(id: string): Tipologia {
-  const tip = db.tipologias.find((t) => t.id === id);
-  if (!tip) throw new Error("Tipologia não encontrada.");
-  return tip;
-}
-
-function findAmbiente(tipologiaId: string, ambienteId: string): Ambiente {
-  const amb = findTipologia(tipologiaId).ambientes.find((a) => a.id === ambienteId);
-  if (!amb) throw new Error("Ambiente não encontrado.");
-  return amb;
-}
-
-function findComponente(
-  tipologiaId: string,
-  ambienteId: string,
-  componenteId: string
-): Componente {
-  const comp = findAmbiente(tipologiaId, ambienteId).componentes.find(
-    (c) => c.id === componenteId
-  );
-  if (!comp) throw new Error("Componente não encontrado.");
-  return comp;
-}
-
-/** Data/hora atual no formato do mock: "DD/MM/AAAA HH:mm". */
-function nowBR(): string {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-/**
- * Trava de edição da Fase 9: publicado ⇒ somente leitura. Todas as coleções
- * do mock pertencem ao projeto ativo (p001), então o guard é global; na
- * Fase 10 a checagem vai para o servidor, por organização/projeto.
- */
-function assertEditable(): void {
-  const p = db.projects.find((x) => x.id === SEED_ACTIVE_PROJECT_ID);
-  if (p?.status === "publicado") {
-    throw new Error("Empreendimento publicado — somente leitura.");
-  }
-}
 
 // ─── Projects ─────────────────────────────────────────────────────────
 
@@ -99,48 +39,35 @@ export type ProjectPatch = Partial<
 >;
 
 export async function listProjects(): Promise<Project[]> {
-  return clone(db.projects);
+  return httpGet<Project[]>("/api/projects");
 }
 
 export async function getProject(id: string): Promise<Project | null> {
-  const p = db.projects.find((x) => x.id === id);
-  return p ? clone(p) : null;
+  return httpGet<Project | null>(`/api/projects/${id}`);
 }
 
 export async function updateProject(id: string, patch: ProjectPatch): Promise<Project> {
-  assertEditable();
-  const p = db.projects.find((x) => x.id === id);
-  if (!p) throw new Error("Empreendimento não encontrado.");
-  Object.assign(p, clone(patch));
-  return clone(p);
+  return httpSend<Project, ProjectPatch>(`/api/projects/${id}`, "PATCH", patch);
 }
 
-/**
- * Publica o orçamento: marca `publicado` + `publicadoEm` e, a partir daí,
- * todas as mutações do store passam a lançar (ver assertEditable).
- */
+/** Publica o orçamento — a partir daí o servidor rejeita qualquer mutação. */
 export async function publishProject(id: string): Promise<Project> {
-  const p = db.projects.find((x) => x.id === id);
-  if (!p) throw new Error("Empreendimento não encontrado.");
-  p.status = "publicado";
-  p.publicadoEm = nowBR();
-  return clone(p);
+  return httpSend<Project>(`/api/projects/${id}/publish`, "POST");
 }
 
 export async function getBudgetColumns(projectId: string): Promise<BudgetColumn[]> {
-  const p = db.projects.find((x) => x.id === projectId);
-  return clone(p?.taxColumns ?? TAX_COLUMNS_DEFAULT);
+  return httpGet<BudgetColumn[]>(`/api/projects/${projectId}/columns`);
 }
 
 export async function updateBudgetColumns(
   projectId: string,
   cols: BudgetColumn[]
 ): Promise<BudgetColumn[]> {
-  assertEditable();
-  const p = db.projects.find((x) => x.id === projectId);
-  if (!p) throw new Error("Empreendimento não encontrado.");
-  p.taxColumns = clone(cols);
-  return clone(p.taxColumns);
+  return httpSend<BudgetColumn[], BudgetColumn[]>(
+    `/api/projects/${projectId}/columns`,
+    "PUT",
+    cols
+  );
 }
 
 // ─── Materiais ────────────────────────────────────────────────────────
@@ -148,40 +75,27 @@ export async function updateBudgetColumns(
 export type MaterialInput = Omit<Material, "id">;
 
 export async function listMateriais(): Promise<Material[]> {
-  return clone(db.materiais);
+  return httpGet<Material[]>("/api/materiais");
 }
 
 export async function createMaterial(input: MaterialInput): Promise<Material> {
-  assertEditable();
-  const mat: Material = { id: genId("mat"), ...clone(input) };
-  db.materiais.push(mat);
-  return clone(mat);
+  return httpSend<Material, MaterialInput>("/api/materiais", "POST", input);
 }
 
-/** Criação em lote (importação CSV) — na Fase 10 vira um único POST. */
+/** Criação em lote (importação CSV) — um único POST com array. */
 export async function createMateriais(inputs: MaterialInput[]): Promise<Material[]> {
-  assertEditable();
-  const created = inputs.map((input): Material => ({ id: genId("mat"), ...clone(input) }));
-  db.materiais.push(...created);
-  return clone(created);
+  return httpSend<Material[], MaterialInput[]>("/api/materiais", "POST", inputs);
 }
 
 export async function updateMaterial(
   id: string,
   patch: Partial<MaterialInput>
 ): Promise<Material> {
-  assertEditable();
-  const mat = db.materiais.find((m) => m.id === id);
-  if (!mat) throw new Error("Material não encontrado.");
-  Object.assign(mat, clone(patch));
-  return clone(mat);
+  return httpSend<Material, Partial<MaterialInput>>(`/api/materiais/${id}`, "PATCH", patch);
 }
 
 export async function deleteMaterial(id: string): Promise<void> {
-  assertEditable();
-  const idx = db.materiais.findIndex((m) => m.id === id);
-  if (idx === -1) throw new Error("Material não encontrado.");
-  db.materiais.splice(idx, 1);
+  await httpSend<null>(`/api/materiais/${id}`, "DELETE");
 }
 
 // ─── Kits ─────────────────────────────────────────────────────────────
@@ -189,29 +103,19 @@ export async function deleteMaterial(id: string): Promise<void> {
 export type KitInput = Omit<Kit, "id" | "tipo">;
 
 export async function listKits(): Promise<Kit[]> {
-  return clone(db.kits);
+  return httpGet<Kit[]>("/api/kits");
 }
 
 export async function createKit(input: KitInput): Promise<Kit> {
-  assertEditable();
-  const kit: Kit = { id: genId("kit"), tipo: "kit", ...clone(input) };
-  db.kits.push(kit);
-  return clone(kit);
+  return httpSend<Kit, KitInput>("/api/kits", "POST", input);
 }
 
 export async function updateKit(id: string, patch: Partial<KitInput>): Promise<Kit> {
-  assertEditable();
-  const kit = db.kits.find((k) => k.id === id);
-  if (!kit) throw new Error("Kit não encontrado.");
-  Object.assign(kit, clone(patch));
-  return clone(kit);
+  return httpSend<Kit, Partial<KitInput>>(`/api/kits/${id}`, "PATCH", patch);
 }
 
 export async function deleteKit(id: string): Promise<void> {
-  assertEditable();
-  const idx = db.kits.findIndex((k) => k.id === id);
-  if (idx === -1) throw new Error("Kit não encontrado.");
-  db.kits.splice(idx, 1);
+  await httpSend<null>(`/api/kits/${id}`, "DELETE");
 }
 
 // ─── Tipologias ───────────────────────────────────────────────────────
@@ -219,52 +123,35 @@ export async function deleteKit(id: string): Promise<void> {
 export type TipologiaInput = Pick<Tipologia, "nome" | "metragem" | "descricao" | "unidades">;
 
 export async function listTipologias(): Promise<Tipologia[]> {
-  return clone(db.tipologias);
+  return httpGet<Tipologia[]>("/api/tipologias");
 }
 
 export async function getTipologia(id: string): Promise<Tipologia | null> {
-  const tip = db.tipologias.find((t) => t.id === id);
-  return tip ? clone(tip) : null;
+  return httpGet<Tipologia | null>(`/api/tipologias/${id}`);
 }
 
 export async function createTipologia(input: TipologiaInput): Promise<Tipologia> {
-  assertEditable();
-  const tip: Tipologia = { id: genId("t"), ...clone(input), status: "incompleta", ambientes: [] };
-  db.tipologias.push(tip);
-  return clone(tip);
+  return httpSend<Tipologia, TipologiaInput>("/api/tipologias", "POST", input);
 }
 
 export async function updateTipologia(
   id: string,
   patch: Partial<TipologiaInput & Pick<Tipologia, "status">>
 ): Promise<Tipologia> {
-  assertEditable();
-  const tip = findTipologia(id);
-  Object.assign(tip, clone(patch));
-  return clone(tip);
+  return httpSend<Tipologia, Partial<TipologiaInput & { status: TipologiaStatus }>>(
+    `/api/tipologias/${id}`,
+    "PATCH",
+    patch
+  );
 }
 
 export async function deleteTipologia(id: string): Promise<void> {
-  assertEditable();
-  const idx = db.tipologias.findIndex((t) => t.id === id);
-  if (idx === -1) throw new Error("Tipologia não encontrada.");
-  db.tipologias.splice(idx, 1);
+  await httpSend<null>(`/api/tipologias/${id}`, "DELETE");
 }
 
 /** Clona a árvore inteira (ambientes/componentes) com ids novos. */
 export async function duplicateTipologia(id: string): Promise<Tipologia> {
-  assertEditable();
-  const src = findTipologia(id);
-  const copy = clone(src);
-  copy.id = genId("t");
-  copy.nome = `${src.nome} (cópia)`;
-  copy.ambientes = copy.ambientes.map((amb) => ({
-    ...amb,
-    id: genId("amb"),
-    componentes: amb.componentes.map((c) => ({ ...c, id: genId("c") })),
-  }));
-  db.tipologias.push(copy);
-  return clone(copy);
+  return httpSend<Tipologia>(`/api/tipologias/${id}/duplicar`, "POST");
 }
 
 // ─── Ambientes ────────────────────────────────────────────────────────
@@ -276,11 +163,11 @@ export async function createAmbiente(
   tipologiaId: string,
   input: AmbienteInput
 ): Promise<Ambiente> {
-  assertEditable();
-  const tip = findTipologia(tipologiaId);
-  const amb: Ambiente = { id: genId("amb"), ...clone(input), componentes: [] };
-  tip.ambientes.push(amb);
-  return clone(amb);
+  return httpSend<Ambiente, AmbienteInput>(
+    `/api/tipologias/${tipologiaId}/ambientes`,
+    "POST",
+    input
+  );
 }
 
 export async function updateAmbiente(
@@ -288,53 +175,36 @@ export async function updateAmbiente(
   ambienteId: string,
   patch: Partial<AmbienteInput>
 ): Promise<Ambiente> {
-  assertEditable();
-  const amb = findAmbiente(tipologiaId, ambienteId);
-  Object.assign(amb, clone(patch));
-  return clone(amb);
+  return httpSend<Ambiente, Partial<AmbienteInput>>(
+    `/api/tipologias/${tipologiaId}/ambientes/${ambienteId}`,
+    "PATCH",
+    patch
+  );
 }
 
 export async function deleteAmbiente(tipologiaId: string, ambienteId: string): Promise<void> {
-  assertEditable();
-  const tip = findTipologia(tipologiaId);
-  const idx = tip.ambientes.findIndex((a) => a.id === ambienteId);
-  if (idx === -1) throw new Error("Ambiente não encontrado.");
-  tip.ambientes.splice(idx, 1);
-  // Desvincula esta tipologia do grupo compartilhado, se houver.
-  const sid = db.ambShared[ambienteId];
-  if (sid !== undefined) {
-    delete db.ambShared[ambienteId];
-    const reg = db.sharedReg[sid];
-    if (reg) reg.tips = reg.tips.filter((id) => id !== tipologiaId);
-  }
+  await httpSend<null>(`/api/tipologias/${tipologiaId}/ambientes/${ambienteId}`, "DELETE");
 }
 
 export async function cloneAmbiente(
   tipologiaId: string,
   ambienteId: string
 ): Promise<Ambiente> {
-  assertEditable();
-  const tip = findTipologia(tipologiaId);
-  const src = findAmbiente(tipologiaId, ambienteId);
-  const copy = clone(src);
-  copy.id = genId("amb");
-  copy.nome = `${src.nome} (cópia)`;
-  copy.componentes = copy.componentes.map((c) => ({ ...c, id: genId("c") }));
-  tip.ambientes.push(copy);
-  return clone(copy);
+  return httpSend<Ambiente>(
+    `/api/tipologias/${tipologiaId}/ambientes/${ambienteId}/clonar`,
+    "POST"
+  );
 }
 
 export async function reorderAmbientes(
   tipologiaId: string,
   orderedIds: string[]
 ): Promise<void> {
-  assertEditable();
-  const tip = findTipologia(tipologiaId);
-  const byId = new Map(tip.ambientes.map((a) => [a.id, a]));
-  if (orderedIds.length !== tip.ambientes.length || orderedIds.some((id) => !byId.has(id))) {
-    throw new Error("Ordem de ambientes inválida.");
-  }
-  tip.ambientes = orderedIds.map((id) => byId.get(id)!);
+  await httpSend<null, { orderedIds: string[] }>(
+    `/api/tipologias/${tipologiaId}/ambientes`,
+    "PUT",
+    { orderedIds }
+  );
 }
 
 // ─── Componentes ──────────────────────────────────────────────────────
@@ -342,23 +212,37 @@ export async function reorderAmbientes(
 export type ComponenteInput = Pick<Componente, "nome" | "unidade" | "qtd" | "rt"> &
   Partial<Pick<Componente, "ghost" | "ordem" | "padrao">>;
 
+/** Operações de padrão/upgrades/kitQtds — POST único em /opcoes. */
+type OpcaoBody =
+  | { op: "setPadrao"; padraoId: string | null }
+  | { op: "addUpgrade"; upgradeId: string }
+  | { op: "replaceUpgrade"; oldId: string; newId: string }
+  | { op: "removeUpgrade"; upgradeId: string }
+  | { op: "setKitQtds"; kitId: string; qtds: Record<string, number> };
+
+function opcao(
+  tipologiaId: string,
+  ambienteId: string,
+  componenteId: string,
+  body: OpcaoBody
+): Promise<Componente> {
+  return httpSend<Componente, OpcaoBody>(
+    `/api/tipologias/${tipologiaId}/ambientes/${ambienteId}/componentes/${componenteId}/opcoes`,
+    "POST",
+    body
+  );
+}
+
 export async function createComponente(
   tipologiaId: string,
   ambienteId: string,
   input: ComponenteInput
 ): Promise<Componente> {
-  assertEditable();
-  const amb = findAmbiente(tipologiaId, ambienteId);
-  const { padrao, ...rest } = input;
-  const comp: Componente = {
-    id: genId("c"),
-    ...clone(rest),
-    padrao: padrao ?? null,
-    upgrades: [],
-    taxaEspecifica: null,
-  };
-  amb.componentes.push(comp);
-  return clone(comp);
+  return httpSend<Componente, ComponenteInput>(
+    `/api/tipologias/${tipologiaId}/ambientes/${ambienteId}/componentes`,
+    "POST",
+    input
+  );
 }
 
 export async function updateComponente(
@@ -367,10 +251,11 @@ export async function updateComponente(
   componenteId: string,
   patch: Partial<ComponenteInput>
 ): Promise<Componente> {
-  assertEditable();
-  const comp = findComponente(tipologiaId, ambienteId, componenteId);
-  Object.assign(comp, clone(patch));
-  return clone(comp);
+  return httpSend<Componente, Partial<ComponenteInput>>(
+    `/api/tipologias/${tipologiaId}/ambientes/${ambienteId}/componentes/${componenteId}`,
+    "PATCH",
+    patch
+  );
 }
 
 export async function deleteComponente(
@@ -378,11 +263,10 @@ export async function deleteComponente(
   ambienteId: string,
   componenteId: string
 ): Promise<void> {
-  assertEditable();
-  const amb = findAmbiente(tipologiaId, ambienteId);
-  const idx = amb.componentes.findIndex((c) => c.id === componenteId);
-  if (idx === -1) throw new Error("Componente não encontrado.");
-  amb.componentes.splice(idx, 1);
+  await httpSend<null>(
+    `/api/tipologias/${tipologiaId}/ambientes/${ambienteId}/componentes/${componenteId}`,
+    "DELETE"
+  );
 }
 
 export async function reorderComponentes(
@@ -390,13 +274,11 @@ export async function reorderComponentes(
   ambienteId: string,
   orderedIds: string[]
 ): Promise<void> {
-  assertEditable();
-  const amb = findAmbiente(tipologiaId, ambienteId);
-  const byId = new Map(amb.componentes.map((c) => [c.id, c]));
-  if (orderedIds.length !== amb.componentes.length || orderedIds.some((id) => !byId.has(id))) {
-    throw new Error("Ordem de componentes inválida.");
-  }
-  amb.componentes = orderedIds.map((id) => byId.get(id)!);
+  await httpSend<null, { orderedIds: string[] }>(
+    `/api/tipologias/${tipologiaId}/ambientes/${ambienteId}/componentes`,
+    "PUT",
+    { orderedIds }
+  );
 }
 
 export async function setPadrao(
@@ -405,10 +287,7 @@ export async function setPadrao(
   componenteId: string,
   padraoId: string | null
 ): Promise<Componente> {
-  assertEditable();
-  const comp = findComponente(tipologiaId, ambienteId, componenteId);
-  comp.padrao = padraoId;
-  return clone(comp);
+  return opcao(tipologiaId, ambienteId, componenteId, { op: "setPadrao", padraoId });
 }
 
 export async function addUpgrade(
@@ -417,10 +296,7 @@ export async function addUpgrade(
   componenteId: string,
   upgradeId: string
 ): Promise<Componente> {
-  assertEditable();
-  const comp = findComponente(tipologiaId, ambienteId, componenteId);
-  if (!comp.upgrades.includes(upgradeId)) comp.upgrades.push(upgradeId);
-  return clone(comp);
+  return opcao(tipologiaId, ambienteId, componenteId, { op: "addUpgrade", upgradeId });
 }
 
 /** Troca o material de uma opção preservando a posição no array (ups[i] = novo). */
@@ -431,13 +307,7 @@ export async function replaceUpgrade(
   oldId: string,
   newId: string
 ): Promise<Componente> {
-  assertEditable();
-  const comp = findComponente(tipologiaId, ambienteId, componenteId);
-  const i = comp.upgrades.indexOf(oldId);
-  if (i >= 0) comp.upgrades[i] = newId;
-  else if (!comp.upgrades.includes(newId)) comp.upgrades.push(newId);
-  if (comp.kitQtds && oldId !== newId) delete comp.kitQtds[oldId];
-  return clone(comp);
+  return opcao(tipologiaId, ambienteId, componenteId, { op: "replaceUpgrade", oldId, newId });
 }
 
 export async function removeUpgrade(
@@ -446,11 +316,7 @@ export async function removeUpgrade(
   componenteId: string,
   upgradeId: string
 ): Promise<Componente> {
-  assertEditable();
-  const comp = findComponente(tipologiaId, ambienteId, componenteId);
-  comp.upgrades = comp.upgrades.filter((u) => u !== upgradeId);
-  if (comp.kitQtds) delete comp.kitQtds[upgradeId];
-  return clone(comp);
+  return opcao(tipologiaId, ambienteId, componenteId, { op: "removeUpgrade", upgradeId });
 }
 
 /** Grava os quantitativos dos sub-itens de um kit para o componente. */
@@ -461,15 +327,10 @@ export async function setKitQtds(
   kitId: string,
   qtds: Record<string, number>
 ): Promise<Componente> {
-  assertEditable();
-  const comp = findComponente(tipologiaId, ambienteId, componenteId);
-  comp.kitQtds = { ...comp.kitQtds, [kitId]: clone(qtds) };
-  return clone(comp);
+  return opcao(tipologiaId, ambienteId, componenteId, { op: "setKitQtds", kitId, qtds });
 }
 
 // ─── Compartilhamento de ambientes entre tipologias ──────────────────
-// Fase 5 do plano: ao vincular, clona os componentes e registra o grupo
-// (sincronização real de edições fica para depois — §12).
 
 export interface SharedInfo {
   /** shareId → tipologias participantes. */
@@ -479,7 +340,7 @@ export interface SharedInfo {
 }
 
 export async function getSharedInfo(): Promise<SharedInfo> {
-  return clone({ sharedReg: db.sharedReg, ambShared: db.ambShared });
+  return httpGet<SharedInfo>("/api/shared-ambientes");
 }
 
 /**
@@ -491,23 +352,11 @@ export async function linkAmbiente(
   srcTipologiaId: string,
   srcAmbienteId: string
 ): Promise<Ambiente> {
-  assertEditable();
-  const target = findTipologia(targetTipologiaId);
-  const srcAmb = findAmbiente(srcTipologiaId, srcAmbienteId);
-  const sid = db.ambShared[srcAmbienteId] ?? `sh-${srcAmbienteId}`;
-
-  const copy = clone(srcAmb);
-  copy.id = genId("amb");
-  copy.componentes = copy.componentes.map((c) => ({ ...c, id: genId("c") }));
-  target.ambientes.push(copy);
-
-  db.ambShared[copy.id] = sid;
-  db.ambShared[srcAmbienteId] = sid;
-  const reg = db.sharedReg[sid] ?? { tips: [] };
-  reg.tips = Array.from(new Set([...reg.tips, srcTipologiaId, targetTipologiaId]));
-  db.sharedReg[sid] = reg;
-
-  return clone(copy);
+  return httpSend<Ambiente, { srcTipologiaId: string; srcAmbienteId: string }>(
+    `/api/tipologias/${targetTipologiaId}/ambientes/vincular`,
+    "POST",
+    { srcTipologiaId, srcAmbienteId }
+  );
 }
 
 // ─── Unit groups / Torres ─────────────────────────────────────────────
@@ -515,36 +364,30 @@ export async function linkAmbiente(
 export type UnitGroupInput = Omit<UnitGroup, "id">;
 
 export async function listUnitGroups(): Promise<UnitGroup[]> {
-  return clone(db.unitGroups);
+  return httpGet<UnitGroup[]>("/api/unit-groups");
 }
 
 export async function createUnitGroup(input: UnitGroupInput): Promise<UnitGroup> {
-  assertEditable();
-  const group: UnitGroup = { id: genId("ug"), ...clone(input) };
-  db.unitGroups.push(group);
-  return clone(group);
+  return httpSend<UnitGroup, UnitGroupInput>("/api/unit-groups", "POST", input);
 }
 
 export async function updateUnitGroup(
   id: string,
   patch: Partial<UnitGroupInput>
 ): Promise<UnitGroup> {
-  assertEditable();
-  const group = db.unitGroups.find((g) => g.id === id);
-  if (!group) throw new Error("Grupo de unidades não encontrado.");
-  Object.assign(group, clone(patch));
-  return clone(group);
+  return httpSend<UnitGroup, Partial<UnitGroupInput>>(
+    `/api/unit-groups/${id}`,
+    "PATCH",
+    patch
+  );
 }
 
 export async function deleteUnitGroup(id: string): Promise<void> {
-  assertEditable();
-  const idx = db.unitGroups.findIndex((g) => g.id === id);
-  if (idx === -1) throw new Error("Grupo de unidades não encontrado.");
-  db.unitGroups.splice(idx, 1);
+  await httpSend<null>(`/api/unit-groups/${id}`, "DELETE");
 }
 
 export async function listTorres(): Promise<string[]> {
-  return clone(db.torres);
+  return httpGet<string[]>("/api/torres");
 }
 
 // ─── Versions ─────────────────────────────────────────────────────────
@@ -556,34 +399,16 @@ export interface VersionInput {
 }
 
 export async function listVersions(): Promise<BudgetVersion[]> {
-  return clone(db.versions);
+  return httpGet<BudgetVersion[]>("/api/versions");
 }
 
 export async function createVersion(input: VersionInput): Promise<BudgetVersion> {
-  assertEditable();
-  const version: BudgetVersion = {
-    id: genId("v"),
-    label: `v${db.versions.length + 1}`,
-    createdAt: nowBR().replace(" ", " às "),
-    isCurrent: true,
-    ...clone(input),
-  };
-  db.versions.forEach((v) => {
-    v.isCurrent = false;
-  });
-  db.versions.unshift(version);
-  return clone(version);
+  return httpSend<BudgetVersion, VersionInput>("/api/versions", "POST", input);
 }
 
-/** Marca a versão como atual (snapshot/restore real de estado é Fase 7, §12). */
+/** Marca a versão como atual (snapshot/restore real de estado — §12). */
 export async function restoreVersion(id: string): Promise<BudgetVersion> {
-  assertEditable();
-  const version = db.versions.find((v) => v.id === id);
-  if (!version) throw new Error("Versão não encontrada.");
-  db.versions.forEach((v) => {
-    v.isCurrent = v.id === id;
-  });
-  return clone(version);
+  return httpSend<BudgetVersion>(`/api/versions/${id}/restore`, "POST");
 }
 
 // ─── Comments (rowKey = `${compId}-${optId}`) ─────────────────────────
@@ -594,87 +419,39 @@ export interface CommentInput {
 }
 
 export async function getComments(rowKey: string): Promise<Comment[]> {
-  return clone(db.comments[rowKey] ?? []);
+  return httpGet<Comment[]>(`/api/comments?rowKey=${encodeURIComponent(rowKey)}`);
 }
 
 /** Todas as threads (contadores de comentário por linha nas tabelas). */
 export async function listCommentThreads(): Promise<Record<string, Comment[]>> {
-  return clone(db.comments);
+  return httpGet<Record<string, Comment[]>>("/api/comments");
 }
 
 export async function appendComment(rowKey: string, input: CommentInput): Promise<Comment> {
-  assertEditable();
-  const comment: Comment = { ...clone(input), data: nowBR() };
-  const thread = db.comments[rowKey];
-  if (thread) thread.push(comment);
-  else db.comments[rowKey] = [comment];
-  return clone(comment);
-}
-
-// ─── Links de preenchimento + portal do terceiro (Fase 8) ─────────────
-// Token e senha resolvidos no cliente contra o mock; a resolução no servidor
-// (e o hash da senha) entram na Fase 10.
-
-export type FillLinkInput = Pick<FillLink, "tipologiaIds" | "campos" | "prazo" | "senha">;
-
-export async function createFillLink(input: FillLinkInput): Promise<FillLink> {
-  assertEditable();
-  const link: FillLink = {
-    id: genId("fl"),
-    token: Math.random().toString(36).slice(2, 10),
-    criadoEm: nowBR(),
-    ...clone(input),
-  };
-  db.fillLinks.push(link);
-  return clone(link);
-}
-
-export async function getFillLinkByToken(token: string): Promise<FillLink | null> {
-  const link = db.fillLinks.find((l) => l.token === token);
-  return link ? clone(link) : null;
-}
-
-export async function getPortalFills(): Promise<Record<string, PortalFill>> {
-  return clone(db.portalFills);
-}
-
-/**
- * "Enviar preenchimento" do portal: grava os fills, aplica os custos com
- * material preenchido ao catálogo, limpa as pendências relacionadas e move o
- * projeto ativo para "em_revisao". Retorna quantos materiais foram aplicados.
- */
-export async function submitPortalFills(fills: Record<string, PortalFill>): Promise<number> {
-  assertEditable();
-  db.portalFills = clone(fills);
-  let applied = 0;
-  for (const [matId, fill] of Object.entries(db.portalFills)) {
-    const custoMat = parseFloat(fill.mat);
-    if (!(custoMat > 0)) continue;
-    const mat = db.materiais.find((m) => m.id === matId);
-    if (!mat) continue;
-    mat.custoMat = custoMat;
-    mat.custoMO = parseFloat(fill.mo) > 0 ? parseFloat(fill.mo) : 0;
-    applied += 1;
-    // Chaves `${compId}-${matId}` e sub-itens `${compId}-${kitId}-${matId}`.
-    db.pendingItems = db.pendingItems.filter((k) => !k.endsWith(`-${matId}`));
-  }
-  const p = db.projects.find((x) => x.id === SEED_ACTIVE_PROJECT_ID);
-  if (p && applied > 0) p.status = "em_revisao";
-  return applied;
+  return httpSend<Comment, { rowKey: string; input: CommentInput }>("/api/comments", "POST", {
+    rowKey,
+    input,
+  });
 }
 
 // ─── Pending items ────────────────────────────────────────────────────
 
 export async function listPendingItems(): Promise<string[]> {
-  return clone(db.pendingItems);
+  return httpGet<string[]>("/api/pending-items");
 }
 
 export async function addPendingItem(key: string): Promise<void> {
-  assertEditable();
-  if (!db.pendingItems.includes(key)) db.pendingItems.push(key);
+  await httpSend<null, { key: string }>("/api/pending-items", "POST", { key });
 }
 
 export async function removePendingItem(key: string): Promise<void> {
-  assertEditable();
-  db.pendingItems = db.pendingItems.filter((k) => k !== key);
+  await httpSend<null>(`/api/pending-items?key=${encodeURIComponent(key)}`, "DELETE");
+}
+
+// ─── Links de preenchimento (o portal usa /api/portal/[token]) ────────
+
+export type FillLinkInput = Pick<FillLink, "tipologiaIds" | "campos" | "prazo" | "senha">;
+
+export async function createFillLink(input: FillLinkInput): Promise<FillLink> {
+  return httpSend<FillLink, FillLinkInput>("/api/fill-links", "POST", input);
 }
