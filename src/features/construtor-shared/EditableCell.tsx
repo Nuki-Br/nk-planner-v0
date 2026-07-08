@@ -86,9 +86,17 @@ export function EditableCell({
 
   return (
     <div
+      role="button"
+      tabIndex={0}
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       onClick={startEdit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          startEdit();
+        }
+      }}
       className={cn(
         "flex cursor-text select-none items-center justify-end gap-1 rounded px-1.5 py-[3px] transition-colors",
         hov ? "bg-neutral-gray-3" : isModified && "bg-primary-1"

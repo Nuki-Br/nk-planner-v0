@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { FocusScope } from "@react-aria/focus";
 
 import { Button, Icon } from "@/components/ui";
 import { cn } from "@/lib/utils";
@@ -152,6 +153,14 @@ export function VersionDrawer({
     if (open) setExpanded(new Set(current ? [current.id] : []));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+  React.useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
   if (!open) return null;
   const toggle = (id: string) =>
     setExpanded((prev) => {
@@ -161,12 +170,19 @@ export function VersionDrawer({
       return next;
     });
   return (
-    <>
+    <FocusScope contain restoreFocus autoFocus>
       <div onClick={onClose} className="fixed inset-0 z-[900] bg-black/25" />
-      <aside className="fixed right-0 top-0 z-[901] flex h-screen w-[400px] max-w-[92vw] flex-col bg-white shadow-[-8px_0_32px_rgba(0,0,0,0.14)]">
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="version-drawer-title"
+        className="fixed right-0 top-0 z-[901] flex h-screen w-[400px] max-w-[92vw] flex-col bg-white shadow-[-8px_0_32px_rgba(0,0,0,0.14)]"
+      >
         <div className="flex items-start gap-3 border-b border-neutral-gray-3 px-5 py-[18px]">
           <div className="flex-1">
-            <div className="text-[15px] font-bold text-neutral-gray-11">Histórico de versões</div>
+            <div id="version-drawer-title" className="text-[15px] font-bold text-neutral-gray-11">
+              Histórico de versões
+            </div>
             <div className="mt-0.5 text-xs text-neutral-gray-7">
               {projetoNome} · {versions.length} versões
             </div>
@@ -192,7 +208,7 @@ export function VersionDrawer({
           ))}
         </div>
       </aside>
-    </>
+    </FocusScope>
   );
 }
 

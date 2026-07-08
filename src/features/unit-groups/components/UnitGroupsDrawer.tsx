@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { FocusScope } from "@react-aria/focus";
 
 import { Button, Icon } from "@/components/ui";
 import {
@@ -77,16 +78,24 @@ export function UnitGroupsDrawer({ open, onClose, empreendimento }: UnitGroupsDr
   const totalUnidades = groups.reduce((a, g) => a + g.unidades.length, 0);
 
   return (
-    <div
-      className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/45 p-6"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="flex h-[600px] max-h-[90vh] w-[920px] max-w-full flex-col overflow-hidden rounded-2xl bg-white shadow-[0_20px_60px_rgba(0,0,0,0.22)]">
+    <FocusScope contain restoreFocus autoFocus>
+      <div
+        className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/45 p-6"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) onClose();
+        }}
+      >
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="ug-drawer-title"
+          className="flex h-[600px] max-h-[90vh] w-[920px] max-w-full flex-col overflow-hidden rounded-2xl bg-white shadow-[0_20px_60px_rgba(0,0,0,0.22)]"
+        >
         <div className="flex items-center justify-between border-b border-neutral-gray-3 px-6 py-[18px]">
           <div>
-            <p className="text-[17px] font-bold text-neutral-gray-11">Grupos de unidades</p>
+            <p id="ug-drawer-title" className="text-[17px] font-bold text-neutral-gray-11">
+              Grupos de unidades
+            </p>
             <p className="mt-0.5 text-xs text-neutral-gray-7">
               {empreendimento} · {groups.length} grupos · {totalUnidades} unidades
             </p>
@@ -170,6 +179,7 @@ export function UnitGroupsDrawer({ open, onClose, empreendimento }: UnitGroupsDr
           )}
         </div>
       </div>
-    </div>
+      </div>
+    </FocusScope>
   );
 }

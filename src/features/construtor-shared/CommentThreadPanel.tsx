@@ -97,6 +97,7 @@ export function CommentThreadPanel({
           value={newComment}
           onChange={(e) => setNewComment(e.target.value)}
           placeholder="Adicionar comentário..."
+          aria-label="Adicionar comentário"
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();

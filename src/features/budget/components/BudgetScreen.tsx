@@ -377,9 +377,21 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
         className={ovr ? "bg-[#f0faf9]" : special ? "bg-[#f7fdfc]" : rowBgClass}
       >
         <div
+          role={special ? undefined : "button"}
+          tabIndex={special ? undefined : 0}
           onClick={() => {
             if (!special) setEditingCell({ rowKey, colId: col.id });
           }}
+          onKeyDown={
+            special
+              ? undefined
+              : (e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setEditingCell({ rowKey, colId: col.id });
+                  }
+                }
+          }
           title={
             special
               ? col.kind === "rowAvg"
