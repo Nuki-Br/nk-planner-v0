@@ -18,8 +18,6 @@ import type { Ambiente, BudgetColumn, Componente, Kit, Material } from "@/shared
 export type BaseCosts = Record<string, { mat: string; mo: string }>;
 /** Overrides por célula: rowKey → colId → expressão. */
 export type CellOverrides = Record<string, RowOverrides>;
-/** Arredondamento manual por linha. */
-export type Roundings = Record<string, number>;
 
 export interface BudgetDeps {
   materiais: Material[];
@@ -27,7 +25,6 @@ export interface BudgetDeps {
   cols: BudgetColumn[];
   overrides: CellOverrides;
   baseCosts: BaseCosts;
-  roundings: Roundings;
   pendingSet: ReadonlySet<string>;
 }
 
@@ -95,13 +92,13 @@ export function ambTotal(deps: BudgetDeps, amb: Ambiente): number {
       if (isKitId(uid)) {
         const r = calcAnyRow(deps, comp, uid, rowKey);
         if (r?.kind === "kit" && !r.result.anyPending) {
-          t += r.result.total + (deps.roundings[rowKey] ?? 0);
+          t += r.result.total;
         }
         continue;
       }
       if (isBasePending(deps.pendingSet, deps.baseCosts, rowKey, uid)) continue;
       const r = calcAnyRow(deps, comp, uid, rowKey);
-      if (r?.kind === "material") t += r.result.total + (deps.roundings[rowKey] ?? 0);
+      if (r?.kind === "material") t += r.result.total;
     }
   }
   return t;

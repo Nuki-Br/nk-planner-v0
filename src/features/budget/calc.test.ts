@@ -19,7 +19,6 @@ const deps = (extra?: Partial<BudgetDeps>): BudgetDeps => ({
   cols: TAX_COLUMNS_DEFAULT,
   overrides: {},
   baseCosts: {},
-  roundings: {},
   pendingSet: new Set(seed.pendingItems),
   ...extra,
 });
@@ -57,12 +56,9 @@ describe("calcAnyRow", () => {
 });
 
 describe("ambTotal", () => {
-  it("soma upgrades não pendentes + arredondamentos", () => {
+  it("soma os upgrades não pendentes do ambiente", () => {
     const amb = t1.ambientes[0]!; // Sala/Living: c1-1-1 (3 upgrades) + c1-1-2 (1 upgrade)
-    const base = ambTotal(deps(), amb);
-    expect(base).toBeGreaterThan(0);
-    const comRounding = ambTotal(deps({ roundings: { "c1-1-1-piso-002": 25 } }), amb);
-    expect(comRounding - base).toBeCloseTo(25, 10);
+    expect(ambTotal(deps(), amb)).toBeGreaterThan(0);
   });
 
   it("linha pendente fica fora do total e volta ao preencher custo base", () => {

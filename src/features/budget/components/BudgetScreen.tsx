@@ -29,7 +29,6 @@ import {
   type BaseCosts,
   type BudgetDeps,
   type CellOverrides,
-  type Roundings,
 } from "../calc";
 import { AddColumnTh, ColHeaderCell } from "./ColHeaderCell";
 import { CostBaseView } from "./CostBaseView";
@@ -136,30 +135,9 @@ function FillInput({
   );
 }
 
-function RoundingInput({
-  value,
-  onChange,
-}: {
-  value: number;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <input
-      type="number"
-      step="10"
-      value={value}
-      onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
-      className={cn(
-        "w-[72px] rounded border border-neutral-gray-4 px-1.5 py-0.5 text-right text-[11px] outline-none focus:border-primary-7",
-        value !== 0 ? "font-bold text-primary-7" : "text-neutral-gray-7"
-      )}
-    />
-  );
-}
-
 // Tela 10 — Construtor de Preço (protótipo: BudgetTableScreen). Colunas e
-// versões persistem no store; overrides/custos base/arredondamentos são
-// estado de sessão (snapshot real por versão fica adiado — §12).
+// versões persistem no store; overrides/custos base são estado de sessão
+// (snapshot real por versão fica adiado — §12).
 export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: PendingFillMode }) {
   const router = useRouter();
   const activeProjectId = useSelection((s) => s.activeProjectId);
@@ -184,7 +162,6 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   const [openThread, setOpenThread] = React.useState<ThreadRow | null>(null);
   const [overrides, setOverrides] = React.useState<CellOverrides>({});
   const [editingCell, setEditingCell] = React.useState<EditingCell | null>(null);
-  const [roundings, setRoundings] = React.useState<Roundings>({});
   const [showAdd, setShowAdd] = React.useState(false);
   const [dragId, setDragId] = React.useState<string | null>(null);
   const [dragTarget, setDragTarget] = React.useState<string | null>(null);
@@ -213,12 +190,12 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   const currentVersion = versions.find((v) => v.isCurrent) ?? versions[0] ?? null;
 
   const deps = React.useMemo<BudgetDeps>(
-    () => ({ materiais, kits, cols, overrides, baseCosts, roundings, pendingSet }),
-    [materiais, kits, cols, overrides, baseCosts, roundings, pendingSet]
+    () => ({ materiais, kits, cols, overrides, baseCosts, pendingSet }),
+    [materiais, kits, cols, overrides, baseCosts, pendingSet]
   );
 
   if (!tip) return null;
-  const colCount = 8 + cols.length;
+  const colCount = 7 + cols.length;
 
   // ── colunas (persistem no store) ──
   const persistCols = (next: BudgetColumn[]) => updateCols.mutate({ projectId, cols: next });
@@ -587,7 +564,6 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                 ))}
                 <AddColumnTh showAdd={showAdd} setShowAdd={(fn) => setShowAdd(fn)} onAdd={addColumn} />
                 <Th right teal>Total final</Th>
-                <Th right>Arredond.</Th>
               </tr>
             </thead>
             <tbody>
@@ -753,20 +729,8 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                 <Td right className={r && !pending ? "bg-primary-1" : kitBg}>
                                   {r && !pending ? (
                                     <span className="text-[13px] font-extrabold text-primary-7">
-                                      {fmtBRL(r.total + (roundings[rowKey] ?? 0))}
+                                      {fmtBRL(r.total)}
                                     </span>
-                                  ) : (
-                                    "—"
-                                  )}
-                                </Td>
-                                <Td right className={kitBg}>
-                                  {r && !pending ? (
-                                    <RoundingInput
-                                      value={roundings[rowKey] ?? 0}
-                                      onChange={(v) =>
-                                        setRoundings((prev) => ({ ...prev, [rowKey]: v }))
-                                      }
-                                    />
                                   ) : (
                                     "—"
                                   )}
@@ -1011,20 +975,8 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                               <Td right className={r ? "bg-primary-1" : rowBg}>
                                 {r ? (
                                   <span className="text-[13px] font-extrabold text-primary-7">
-                                    {fmtBRL(r.total + (roundings[rowKey] ?? 0))}
+                                    {fmtBRL(r.total)}
                                   </span>
-                                ) : (
-                                  "—"
-                                )}
-                              </Td>
-                              <Td right className={rowBg}>
-                                {r ? (
-                                  <RoundingInput
-                                    value={roundings[rowKey] ?? 0}
-                                    onChange={(v) =>
-                                      setRoundings((prev) => ({ ...prev, [rowKey]: v }))
-                                    }
-                                  />
                                 ) : (
                                   "—"
                                 )}
