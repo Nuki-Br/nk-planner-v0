@@ -335,6 +335,7 @@ export function MaterialsConfigScreen({
                             variant="ghost"
                             size="sm"
                             icon="trash"
+                            aria-label="Excluir kit"
                             onPress={() => setRemoveTarget(id)}
                           />
                         </td>
@@ -384,6 +385,7 @@ export function MaterialsConfigScreen({
                         variant="ghost"
                         size="sm"
                         icon="trash"
+                        aria-label="Excluir material"
                         onPress={() => setRemoveTarget(id)}
                       />
                     </td>

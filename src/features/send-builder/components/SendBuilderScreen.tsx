@@ -8,6 +8,7 @@ import {
   Card,
   Icon,
   Input,
+  LoadingState,
   PageHeader,
   StatCard,
   Textarea,
@@ -40,7 +41,7 @@ export function SendBuilderScreen() {
   const router = useRouter();
   const activeProjectId = useSelection((s) => s.activeProjectId);
   const projectId = activeProjectId ?? SEED_ACTIVE_PROJECT_ID;
-  const { data: project } = useProject(projectId);
+  const { data: project, isLoading: projectLoading } = useProject(projectId);
   const { data: tipologias = [] } = useTipologias();
   const createLink = useCreateFillLink();
   const updateProject = useUpdateProject();
@@ -174,6 +175,8 @@ export function SendBuilderScreen() {
       </div>
     );
   }
+
+  if (projectLoading) return <LoadingState label="Carregando…" />;
 
   return (
     <div className="mx-auto max-w-[800px]">

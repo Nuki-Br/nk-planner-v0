@@ -26,7 +26,9 @@ export function PageHeader({ title, subtitle, breadcrumb, action, className }: P
         </h1>
         {subtitle && <p className="mt-1 text-[13px] text-neutral-gray-7">{subtitle}</p>}
       </div>
-      {action && <div className="flex flex-wrap items-center justify-end gap-2">{action}</div>}
+      {action && (
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">{action}</div>
+      )}
     </div>
   );
 }
