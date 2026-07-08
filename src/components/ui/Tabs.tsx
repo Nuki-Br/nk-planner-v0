@@ -14,12 +14,21 @@ interface TabsProps {
   selectedKey: string;
   onSelectionChange: (key: string) => void;
   className?: string;
+  /** Nome acessível do conjunto de abas (react-aria exige um). */
+  "aria-label"?: string;
 }
 
 /** Abas sublinhadas em teal (abas de tipologia do orçamento/portal). */
-export function Tabs({ items, selectedKey, onSelectionChange, className }: TabsProps) {
+export function Tabs({
+  items,
+  selectedKey,
+  onSelectionChange,
+  className,
+  "aria-label": ariaLabel = "Abas",
+}: TabsProps) {
   return (
     <HeroTabs
+      aria-label={ariaLabel}
       variant="underlined"
       selectedKey={selectedKey}
       onSelectionChange={(key) => onSelectionChange(String(key))}

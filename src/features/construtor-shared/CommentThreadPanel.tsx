@@ -53,7 +53,12 @@ export function CommentThreadPanel({
             {row.ambiente} · {row.componente}
           </p>
         </div>
-        <button type="button" onClick={onClose} className="flex text-neutral-gray-6">
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Fechar"
+          className="flex text-neutral-gray-6"
+        >
           <Icon name="close" size={16} />
         </button>
       </div>

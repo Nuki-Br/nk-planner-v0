@@ -59,6 +59,7 @@ export function LinkAmbienteModal({
         value={q}
         onValueChange={setQ}
         placeholder="Buscar ambiente ou tipologia..."
+        aria-label="Buscar ambiente ou tipologia"
         variant="bordered"
         radius="sm"
         size="sm"

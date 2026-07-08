@@ -94,6 +94,7 @@ export function UnitGroupsDrawer({ open, onClose, empreendimento }: UnitGroupsDr
           <button
             type="button"
             onClick={onClose}
+            aria-label="Fechar"
             className="flex p-1 text-neutral-gray-7 hover:text-neutral-gray-10"
           >
             <Icon name="close" size={18} />

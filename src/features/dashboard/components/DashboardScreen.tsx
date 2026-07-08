@@ -175,6 +175,7 @@ export function DashboardScreen() {
               <Select
                 options={STATUS_OPTIONS}
                 placeholder="Todos os status"
+                aria-label="Filtrar por status"
                 value={statusFilter}
                 onValueChange={setStatusFilter}
                 small

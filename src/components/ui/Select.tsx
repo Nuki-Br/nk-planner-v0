@@ -11,6 +11,8 @@ export interface SelectOption {
 
 export interface SelectProps {
   label?: string;
+  /** Nome acessível quando não há `label` visível (evita o aviso do react-aria). */
+  "aria-label"?: string;
   placeholder?: string;
   options: SelectOption[];
   /** Valor selecionado (controlado). "" = nenhum. */
@@ -27,6 +29,7 @@ export interface SelectProps {
 /** Select Nuki: label interna, borda preta 1px (NSelect do protótipo). */
 export function Select({
   label,
+  "aria-label": ariaLabel,
   placeholder = "Selecione...",
   options,
   value,
@@ -41,6 +44,7 @@ export function Select({
   return (
     <HeroSelect
       label={label}
+      aria-label={ariaLabel}
       placeholder={placeholder}
       variant="bordered"
       radius="sm"

@@ -152,6 +152,7 @@ export function SelectEntityModal({
             value={search}
             onValueChange={setSearch}
             placeholder="Buscar material ou kit..."
+            aria-label="Buscar material ou kit"
             variant="bordered"
             radius="sm"
             size="sm"

@@ -125,6 +125,7 @@ export function MaterialPicker({
         value={q}
         onValueChange={setQ}
         placeholder="Buscar material no catálogo…"
+        aria-label="Buscar material no catálogo"
         variant="bordered"
         radius="sm"
         size="sm"

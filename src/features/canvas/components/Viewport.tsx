@@ -18,11 +18,20 @@ const COLUMN_HEADERS: [string, number, number][] = [
   ["Composição do kit", CV.x4, CV.w4],
 ];
 
-function ZoomBtn({ label, onClick }: { label: string; onClick: () => void }) {
+function ZoomBtn({
+  label,
+  ariaLabel,
+  onClick,
+}: {
+  label: string;
+  ariaLabel?: string;
+  onClick: () => void;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
+      aria-label={ariaLabel}
       className="h-8 w-9 bg-white p-0 text-lg font-semibold leading-none text-neutral-gray-9 hover:bg-neutral-gray-3"
     >
       {label}
@@ -117,18 +126,19 @@ export function Viewport({
       <CanvasLegend materiais={materiais} />
 
       <div className="absolute bottom-4 right-4 z-40 flex flex-col overflow-hidden rounded-lg border border-neutral-gray-5 bg-white shadow-[0_2px_10px_rgba(0,0,0,0.08)]">
-        <ZoomBtn label="+" onClick={() => view.applyZoom(1.15)} />
+        <ZoomBtn label="+" ariaLabel="Aumentar zoom" onClick={() => view.applyZoom(1.15)} />
         <div className="h-px bg-neutral-gray-4" />
         <div className="flex h-[30px] items-center justify-center text-[11px] font-bold text-neutral-gray-8">
           {view.zoomPct}%
         </div>
         <div className="h-px bg-neutral-gray-4" />
-        <ZoomBtn label="−" onClick={() => view.applyZoom(0.87)} />
+        <ZoomBtn label="−" ariaLabel="Diminuir zoom" onClick={() => view.applyZoom(0.87)} />
         <div className="h-px bg-neutral-gray-4" />
         <button
           type="button"
           onClick={() => view.fitView(planeHeight)}
           title="Ajustar à tela"
+          aria-label="Ajustar à tela"
           className="flex h-8 w-9 items-center justify-center bg-white text-neutral-gray-8 hover:bg-neutral-gray-3"
         >
           <Icon name="share" size={14} />

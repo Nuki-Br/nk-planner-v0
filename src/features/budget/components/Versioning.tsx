@@ -171,7 +171,12 @@ export function VersionDrawer({
               {projetoNome} · {versions.length} versões
             </div>
           </div>
-          <button type="button" onClick={onClose} className="flex p-1 text-neutral-gray-7">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Fechar"
+            className="flex p-1 text-neutral-gray-7"
+          >
             <Icon name="close" size={18} />
           </button>
         </div>

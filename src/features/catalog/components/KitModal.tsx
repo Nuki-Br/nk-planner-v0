@@ -178,6 +178,7 @@ export function KitModal({ open, onClose, kit, materiais }: KitModalProps) {
             value={search}
             onValueChange={setSearch}
             placeholder="Buscar material para adicionar..."
+            aria-label="Buscar material para adicionar"
             variant="bordered"
             radius="sm"
             size="sm"
