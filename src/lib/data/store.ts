@@ -67,6 +67,18 @@ function nowBR(): string {
   return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/**
+ * Trava de edição da Fase 9: publicado ⇒ somente leitura. Todas as coleções
+ * do mock pertencem ao projeto ativo (p001), então o guard é global; na
+ * Fase 10 a checagem vai para o servidor, por organização/projeto.
+ */
+function assertEditable(): void {
+  const p = db.projects.find((x) => x.id === SEED_ACTIVE_PROJECT_ID);
+  if (p?.status === "publicado") {
+    throw new Error("Empreendimento publicado — somente leitura.");
+  }
+}
+
 // ─── Projects ─────────────────────────────────────────────────────────
 
 export type ProjectPatch = Partial<
@@ -96,9 +108,22 @@ export async function getProject(id: string): Promise<Project | null> {
 }
 
 export async function updateProject(id: string, patch: ProjectPatch): Promise<Project> {
+  assertEditable();
   const p = db.projects.find((x) => x.id === id);
   if (!p) throw new Error("Empreendimento não encontrado.");
   Object.assign(p, clone(patch));
+  return clone(p);
+}
+
+/**
+ * Publica o orçamento: marca `publicado` + `publicadoEm` e, a partir daí,
+ * todas as mutações do store passam a lançar (ver assertEditable).
+ */
+export async function publishProject(id: string): Promise<Project> {
+  const p = db.projects.find((x) => x.id === id);
+  if (!p) throw new Error("Empreendimento não encontrado.");
+  p.status = "publicado";
+  p.publicadoEm = nowBR();
   return clone(p);
 }
 
@@ -111,6 +136,7 @@ export async function updateBudgetColumns(
   projectId: string,
   cols: BudgetColumn[]
 ): Promise<BudgetColumn[]> {
+  assertEditable();
   const p = db.projects.find((x) => x.id === projectId);
   if (!p) throw new Error("Empreendimento não encontrado.");
   p.taxColumns = clone(cols);
@@ -126,6 +152,7 @@ export async function listMateriais(): Promise<Material[]> {
 }
 
 export async function createMaterial(input: MaterialInput): Promise<Material> {
+  assertEditable();
   const mat: Material = { id: genId("mat"), ...clone(input) };
   db.materiais.push(mat);
   return clone(mat);
@@ -133,6 +160,7 @@ export async function createMaterial(input: MaterialInput): Promise<Material> {
 
 /** Criação em lote (importação CSV) — na Fase 10 vira um único POST. */
 export async function createMateriais(inputs: MaterialInput[]): Promise<Material[]> {
+  assertEditable();
   const created = inputs.map((input): Material => ({ id: genId("mat"), ...clone(input) }));
   db.materiais.push(...created);
   return clone(created);
@@ -142,6 +170,7 @@ export async function updateMaterial(
   id: string,
   patch: Partial<MaterialInput>
 ): Promise<Material> {
+  assertEditable();
   const mat = db.materiais.find((m) => m.id === id);
   if (!mat) throw new Error("Material não encontrado.");
   Object.assign(mat, clone(patch));
@@ -149,6 +178,7 @@ export async function updateMaterial(
 }
 
 export async function deleteMaterial(id: string): Promise<void> {
+  assertEditable();
   const idx = db.materiais.findIndex((m) => m.id === id);
   if (idx === -1) throw new Error("Material não encontrado.");
   db.materiais.splice(idx, 1);
@@ -163,12 +193,14 @@ export async function listKits(): Promise<Kit[]> {
 }
 
 export async function createKit(input: KitInput): Promise<Kit> {
+  assertEditable();
   const kit: Kit = { id: genId("kit"), tipo: "kit", ...clone(input) };
   db.kits.push(kit);
   return clone(kit);
 }
 
 export async function updateKit(id: string, patch: Partial<KitInput>): Promise<Kit> {
+  assertEditable();
   const kit = db.kits.find((k) => k.id === id);
   if (!kit) throw new Error("Kit não encontrado.");
   Object.assign(kit, clone(patch));
@@ -176,6 +208,7 @@ export async function updateKit(id: string, patch: Partial<KitInput>): Promise<K
 }
 
 export async function deleteKit(id: string): Promise<void> {
+  assertEditable();
   const idx = db.kits.findIndex((k) => k.id === id);
   if (idx === -1) throw new Error("Kit não encontrado.");
   db.kits.splice(idx, 1);
@@ -195,6 +228,7 @@ export async function getTipologia(id: string): Promise<Tipologia | null> {
 }
 
 export async function createTipologia(input: TipologiaInput): Promise<Tipologia> {
+  assertEditable();
   const tip: Tipologia = { id: genId("t"), ...clone(input), status: "incompleta", ambientes: [] };
   db.tipologias.push(tip);
   return clone(tip);
@@ -204,12 +238,14 @@ export async function updateTipologia(
   id: string,
   patch: Partial<TipologiaInput & Pick<Tipologia, "status">>
 ): Promise<Tipologia> {
+  assertEditable();
   const tip = findTipologia(id);
   Object.assign(tip, clone(patch));
   return clone(tip);
 }
 
 export async function deleteTipologia(id: string): Promise<void> {
+  assertEditable();
   const idx = db.tipologias.findIndex((t) => t.id === id);
   if (idx === -1) throw new Error("Tipologia não encontrada.");
   db.tipologias.splice(idx, 1);
@@ -217,6 +253,7 @@ export async function deleteTipologia(id: string): Promise<void> {
 
 /** Clona a árvore inteira (ambientes/componentes) com ids novos. */
 export async function duplicateTipologia(id: string): Promise<Tipologia> {
+  assertEditable();
   const src = findTipologia(id);
   const copy = clone(src);
   copy.id = genId("t");
@@ -239,6 +276,7 @@ export async function createAmbiente(
   tipologiaId: string,
   input: AmbienteInput
 ): Promise<Ambiente> {
+  assertEditable();
   const tip = findTipologia(tipologiaId);
   const amb: Ambiente = { id: genId("amb"), ...clone(input), componentes: [] };
   tip.ambientes.push(amb);
@@ -250,12 +288,14 @@ export async function updateAmbiente(
   ambienteId: string,
   patch: Partial<AmbienteInput>
 ): Promise<Ambiente> {
+  assertEditable();
   const amb = findAmbiente(tipologiaId, ambienteId);
   Object.assign(amb, clone(patch));
   return clone(amb);
 }
 
 export async function deleteAmbiente(tipologiaId: string, ambienteId: string): Promise<void> {
+  assertEditable();
   const tip = findTipologia(tipologiaId);
   const idx = tip.ambientes.findIndex((a) => a.id === ambienteId);
   if (idx === -1) throw new Error("Ambiente não encontrado.");
@@ -273,6 +313,7 @@ export async function cloneAmbiente(
   tipologiaId: string,
   ambienteId: string
 ): Promise<Ambiente> {
+  assertEditable();
   const tip = findTipologia(tipologiaId);
   const src = findAmbiente(tipologiaId, ambienteId);
   const copy = clone(src);
@@ -287,6 +328,7 @@ export async function reorderAmbientes(
   tipologiaId: string,
   orderedIds: string[]
 ): Promise<void> {
+  assertEditable();
   const tip = findTipologia(tipologiaId);
   const byId = new Map(tip.ambientes.map((a) => [a.id, a]));
   if (orderedIds.length !== tip.ambientes.length || orderedIds.some((id) => !byId.has(id))) {
@@ -305,6 +347,7 @@ export async function createComponente(
   ambienteId: string,
   input: ComponenteInput
 ): Promise<Componente> {
+  assertEditable();
   const amb = findAmbiente(tipologiaId, ambienteId);
   const { padrao, ...rest } = input;
   const comp: Componente = {
@@ -324,6 +367,7 @@ export async function updateComponente(
   componenteId: string,
   patch: Partial<ComponenteInput>
 ): Promise<Componente> {
+  assertEditable();
   const comp = findComponente(tipologiaId, ambienteId, componenteId);
   Object.assign(comp, clone(patch));
   return clone(comp);
@@ -334,6 +378,7 @@ export async function deleteComponente(
   ambienteId: string,
   componenteId: string
 ): Promise<void> {
+  assertEditable();
   const amb = findAmbiente(tipologiaId, ambienteId);
   const idx = amb.componentes.findIndex((c) => c.id === componenteId);
   if (idx === -1) throw new Error("Componente não encontrado.");
@@ -345,6 +390,7 @@ export async function reorderComponentes(
   ambienteId: string,
   orderedIds: string[]
 ): Promise<void> {
+  assertEditable();
   const amb = findAmbiente(tipologiaId, ambienteId);
   const byId = new Map(amb.componentes.map((c) => [c.id, c]));
   if (orderedIds.length !== amb.componentes.length || orderedIds.some((id) => !byId.has(id))) {
@@ -359,6 +405,7 @@ export async function setPadrao(
   componenteId: string,
   padraoId: string | null
 ): Promise<Componente> {
+  assertEditable();
   const comp = findComponente(tipologiaId, ambienteId, componenteId);
   comp.padrao = padraoId;
   return clone(comp);
@@ -370,6 +417,7 @@ export async function addUpgrade(
   componenteId: string,
   upgradeId: string
 ): Promise<Componente> {
+  assertEditable();
   const comp = findComponente(tipologiaId, ambienteId, componenteId);
   if (!comp.upgrades.includes(upgradeId)) comp.upgrades.push(upgradeId);
   return clone(comp);
@@ -383,6 +431,7 @@ export async function replaceUpgrade(
   oldId: string,
   newId: string
 ): Promise<Componente> {
+  assertEditable();
   const comp = findComponente(tipologiaId, ambienteId, componenteId);
   const i = comp.upgrades.indexOf(oldId);
   if (i >= 0) comp.upgrades[i] = newId;
@@ -397,6 +446,7 @@ export async function removeUpgrade(
   componenteId: string,
   upgradeId: string
 ): Promise<Componente> {
+  assertEditable();
   const comp = findComponente(tipologiaId, ambienteId, componenteId);
   comp.upgrades = comp.upgrades.filter((u) => u !== upgradeId);
   if (comp.kitQtds) delete comp.kitQtds[upgradeId];
@@ -411,6 +461,7 @@ export async function setKitQtds(
   kitId: string,
   qtds: Record<string, number>
 ): Promise<Componente> {
+  assertEditable();
   const comp = findComponente(tipologiaId, ambienteId, componenteId);
   comp.kitQtds = { ...comp.kitQtds, [kitId]: clone(qtds) };
   return clone(comp);
@@ -440,6 +491,7 @@ export async function linkAmbiente(
   srcTipologiaId: string,
   srcAmbienteId: string
 ): Promise<Ambiente> {
+  assertEditable();
   const target = findTipologia(targetTipologiaId);
   const srcAmb = findAmbiente(srcTipologiaId, srcAmbienteId);
   const sid = db.ambShared[srcAmbienteId] ?? `sh-${srcAmbienteId}`;
@@ -467,6 +519,7 @@ export async function listUnitGroups(): Promise<UnitGroup[]> {
 }
 
 export async function createUnitGroup(input: UnitGroupInput): Promise<UnitGroup> {
+  assertEditable();
   const group: UnitGroup = { id: genId("ug"), ...clone(input) };
   db.unitGroups.push(group);
   return clone(group);
@@ -476,6 +529,7 @@ export async function updateUnitGroup(
   id: string,
   patch: Partial<UnitGroupInput>
 ): Promise<UnitGroup> {
+  assertEditable();
   const group = db.unitGroups.find((g) => g.id === id);
   if (!group) throw new Error("Grupo de unidades não encontrado.");
   Object.assign(group, clone(patch));
@@ -483,6 +537,7 @@ export async function updateUnitGroup(
 }
 
 export async function deleteUnitGroup(id: string): Promise<void> {
+  assertEditable();
   const idx = db.unitGroups.findIndex((g) => g.id === id);
   if (idx === -1) throw new Error("Grupo de unidades não encontrado.");
   db.unitGroups.splice(idx, 1);
@@ -505,6 +560,7 @@ export async function listVersions(): Promise<BudgetVersion[]> {
 }
 
 export async function createVersion(input: VersionInput): Promise<BudgetVersion> {
+  assertEditable();
   const version: BudgetVersion = {
     id: genId("v"),
     label: `v${db.versions.length + 1}`,
@@ -521,6 +577,7 @@ export async function createVersion(input: VersionInput): Promise<BudgetVersion>
 
 /** Marca a versão como atual (snapshot/restore real de estado é Fase 7, §12). */
 export async function restoreVersion(id: string): Promise<BudgetVersion> {
+  assertEditable();
   const version = db.versions.find((v) => v.id === id);
   if (!version) throw new Error("Versão não encontrada.");
   db.versions.forEach((v) => {
@@ -546,6 +603,7 @@ export async function listCommentThreads(): Promise<Record<string, Comment[]>> {
 }
 
 export async function appendComment(rowKey: string, input: CommentInput): Promise<Comment> {
+  assertEditable();
   const comment: Comment = { ...clone(input), data: nowBR() };
   const thread = db.comments[rowKey];
   if (thread) thread.push(comment);
@@ -560,6 +618,7 @@ export async function appendComment(rowKey: string, input: CommentInput): Promis
 export type FillLinkInput = Pick<FillLink, "tipologiaIds" | "campos" | "prazo" | "senha">;
 
 export async function createFillLink(input: FillLinkInput): Promise<FillLink> {
+  assertEditable();
   const link: FillLink = {
     id: genId("fl"),
     token: Math.random().toString(36).slice(2, 10),
@@ -585,6 +644,7 @@ export async function getPortalFills(): Promise<Record<string, PortalFill>> {
  * projeto ativo para "em_revisao". Retorna quantos materiais foram aplicados.
  */
 export async function submitPortalFills(fills: Record<string, PortalFill>): Promise<number> {
+  assertEditable();
   db.portalFills = clone(fills);
   let applied = 0;
   for (const [matId, fill] of Object.entries(db.portalFills)) {
@@ -610,9 +670,11 @@ export async function listPendingItems(): Promise<string[]> {
 }
 
 export async function addPendingItem(key: string): Promise<void> {
+  assertEditable();
   if (!db.pendingItems.includes(key)) db.pendingItems.push(key);
 }
 
 export async function removePendingItem(key: string): Promise<void> {
+  assertEditable();
   db.pendingItems = db.pendingItems.filter((k) => k !== key);
 }

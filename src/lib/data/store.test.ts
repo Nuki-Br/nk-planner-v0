@@ -23,6 +23,7 @@ import {
   listPendingItems,
   listProjects,
   listVersions,
+  publishProject,
   removePendingItem,
   reorderComponentes,
   replaceUpgrade,
@@ -260,6 +261,35 @@ describe("store — portal do terceiro (Fase 8)", () => {
   it("sub-item de kit pendente é limpo quando o material recebe custo", async () => {
     await submitPortalFills({ "rt-bcn": { mat: "180", mo: "0", comment: "" } });
     expect(await listPendingItems()).not.toContain("c3-1-1-kit-piso-barcelona-rt-bcn");
+  });
+});
+
+describe("store — publicação (Fase 9)", () => {
+  it("publishProject marca publicado com publicadoEm", async () => {
+    const p = await publishProject("p001");
+    expect(p.status).toBe("publicado");
+    expect(p.publicadoEm).toMatch(/^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/);
+  });
+
+  it("depois de publicado, mutações lançam e leituras seguem funcionando", async () => {
+    await publishProject("p001");
+    await expect(
+      createMaterial({ codigo: "X", nome: "X", fabricante: "X", categoria: "Piso", unidade: "m²", custoMat: 1, custoMO: 1 })
+    ).rejects.toThrow("somente leitura");
+    await expect(updateProject("p001", { nome: "Outro" })).rejects.toThrow("somente leitura");
+    await expect(appendComment("c2-1-1-piso-002", { autor: "incorporadora", texto: "x" })).rejects.toThrow(
+      "somente leitura"
+    );
+    await expect(submitPortalFills({ "piso-004": { mat: "10", mo: "0", comment: "" } })).rejects.toThrow(
+      "somente leitura"
+    );
+    expect(await listMateriais()).toHaveLength(25);
+    expect((await getProject("p001"))?.status).toBe("publicado");
+  });
+
+  it("antes de publicar, mutações continuam liberadas", async () => {
+    await updateProject("p001", { nome: "Editável" });
+    expect((await getProject("p001"))?.nome).toBe("Editável");
   });
 });
 

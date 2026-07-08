@@ -122,6 +122,7 @@ export function CostReviewScreen() {
   const [editCell, setEditCell] = React.useState<EditCellRef | null>(null);
   const [overrides, setOverrides] = React.useState<CostOverrides>({});
   const [saved, setSaved] = React.useState(false);
+  const [saveError, setSaveError] = React.useState<string | null>(null);
   const [showLink, setShowLink] = React.useState(false);
   const savedTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   React.useEffect(
@@ -156,11 +157,18 @@ export function CostReviewScreen() {
       if (ov.mo != null) patch.custoMO = parseFloat(ov.mo) || 0;
       patches.set(matId, patch);
     }
-    await Promise.all(
-      Array.from(patches.entries()).map(([id, patch]) =>
-        updateMaterial.mutateAsync({ id, patch })
-      )
-    );
+    try {
+      await Promise.all(
+        Array.from(patches.entries()).map(([id, patch]) =>
+          updateMaterial.mutateAsync({ id, patch })
+        )
+      );
+    } catch (e: unknown) {
+      // Ex.: empreendimento publicado — o store é somente leitura (Fase 9).
+      setSaveError(e instanceof Error ? e.message : "Não foi possível salvar.");
+      return;
+    }
+    setSaveError(null);
     setOverrides({});
     setEditCell(null);
     setSaved(true);
@@ -183,6 +191,11 @@ export function CostReviewScreen() {
             {saved && (
               <span className="flex items-center gap-1 text-xs text-functional-success">
                 <Icon name="check" size={13} /> Salvo
+              </span>
+            )}
+            {saveError && (
+              <span className="flex items-center gap-1 text-xs text-functional-error">
+                <Icon name="warning" size={13} /> {saveError}
               </span>
             )}
             {modifiedCount > 0 && !saved && (

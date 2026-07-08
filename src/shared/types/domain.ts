@@ -186,6 +186,8 @@ export interface Project {
   status: ProjectStatus;
   enviadoEm: string | null;
   prazo: string | null;
+  /** "DD/MM/AAAA HH:mm" — gravado ao publicar (Fase 9). */
+  publicadoEm?: string | null;
   totalItens: number;
   /** NOTA: o mock original trazia o typo "itensPrenchidos" (corrigido, §6). */
   itensPreenchidos: number;
