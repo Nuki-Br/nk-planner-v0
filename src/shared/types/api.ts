@@ -18,3 +18,27 @@ export interface GetParams {
   pageSize?: number;
   search?: string;
 }
+
+// ─── Portal do terceiro (rota pública /api/portal/[token]) ────────────
+import type {
+  FillLinkCampos,
+  Material,
+  PortalFill,
+  Tipologia,
+} from "@/shared/types/domain";
+
+/**
+ * Payload completo do portal, resolvido no servidor a partir do token.
+ * Quando `protegido` é true (senha exigida e não fornecida), os dados vêm
+ * vazios — o gate desbloqueia repetindo o GET com ?senha=.
+ */
+export interface PortalData {
+  protegido: boolean;
+  projectNome: string;
+  prazo: string | null;
+  campos: FillLinkCampos;
+  /** Só as tipologias do escopo do link (com ambientes/componentes). */
+  tipologias: Tipologia[];
+  materiais: Material[];
+  fills: Record<string, PortalFill>;
+}
