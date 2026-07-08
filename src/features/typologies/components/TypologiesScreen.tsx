@@ -12,7 +12,16 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove, SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 
-import { Button, Card, Modal, PageHeader, ProgressBar, StatusBadge } from "@/components/ui";
+import {
+  Button,
+  Card,
+  EmptyState,
+  LoadingState,
+  Modal,
+  PageHeader,
+  ProgressBar,
+  StatusBadge,
+} from "@/components/ui";
 import { useKits } from "@/lib/hooks/useKits";
 import { useMateriais } from "@/lib/hooks/useMateriais";
 import { useProject } from "@/lib/hooks/useProjects";
@@ -56,7 +65,7 @@ const configuredComps = (tip: Tipologia) =>
 // store via reorderAmbientes/reorderComponentes.
 export function TypologiesScreen() {
   const router = useRouter();
-  const { data: tipologias = [] } = useTipologias();
+  const { data: tipologias = [], isLoading: tipsLoading } = useTipologias();
   const { data: materiais = [] } = useMateriais();
   const { data: kits = [] } = useKits();
   const { data: unitGroups = [] } = useUnitGroups();
@@ -106,7 +115,20 @@ export function TypologiesScreen() {
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
-  if (!selectedTip) return null;
+  if (tipsLoading) return <LoadingState label="Carregando tipologias…" />;
+  if (!selectedTip)
+    return (
+      <EmptyState
+        icon="layers"
+        title="Nenhuma tipologia ainda"
+        subtitle="Crie um empreendimento para começar o planejamento das tipologias."
+        action={
+          <Button variant="teal" icon="plus" onPress={() => router.push("/config-base")}>
+            Novo empreendimento
+          </Button>
+        }
+      />
+    );
   const tip = selectedTip;
 
   const toggleRoom = (id: string) =>

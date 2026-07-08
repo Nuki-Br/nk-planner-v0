@@ -3,7 +3,7 @@
 import React from "react";
 import { useRouter } from "next/navigation";
 
-import { Button, Card, Icon, Modal, PageHeader, StatusBadge } from "@/components/ui";
+import { Button, Card, Icon, LoadingState, Modal, PageHeader, StatusBadge } from "@/components/ui";
 import { calcBudgetRow, upgradeKey } from "@/lib/budget";
 import { getMaterial } from "@/lib/data/entities";
 import { SEED_ACTIVE_PROJECT_ID } from "@/lib/data/seed";
@@ -59,7 +59,7 @@ export function PublishScreen() {
   const router = useRouter();
   const activeProjectId = useSelection((s) => s.activeProjectId);
   const projectId = activeProjectId ?? SEED_ACTIVE_PROJECT_ID;
-  const { data: project } = useProject(projectId);
+  const { data: project, isLoading: projectLoading } = useProject(projectId);
   const { data: tipologias = [] } = useTipologias();
   const { data: materiais = [] } = useMateriais();
   const { data: pendingSet = new Set<string>() } = usePendingItems();
@@ -68,6 +68,7 @@ export function PublishScreen() {
 
   const [showConfirm, setShowConfirm] = React.useState(false);
 
+  if (projectLoading) return <LoadingState label="Carregando publicação…" />;
   if (!project) return null;
 
   const resolve = (id: string): Material | undefined => getMaterial(materiais, id);

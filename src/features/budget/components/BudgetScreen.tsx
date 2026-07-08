@@ -3,7 +3,7 @@
 import React from "react";
 import { useRouter } from "next/navigation";
 
-import { Button, Icon, Modal, PageHeader, Textarea } from "@/components/ui";
+import { Button, Icon, LoadingState, Modal, PageHeader, Textarea } from "@/components/ui";
 import { upgradeKey } from "@/lib/budget";
 import { getKit, getMaterial, isKitId } from "@/lib/data/entities";
 import { SEED_ACTIVE_PROJECT_ID } from "@/lib/data/seed";
@@ -143,7 +143,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   const activeProjectId = useSelection((s) => s.activeProjectId);
   const projectId = activeProjectId ?? SEED_ACTIVE_PROJECT_ID;
   const { data: project } = useProject(projectId);
-  const { data: tipologias = [] } = useTipologias();
+  const { data: tipologias = [], isLoading: tipsLoading } = useTipologias();
   const { data: materiais = [] } = useMateriais();
   const { data: kits = [] } = useKits();
   const { data: pendingSet = new Set<string>() } = usePendingItems();
@@ -194,6 +194,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
     [materiais, kits, cols, overrides, baseCosts, pendingSet]
   );
 
+  if (tipsLoading) return <LoadingState label="Carregando orçamento…" />;
   if (!tip) return null;
   const colCount = 7 + cols.length;
 

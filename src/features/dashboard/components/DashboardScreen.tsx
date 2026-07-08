@@ -8,7 +8,9 @@ import {
   Button,
   Card,
   DataTable,
+  EmptyState,
   Icon,
+  LoadingState,
   PageHeader,
   ProgressBar,
   Select,
@@ -29,7 +31,7 @@ const STATUS_OPTIONS = (
 export function DashboardScreen() {
   const router = useRouter();
   const setActiveProject = useSelection((s) => s.setActiveProject);
-  const { data: projects = [] } = useProjects();
+  const { data: projects = [], isLoading, isError, refetch } = useProjects();
 
   const [search, setSearch] = React.useState("");
   const [statusFilter, setStatusFilter] = React.useState("");
@@ -139,43 +141,61 @@ export function DashboardScreen() {
       </div>
 
       <Card>
-        <div className="mb-4 flex flex-wrap items-center gap-3">
-          <HeroInput
-            value={search}
-            onValueChange={setSearch}
-            placeholder="Buscar empreendimento..."
-            variant="bordered"
-            radius="sm"
-            size="sm"
-            startContent={<Icon name="search" size={14} className="text-neutral-gray-6" />}
-            classNames={{
-              base: "w-[280px] max-w-full flex-none",
-              inputWrapper: "!border-small h-10 border-neutral-gray-5 bg-white",
-              input: "text-[13px]",
-            }}
+        {isLoading ? (
+          <LoadingState label="Carregando empreendimentos…" />
+        ) : isError ? (
+          <EmptyState
+            icon="warning"
+            title="Não foi possível carregar os empreendimentos"
+            subtitle="Verifique sua conexão e tente novamente."
+            action={
+              <Button variant="bordered" onPress={() => void refetch()}>
+                Tentar novamente
+              </Button>
+            }
           />
-          <Select
-            options={STATUS_OPTIONS}
-            placeholder="Todos os status"
-            value={statusFilter}
-            onValueChange={setStatusFilter}
-            small
-            className="w-[180px] flex-none"
-          />
-          <div className="ml-auto">
-            <Button variant="ghost" icon="filter" size="sm">
-              Filtros
-            </Button>
-          </div>
-        </div>
-        <DataTable
-          aria-label="Empreendimentos"
-          columns={columns}
-          rows={filtered}
-          rowKey={(r) => r.id}
-          onRowClick={openProject}
-          emptyText="Nenhum empreendimento encontrado."
-        />
+        ) : (
+          <>
+            <div className="mb-4 flex flex-wrap items-center gap-3">
+              <HeroInput
+                value={search}
+                onValueChange={setSearch}
+                aria-label="Buscar empreendimento"
+                placeholder="Buscar empreendimento..."
+                variant="bordered"
+                radius="sm"
+                size="sm"
+                startContent={<Icon name="search" size={14} className="text-neutral-gray-6" />}
+                classNames={{
+                  base: "w-[280px] max-w-full flex-none",
+                  inputWrapper: "!border-small h-10 border-neutral-gray-5 bg-white",
+                  input: "text-[13px]",
+                }}
+              />
+              <Select
+                options={STATUS_OPTIONS}
+                placeholder="Todos os status"
+                value={statusFilter}
+                onValueChange={setStatusFilter}
+                small
+                className="w-[180px] flex-none"
+              />
+              <div className="ml-auto">
+                <Button variant="ghost" icon="filter" size="sm">
+                  Filtros
+                </Button>
+              </div>
+            </div>
+            <DataTable
+              aria-label="Empreendimentos"
+              columns={columns}
+              rows={filtered}
+              rowKey={(r) => r.id}
+              onRowClick={openProject}
+              emptyText="Nenhum empreendimento encontrado."
+            />
+          </>
+        )}
       </Card>
     </div>
   );

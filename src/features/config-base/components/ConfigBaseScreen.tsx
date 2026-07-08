@@ -3,7 +3,7 @@
 import React from "react";
 import { useRouter } from "next/navigation";
 
-import { Button, Card, Input, PageHeader } from "@/components/ui";
+import { Button, Card, Input, LoadingState, PageHeader } from "@/components/ui";
 import { SEED_ACTIVE_PROJECT_ID } from "@/lib/data/seed";
 import { useProject, useUpdateProject } from "@/lib/hooks/useProjects";
 import { useSelection } from "@/lib/store/selection";
@@ -50,7 +50,7 @@ export function ConfigBaseScreen() {
   const router = useRouter();
   const activeProjectId = useSelection((s) => s.activeProjectId);
   const projectId = activeProjectId ?? SEED_ACTIVE_PROJECT_ID;
-  const { data: project } = useProject(projectId);
+  const { data: project, isLoading: projectLoading } = useProject(projectId);
   const updateProject = useUpdateProject();
 
   const [form, setForm] = React.useState<FormState | null>(null);
@@ -67,6 +67,7 @@ export function ConfigBaseScreen() {
     []
   );
 
+  if (projectLoading) return <LoadingState label="Carregando dados do empreendimento…" />;
   if (!form) return null;
 
   const set = (key: keyof FormState) => (value: string) =>

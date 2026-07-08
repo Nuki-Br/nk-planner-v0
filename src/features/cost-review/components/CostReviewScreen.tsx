@@ -3,7 +3,7 @@
 import React from "react";
 import { useRouter } from "next/navigation";
 
-import { Button, Icon, PageHeader, StatusBadge } from "@/components/ui";
+import { Button, Icon, LoadingState, PageHeader, StatusBadge } from "@/components/ui";
 import { upgradeKey } from "@/lib/budget";
 import { getMaterial } from "@/lib/data/entities";
 import { SEED_ACTIVE_PROJECT_ID } from "@/lib/data/seed";
@@ -112,7 +112,7 @@ export function CostReviewScreen() {
   const router = useRouter();
   const activeProjectId = useSelection((s) => s.activeProjectId);
   const { data: project } = useProject(activeProjectId ?? SEED_ACTIVE_PROJECT_ID);
-  const { data: tipologias = [] } = useTipologias();
+  const { data: tipologias = [], isLoading: tipsLoading } = useTipologias();
   const { data: materiais = [] } = useMateriais();
   const { data: threads = {} } = useCommentThreads();
   const updateMaterial = useUpdateMaterial();
@@ -133,6 +133,7 @@ export function CostReviewScreen() {
   );
 
   const tip = tipologias.find((t) => t.id === tipFilter) ?? tipologias[0] ?? null;
+  if (tipsLoading) return <LoadingState label="Carregando revisão de custos…" />;
   if (!tip) return null;
 
   const rows = buildRows(tip, materiais, overrides, threads);

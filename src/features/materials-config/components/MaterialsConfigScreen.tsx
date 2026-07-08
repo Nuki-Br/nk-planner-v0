@@ -3,7 +3,16 @@
 import React from "react";
 import { useRouter } from "next/navigation";
 
-import { Button, Card, EmptyState, Icon, Modal, PageHeader, StatusBadge } from "@/components/ui";
+import {
+  Button,
+  Card,
+  EmptyState,
+  Icon,
+  LoadingState,
+  Modal,
+  PageHeader,
+  StatusBadge,
+} from "@/components/ui";
 import { getEntity, getMaterial } from "@/lib/data/entities";
 import { useKits } from "@/lib/hooks/useKits";
 import { useMateriais } from "@/lib/hooks/useMateriais";
@@ -87,7 +96,7 @@ export function MaterialsConfigScreen({
     setExpandedUpg(new Set(found.comp.upgrades.filter((id) => id.startsWith("kit-"))));
   }, [found]);
 
-  if (isLoading) return null;
+  if (isLoading) return <LoadingState label="Carregando componente…" />;
   if (!tipologia || !found) {
     return (
       <div className="mx-auto max-w-4xl">

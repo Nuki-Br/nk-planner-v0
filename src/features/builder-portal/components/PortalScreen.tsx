@@ -3,7 +3,7 @@
 import React from "react";
 import { useRouter } from "next/navigation";
 
-import { Button, EmptyState, Icon, ProgressBar } from "@/components/ui";
+import { Button, EmptyState, Icon, LoadingState, ProgressBar } from "@/components/ui";
 import { getMaterial } from "@/lib/data/entities";
 import { usePortalData, useSubmitPortalFills } from "@/lib/hooks/usePortalFills";
 import { cn } from "@/lib/utils";
@@ -80,7 +80,12 @@ export function PortalScreen({ token }: { token: string }) {
     setCosts(init);
   }, [costs, data]);
 
-  if (isLoading) return null;
+  if (isLoading)
+    return (
+      <div className="mx-auto max-w-3xl px-6 py-16">
+        <LoadingState label="Abrindo o portal…" />
+      </div>
+    );
   if (!data) {
     return (
       <div className="mx-auto max-w-3xl px-6 py-16">

@@ -3,7 +3,7 @@
 import React from "react";
 import { useRouter } from "next/navigation";
 
-import { Button, Modal, StatusBadge } from "@/components/ui";
+import { Button, LoadingState, Modal, StatusBadge } from "@/components/ui";
 import { buildLayout, CV } from "@/lib/canvas/buildLayout";
 import { useKits } from "@/lib/hooks/useKits";
 import { useMateriais } from "@/lib/hooks/useMateriais";
@@ -77,7 +77,7 @@ const EMPTY_COMP: Componente = {
 // store e refletem nas outras telas), não uma cópia local.
 export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
   const router = useRouter();
-  const { data: tipologias = [] } = useTipologias();
+  const { data: tipologias = [], isLoading: tipsLoading } = useTipologias();
   const { data: materiais = [] } = useMateriais();
   const { data: kits = [] } = useKits();
   const { data: pendingSet = new Set<string>() } = usePendingItems();
@@ -130,6 +130,7 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
     fitRef.current(layoutHeightRef.current);
   }, [tip?.id, tip]);
 
+  if (tipsLoading) return <LoadingState label="Carregando canvas…" />;
   if (!tip || !layout) return null;
   const tipId = tip.id;
 

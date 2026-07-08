@@ -8,7 +8,9 @@ import {
   Button,
   Card,
   DataTable,
+  EmptyState,
   Icon,
+  LoadingState,
   PageHeader,
   type DataTableColumn,
 } from "@/components/ui";
@@ -36,8 +38,9 @@ type TypeFilter = "" | "Material" | "Kit";
 // Tela 6 — Catálogo de materiais e kits (protótipo: MaterialsCatalogScreen).
 export function CatalogScreen() {
   const router = useRouter();
-  const { data: materiais = [] } = useMateriais();
-  const { data: kits = [] } = useKits();
+  const { data: materiais = [], isLoading: matLoading, isError: matError, refetch: refetchMat } =
+    useMateriais();
+  const { data: kits = [], isLoading: kitLoading } = useKits();
   const { data: tipologias = [] } = useTipologias();
   const activeProjectId = useSelection((s) => s.activeProjectId);
   const { data: project } = useProject(activeProjectId);
@@ -269,32 +272,50 @@ export function CatalogScreen() {
       )}
 
       <Card padding={0}>
-        <div className="flex items-center gap-3 border-b border-neutral-gray-4 px-4 py-3.5">
-          <HeroInput
-            value={search}
-            onValueChange={setSearch}
-            placeholder="Buscar por nome, código ou fabricante..."
-            variant="bordered"
-            radius="sm"
-            size="sm"
-            startContent={<Icon name="search" size={14} className="text-neutral-gray-6" />}
-            classNames={{
-              base: "w-80 max-w-full flex-none",
-              inputWrapper: "!border-small h-10 border-neutral-gray-5 bg-white",
-              input: "text-[13px]",
-            }}
+        {matLoading || kitLoading ? (
+          <LoadingState label="Carregando catálogo…" />
+        ) : matError ? (
+          <EmptyState
+            icon="warning"
+            title="Não foi possível carregar o catálogo"
+            subtitle="Verifique sua conexão e tente novamente."
+            action={
+              <Button variant="bordered" onPress={() => void refetchMat()}>
+                Tentar novamente
+              </Button>
+            }
           />
-          <span className="text-xs text-neutral-gray-7">
-            {filtered.length} resultado{filtered.length !== 1 ? "s" : ""}
-          </span>
-        </div>
-        <DataTable
-          aria-label="Catálogo de materiais e kits"
-          columns={columns}
-          rows={filtered}
-          rowKey={(r) => r.id}
-          emptyText="Nenhum material ou kit encontrado."
-        />
+        ) : (
+          <>
+            <div className="flex items-center gap-3 border-b border-neutral-gray-4 px-4 py-3.5">
+              <HeroInput
+                value={search}
+                onValueChange={setSearch}
+                aria-label="Buscar no catálogo"
+                placeholder="Buscar por nome, código ou fabricante..."
+                variant="bordered"
+                radius="sm"
+                size="sm"
+                startContent={<Icon name="search" size={14} className="text-neutral-gray-6" />}
+                classNames={{
+                  base: "w-80 max-w-full flex-none",
+                  inputWrapper: "!border-small h-10 border-neutral-gray-5 bg-white",
+                  input: "text-[13px]",
+                }}
+              />
+              <span className="text-xs text-neutral-gray-7">
+                {filtered.length} resultado{filtered.length !== 1 ? "s" : ""}
+              </span>
+            </div>
+            <DataTable
+              aria-label="Catálogo de materiais e kits"
+              columns={columns}
+              rows={filtered}
+              rowKey={(r) => r.id}
+              emptyText="Nenhum material ou kit encontrado."
+            />
+          </>
+        )}
       </Card>
 
       <MaterialModal
