@@ -18,7 +18,7 @@ function json<T extends object>(v: T | null | undefined): Prisma.InputJsonValue 
 const ORG_ID = "org-grupo-axis";
 const ORG_NAME = "Grupo Axis";
 const SEED_USER_EMAIL = process.env.SEED_USER_EMAIL ?? "beta@nukibr.com";
-const SEED_USER_PASSWORD = process.env.SEED_USER_PASSWORD ?? "nuki-beta-2026";
+const SEED_USER_PASSWORD = process.env.SEED_USER_PASSWORD;
 
 /**
  * Cria (ou reaproveita) o usuário de teste no Supabase Auth e retorna o id.
@@ -27,8 +27,10 @@ const SEED_USER_PASSWORD = process.env.SEED_USER_PASSWORD ?? "nuki-beta-2026";
 async function ensureAuthUser(): Promise<string | null> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const secret = process.env.SUPABASE_SECRET_KEY;
-  if (!url || !secret) {
-    console.warn("⚠ NEXT_PUBLIC_SUPABASE_URL/SUPABASE_SECRET_KEY ausentes — pulando usuário de teste.");
+  if (!url || !secret || !SEED_USER_PASSWORD) {
+    console.warn(
+      "⚠ NEXT_PUBLIC_SUPABASE_URL/SUPABASE_SECRET_KEY/SEED_USER_PASSWORD ausentes — pulando usuário de teste."
+    );
     return null;
   }
   const admin = createClient(url, secret, {

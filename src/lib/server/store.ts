@@ -6,6 +6,8 @@
 // Nota (beta): o domínio é escopado por ORG (não por projeto), como no mock —
 // o "projeto ativo" é o p001 e a trava de publicação olha para ele
 // (ACTIVE_PROJECT_ID). Escopo por projeto entra quando houver multiprojeto.
+import { randomBytes, randomUUID } from "crypto";
+
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
@@ -35,7 +37,9 @@ import type {
 } from "@/shared/types/domain";
 
 function genId(prefix: string): string {
-  return `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+  // randomBytes (CSPRNG) em vez de Math.random — ids não vazam estado do PRNG
+  // (o que enfraqueceria a previsibilidade de tokens gerados no mesmo processo).
+  return `${prefix}-${Date.now().toString(36)}${randomBytes(6).toString("hex")}`;
 }
 
 /** Data/hora atual no formato de exibição: "DD/MM/AAAA HH:mm". */
@@ -1135,7 +1139,9 @@ export async function createFillLink(
   const row = await prisma.fillLink.create({
     data: {
       id: genId("fl"),
-      token: Math.random().toString(36).slice(2, 10),
+      // Token = único controle de acesso das rotas PÚBLICAS do portal: CSPRNG
+      // (UUID v4, 122 bits), nunca Math.random.
+      token: randomUUID(),
       tipologiaIds: input.tipologiaIds,
       campos: json(input.campos) ?? {},
       prazo: input.prazo,
@@ -1165,20 +1171,52 @@ export async function getPortalFills(
 }
 
 /**
+ * Ids de material referenciados (padrão + upgrades) pelas tipologias do link —
+ * o escopo do que o portal do terceiro pode LER e PREENCHER. Kits ficam de fora
+ * (o portal só preenche custo de material direto).
+ */
+export async function getPortalMaterialIds(
+  organizationId: string,
+  tipologiaIds: string[]
+): Promise<Set<string>> {
+  const tips = await prisma.tipologia.findMany({
+    where: { id: { in: tipologiaIds }, organizationId },
+    include: { ambientes: { include: { componentes: true } } },
+  });
+  const ids = new Set<string>();
+  for (const t of tips) {
+    for (const amb of t.ambientes) {
+      for (const c of amb.componentes) {
+        if (c.padrao) ids.add(c.padrao);
+        for (const u of c.upgrades) ids.add(u);
+      }
+    }
+  }
+  return ids;
+}
+
+/**
  * "Enviar preenchimento" do portal: grava os fills, aplica os custos com
  * material preenchido ao catálogo, limpa as pendências relacionadas e move o
  * projeto ativo para "em_revisao". Retorna quantos materiais foram aplicados.
  */
 export async function submitPortalFills(
   organizationId: string,
-  fills: Record<string, PortalFill>
+  fills: Record<string, PortalFill>,
+  allowedMaterialIds: Set<string>
 ): Promise<number> {
   await assertEditable(organizationId);
+
+  // Escopo do link: descarta fills de materiais fora das tipologias liberadas —
+  // o terceiro não pode sobrescrever custos de materiais que o link não abriu.
+  const scoped = Object.fromEntries(
+    Object.entries(fills).filter(([materialId]) => allowedMaterialIds.has(materialId))
+  );
 
   await prisma.$transaction([
     prisma.portalFill.deleteMany({ where: { organizationId } }),
     prisma.portalFill.createMany({
-      data: Object.entries(fills).map(([materialId, f]) => ({
+      data: Object.entries(scoped).map(([materialId, f]) => ({
         materialId,
         mat: f.mat,
         mo: f.mo,
@@ -1191,7 +1229,7 @@ export async function submitPortalFills(
   // Aplica todos os custos preenchidos em paralelo e limpa as pendências
   // relacionadas com UM deleteMany (evita o N+1 de update+delete sequenciais).
   const pendentes = await prisma.pendingItem.findMany({ where: { organizationId } });
-  const paraAplicar = Object.entries(fills).filter(([, f]) => parseFloat(f.mat) > 0);
+  const paraAplicar = Object.entries(scoped).filter(([, f]) => parseFloat(f.mat) > 0);
   const resultados = await Promise.all(
     paraAplicar.map(async ([materialId, fill]) => {
       const res = await prisma.material.updateMany({

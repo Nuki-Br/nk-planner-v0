@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 
 import { fail, publicRoute } from "@/lib/api/handler";
-import { getFillLinkByToken, submitPortalFills } from "@/lib/server/store";
+import { getFillLinkByToken, getPortalMaterialIds, submitPortalFills } from "@/lib/server/store";
 import type { PortalFill } from "@/shared/types/domain";
 
 // Envio do preenchimento pelo terceiro (PÚBLICA — autorização = posse do
@@ -18,5 +18,7 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
   if (link.senha !== null && senha !== link.senha) {
     return fail("Senha incorreta.", 401);
   }
-  return publicRoute(() => submitPortalFills(organizationId, fills));
+  // Escopo do link: só materiais das tipologias liberadas podem ser preenchidos.
+  const allowed = await getPortalMaterialIds(organizationId, link.tipologiaIds);
+  return publicRoute(() => submitPortalFills(organizationId, fills, allowed));
 }
