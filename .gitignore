@@ -29,3 +29,13 @@ yarn-error.log*
 
 # prisma
 /prisma/*.db
+
+# Claude Code tooling (local, reproduzível a partir do skills-lock)
+/.agents/
+/.claude/skills/
+/skills-lock.json
+
+# referência local de design/planejamento (convenção do time: nunca commitar)
+/docs/HTML context/
+/docs/prototype-src/
+/docs/plano-mvp-funcional.md
