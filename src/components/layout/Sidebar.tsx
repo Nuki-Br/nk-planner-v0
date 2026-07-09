@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { Icon, StatusBadge, type IconName } from "@/components/ui";
-import { ACTIVE_PROJECT_ID } from "@/shared/constants/project";
+import { useActiveProjectId } from "@/lib/hooks/useActiveProject";
 import { useProject } from "@/lib/hooks/useProjects";
 import { useSelection } from "@/lib/store/selection";
 import { cn } from "@/lib/utils";
@@ -53,25 +53,20 @@ function NavItem({ href, icon, label, active, done = false }: NavItemProps) {
 //    com passos anteriores marcados como concluídos (check teal).
 export function Sidebar() {
   const pathname = usePathname();
-  const { activeProjectId, setActiveProject, clearSelection } = useSelection();
+  const clearSelection = useSelection((s) => s.clearSelection);
+  const projectId = useActiveProjectId();
 
   const isDashboardMode = DASHBOARD_MODE_ROUTES.some(
     (route) => pathname === route || pathname.startsWith(`${route}/`)
   );
 
-  // Espelha o navigate() do protótipo: entrar no fluxo sem projeto ativa o
-  // p001 (THE_PROJECT); voltar ao dashboard limpa a seleção. Reage APENAS à
-  // mudança de rota (ler o id via getState evita apagar uma seleção feita
-  // no próprio dashboard, ex.: "Abrir" antes de navegar).
+  // Voltar ao dashboard limpa a seleção (tipologia/componente ativos). O
+  // projeto ativo é resolvido por useActiveProjectId (seleção ou 1º da org).
   React.useEffect(() => {
-    if (pathname === "/dashboard") {
-      clearSelection();
-    } else if (!isDashboardMode && useSelection.getState().activeProjectId === null) {
-      setActiveProject(ACTIVE_PROJECT_ID);
-    }
-  }, [pathname, isDashboardMode, setActiveProject, clearSelection]);
+    if (pathname === "/dashboard") clearSelection();
+  }, [pathname, clearSelection]);
 
-  const { data: project } = useProject(activeProjectId);
+  const { data: project } = useProject(projectId);
   const inProject = !isDashboardMode && !!project;
 
   const activeIndex = WORKFLOW_NAV.findIndex(

@@ -11,7 +11,8 @@
     "test": "vitest run",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "dotenv -e .env.local -- prisma migrate dev",
-    "db:seed": "dotenv -e .env.local -- tsx prisma/seed.ts"
+    "db:seed": "dotenv -e .env.local -- tsx prisma/seed.ts",
+    "db:onboard": "dotenv -e .env.local -- tsx prisma/onboard.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

@@ -1,6 +1,7 @@
-// Contatos da equipe Nuki (MVP de validação: a publicação orienta o cliente
+// Contatos da equipe Nuki (MVP de validação: a conclusão orienta o cliente
 // a entrar em contato — sem integração com a Personalização por enquanto).
-export const NUKI_WHATSAPP = "5515981383864";
+// WhatsApp: mesmo número oficial da landing page (nk-lp / wa.me).
+export const NUKI_WHATSAPP = "551531994490";
 export const NUKI_EMAIL = "contato@nukibr.com";
 
 /** Link wa.me com mensagem pré-preenchida. */

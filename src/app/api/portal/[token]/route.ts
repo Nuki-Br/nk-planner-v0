@@ -2,13 +2,13 @@ import type { NextRequest } from "next/server";
 
 import { fail, publicRoute } from "@/lib/api/handler";
 import {
+  getActiveProjectId,
   getFillLinkByToken,
   getPortalFills,
   getProject,
   listMateriais,
   listTipologias,
 } from "@/lib/server/store";
-import { ACTIVE_PROJECT_ID } from "@/shared/constants/project";
 import type { PortalData } from "@/shared/types/api";
 
 // Rota PÚBLICA do portal do terceiro: resolve token → escopo no servidor.
@@ -26,7 +26,8 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
 
   const protegido = link.senha !== null && senha === null;
   return publicRoute(async (): Promise<PortalData> => {
-    const project = await getProject(organizationId, ACTIVE_PROJECT_ID);
+    const activeId = await getActiveProjectId(organizationId);
+    const project = activeId ? await getProject(organizationId, activeId) : null;
     if (protegido) {
       return {
         protegido: true,

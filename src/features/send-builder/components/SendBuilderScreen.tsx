@@ -13,11 +13,10 @@ import {
   StatCard,
   Textarea,
 } from "@/components/ui";
-import { ACTIVE_PROJECT_ID } from "@/shared/constants/project";
+import { useActiveProjectId } from "@/lib/hooks/useActiveProject";
 import { useCreateFillLink } from "@/lib/hooks/useFillLinks";
 import { useProject, useUpdateProject } from "@/lib/hooks/useProjects";
 import { useTipologias } from "@/lib/hooks/useTipologias";
-import { useSelection } from "@/lib/store/selection";
 import type { FillLink, Tipologia } from "@/shared/types/domain";
 
 /** Itens preenchíveis (padrão + upgrades por componente). */
@@ -39,8 +38,7 @@ function todayBR(): string {
 // para copiar / abrir o portal / seguir para a revisão.
 export function SendBuilderScreen() {
   const router = useRouter();
-  const activeProjectId = useSelection((s) => s.activeProjectId);
-  const projectId = activeProjectId ?? ACTIVE_PROJECT_ID;
+  const projectId = useActiveProjectId();
   const { data: project, isLoading: projectLoading } = useProject(projectId);
   const { data: tipologias = [] } = useTipologias();
   const createLink = useCreateFillLink();
@@ -88,6 +86,8 @@ export function SendBuilderScreen() {
   }, [tipologias]);
 
   const linkUrl = link ? `${window.location.origin}/portal/${link.token}` : "";
+
+  if (!projectId) return <LoadingState label="Carregando envio…" />;
 
   const saveDraft = () => {
     updateProject.mutate(

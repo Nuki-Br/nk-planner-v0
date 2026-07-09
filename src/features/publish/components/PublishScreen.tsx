@@ -6,13 +6,12 @@ import { useRouter } from "next/navigation";
 import { Button, Card, Icon, LoadingState, Modal, PageHeader, StatusBadge } from "@/components/ui";
 import { calcBudgetRow, upgradeKey } from "@/lib/budget";
 import { getMaterial } from "@/lib/data/entities";
-import { ACTIVE_PROJECT_ID } from "@/shared/constants/project";
+import { useActiveProjectId } from "@/lib/hooks/useActiveProject";
 import { useBudgetColumns } from "@/lib/hooks/useBudgetColumns";
 import { useMateriais } from "@/lib/hooks/useMateriais";
 import { usePendingItems } from "@/lib/hooks/usePendingItems";
 import { useProject, usePublishProject } from "@/lib/hooks/useProjects";
 import { useTipologias } from "@/lib/hooks/useTipologias";
-import { useSelection } from "@/lib/store/selection";
 import { cn, fmtBRL } from "@/lib/utils";
 import { NUKI_EMAIL, nukiWhatsAppUrl } from "@/shared/constants/contact";
 import type { Material, Tipologia } from "@/shared/types/domain";
@@ -54,11 +53,11 @@ function ChecklistRow({ item }: { item: ChecklistItem }) {
 }
 
 // Tela 11 — Publicação (protótipo: PublishScreen). Min/máx reais via
-// calcBudgetRow (excluindo pendências); publicar trava o store (read-only).
+// calcBudgetRow (excluindo pendências). Concluir apenas marca o projeto como
+// publicado (não bloqueia edição) e mostra a mensagem para avisar a Nuki.
 export function PublishScreen() {
   const router = useRouter();
-  const activeProjectId = useSelection((s) => s.activeProjectId);
-  const projectId = activeProjectId ?? ACTIVE_PROJECT_ID;
+  const projectId = useActiveProjectId();
   const { data: project, isLoading: projectLoading } = useProject(projectId);
   const { data: tipologias = [] } = useTipologias();
   const { data: materiais = [] } = useMateriais();
@@ -68,7 +67,7 @@ export function PublishScreen() {
 
   const [showConfirm, setShowConfirm] = React.useState(false);
 
-  if (projectLoading) return <LoadingState label="Carregando publicação…" />;
+  if (!projectId || projectLoading) return <LoadingState label="Carregando publicação…" />;
   if (!project) return null;
 
   const resolve = (id: string): Material | undefined => getMaterial(materiais, id);
@@ -134,12 +133,12 @@ export function PublishScreen() {
             <Icon name="check_circle" size={44} className="text-functional-success" />
           </div>
           <h2 className="mb-3 text-[26px] font-bold text-neutral-gray-11">
-            Orçamento publicado!
+            Planejamento concluído!
           </h2>
           <p className="mb-2 text-sm text-neutral-gray-7">
-            A configuração de <strong className="text-neutral-gray-11">{project.nome}</strong> foi
-            finalizada. Entre em contato com a equipe Nuki para dar sequência à personalização das
-            unidades.
+            O planejamento de <strong className="text-neutral-gray-11">{project.nome}</strong> foi
+            finalizado. Avise a equipe Nuki que o planejamento acabou para darmos sequência à
+            personalização das unidades.
           </p>
           {project.publicadoEm && (
             <p className="mb-9 text-[13px] text-neutral-gray-6">
@@ -156,10 +155,10 @@ export function PublishScreen() {
               onPress={() =>
                 window.open(
                   nukiWhatsAppUrl(
-                    `Olá! Finalizei a configuração do empreendimento ${project.nome} no Nuki Planner.`
+                    `Olá! Concluí o planejamento no Nuki Planner.\n\nEmpreendimento: ${project.nome}\nIncorporadora: ${project.incorporadora}`
                   ),
                   "_blank",
-                  "noopener"
+                  "noopener,noreferrer"
                 )
               }
             >
@@ -186,7 +185,7 @@ export function PublishScreen() {
           { label: "Publicação" },
         ]}
         title="Publicação do orçamento"
-        subtitle="Revise e publique a configuração finalizada do empreendimento"
+        subtitle="Revise e conclua o planejamento do empreendimento"
         action={
           <Button variant="bordered" onPress={() => router.push("/orcamento")}>
             ← Revisar orçamento
@@ -251,42 +250,42 @@ export function PublishScreen() {
         <Button variant="bordered" size="lg" onPress={() => router.push("/orcamento")}>
           Revisar orçamento
         </Button>
-        <Button size="lg" icon="upload" onPress={() => setShowConfirm(true)}>
-          Publicar orçamento
+        <Button size="lg" icon="check" onPress={() => setShowConfirm(true)}>
+          Concluir planejamento
         </Button>
       </div>
 
       <Modal
         open={showConfirm}
         onClose={() => setShowConfirm(false)}
-        title="Confirmar publicação"
+        title="Concluir planejamento"
         actions={
           <>
             <Button variant="bordered" onPress={() => setShowConfirm(false)}>
               Cancelar
             </Button>
             <Button
-              icon="upload"
+              icon="check"
               isLoading={publish.isPending}
               onPress={() =>
                 publish.mutate(projectId, { onSuccess: () => setShowConfirm(false) })
               }
             >
-              Confirmar e publicar
+              Concluir planejamento
             </Button>
           </>
         }
       >
         <div className="flex flex-col gap-4">
           <p className="text-sm text-neutral-gray-8">
-            Você está prestes a publicar a configuração de{" "}
-            <strong className="text-neutral-gray-11">{project.nome}</strong>.
+            Você está prestes a marcar o planejamento de{" "}
+            <strong className="text-neutral-gray-11">{project.nome}</strong> como concluído.
           </p>
-          <div className="flex items-start gap-2.5 rounded-lg bg-functional-warning-light px-4 py-3">
-            <Icon name="warning" size={16} className="mt-0.5 shrink-0 text-functional-warning" />
-            <p className="text-xs text-tint-orange-fg">
-              Após a publicação, o empreendimento ficará em modo somente leitura. Para fazer
-              alterações, será necessário criar uma nova revisão.
+          <div className="flex items-start gap-2.5 rounded-lg bg-primary-1 px-4 py-3">
+            <Icon name="chat" size={16} className="mt-0.5 shrink-0 text-primary-7" />
+            <p className="text-xs text-primary-7">
+              Nada será bloqueado — você poderá revisar e ajustar quando quiser. Em seguida, avise a
+              equipe Nuki que o planejamento acabou para darmos sequência.
             </p>
           </div>
           <div className="rounded-lg bg-neutral-gray-2 px-4 py-3">

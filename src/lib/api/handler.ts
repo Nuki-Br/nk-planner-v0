@@ -20,7 +20,6 @@ export function fail(message: string, status: number): NextResponse {
 /** Mapeia mensagens do store de servidor para status HTTP. */
 function statusFor(message: string): number {
   if (message.includes("não encontrad")) return 404;
-  if (message.includes("somente leitura")) return 403;
   return 400;
 }
 

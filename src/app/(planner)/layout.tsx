@@ -2,7 +2,6 @@ import { redirect } from "next/navigation";
 
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
-import { ReadOnlyBanner } from "@/components/layout/ReadOnlyBanner";
 import { getAuthContext } from "@/lib/auth/session";
 
 // Shell autenticado (sidebar + header). O middleware já barra sem sessão;
@@ -22,7 +21,6 @@ export default async function PlannerLayout({
       <Header orgName={auth.orgName} email={auth.email} />
       <main style={{ marginLeft: 212, paddingTop: 64 }}>
         <div className="p-6">
-          <ReadOnlyBanner />
           {children}
         </div>
       </main>

@@ -50,7 +50,7 @@ export async function updateProject(id: string, patch: ProjectPatch): Promise<Pr
   return httpSend<Project, ProjectPatch>(`/api/projects/${id}`, "PATCH", patch);
 }
 
-/** Publica o orçamento — a partir daí o servidor rejeita qualquer mutação. */
+/** Marca o planejamento como concluído (status "publicado") — não bloqueia edição. */
 export async function publishProject(id: string): Promise<Project> {
   return httpSend<Project>(`/api/projects/${id}/publish`, "POST");
 }

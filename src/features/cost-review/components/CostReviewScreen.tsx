@@ -6,12 +6,11 @@ import { useRouter } from "next/navigation";
 import { Button, Icon, LoadingState, PageHeader, StatusBadge } from "@/components/ui";
 import { upgradeKey } from "@/lib/budget";
 import { getMaterial } from "@/lib/data/entities";
-import { ACTIVE_PROJECT_ID } from "@/shared/constants/project";
+import { useActiveProjectId } from "@/lib/hooks/useActiveProject";
 import { useCommentThreads } from "@/lib/hooks/useComments";
 import { useMateriais, useUpdateMaterial } from "@/lib/hooks/useMateriais";
 import { useProject } from "@/lib/hooks/useProjects";
 import { useTipologias } from "@/lib/hooks/useTipologias";
-import { useSelection } from "@/lib/store/selection";
 import { cn, fmtBRL, fmtNum } from "@/lib/utils";
 import {
   EditableCell,
@@ -110,8 +109,8 @@ function Th({
 // persiste no catálogo ao salvar; variação compara com o valor original.
 export function CostReviewScreen() {
   const router = useRouter();
-  const activeProjectId = useSelection((s) => s.activeProjectId);
-  const { data: project } = useProject(activeProjectId ?? ACTIVE_PROJECT_ID);
+  const projectId = useActiveProjectId();
+  const { data: project } = useProject(projectId);
   const { data: tipologias = [], isLoading: tipsLoading } = useTipologias();
   const { data: materiais = [] } = useMateriais();
   const { data: threads = {} } = useCommentThreads();
@@ -164,8 +163,8 @@ export function CostReviewScreen() {
         )
       );
     } catch {
-      // Falha (ex.: empreendimento publicado/read-only) já vira toast global
-      // via MutationCache.onError — não duplicamos o erro aqui.
+      // Falha de rede/servidor já vira toast global via
+      // MutationCache.onError — não duplicamos o erro aqui.
       return;
     }
     setOverrides({});
