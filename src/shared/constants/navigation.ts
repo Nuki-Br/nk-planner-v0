@@ -1,30 +1,31 @@
-import type { IconType } from "react-icons";
-import {
-  LuLayoutDashboard,
-  LuSettings,
-  LuLayoutTemplate,
-  LuPackage,
-  LuClipboardList,
-  LuTable,
-  LuUpload,
-} from "react-icons/lu";
+import type { IconName } from "@/components/ui";
 
-export interface NavItem {
-  /** Stable key that maps to the prototype screen id. */
+// Navegação do Planner — reconciliada com os dois modos da sidebar do
+// protótipo (shared-components.jsx):
+//  - modo dashboard: item único "Empreendimentos"
+//  - modo projeto ativo: bloco do projeto + passos do fluxo (done/active)
+export interface NavEntry {
+  /** Chave estável = id de tela do protótipo. */
   key: string;
   label: string;
   href: string;
-  icon: IconType;
+  icon: IconName;
 }
 
-// Top-level Planner navigation. Contextual screens (typology canvas, per-component
-// material config, third-party portal) are reached from within these, not the sidebar.
-export const PLANNER_NAV: NavItem[] = [
-  { key: "dashboard", label: "Dashboard", href: "/dashboard", icon: LuLayoutDashboard },
-  { key: "config-base", label: "Config. base", href: "/config-base", icon: LuSettings },
-  { key: "typologies", label: "Tipologias", href: "/tipologias", icon: LuLayoutTemplate },
-  { key: "catalog", label: "Catálogo", href: "/catalogo", icon: LuPackage },
-  { key: "cost-review", label: "Revisão de custos", href: "/revisao-custos", icon: LuClipboardList },
-  { key: "budget", label: "Orçamento", href: "/orcamento", icon: LuTable },
-  { key: "publish", label: "Publicação", href: "/publicacao", icon: LuUpload },
+export const DASHBOARD_ITEM: NavEntry = {
+  key: "dashboard",
+  label: "Empreendimentos",
+  href: "/dashboard",
+  icon: "building",
+};
+
+/** Passos do fluxo na sidebar em modo projeto ativo (WORKFLOW_STEPS do protótipo). */
+export const WORKFLOW_NAV: NavEntry[] = [
+  { key: "typologies", label: "Tipologias", href: "/tipologias", icon: "layers" },
+  { key: "materials-catalog", label: "Catálogo de materiais", href: "/catalogo", icon: "box" },
+  { key: "budget-table", label: "Construtor de Preço", href: "/orcamento", icon: "calculator" },
+  { key: "publish", label: "Publicação", href: "/publicacao", icon: "check_circle" },
 ];
+
+/** Rotas que mantêm a sidebar em modo dashboard (como no protótipo: dashboard e project-setup). */
+export const DASHBOARD_MODE_ROUTES = ["/dashboard", "/config-base"];

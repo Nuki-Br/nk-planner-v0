@@ -1,12 +1,18 @@
-// Nuki Planner — Prisma schema (STUB).
-// This is a minimal, valid starting point so `prisma generate` produces a typed
-// client for the app skeleton. The full domain model (Project, Tower, UnitGroup,
-// Material, Kit, Blueprint, Room, Component, ComponentItem, PriceColumn,
-// BudgetVersion, Comment, CanvasNote, MediaAsset, fill-link, ...) is designed in
-// Phase 5 → docs/api-plan.md, following the module doc §4.
+// Nuki Planner — Prisma schema (Fase 10).
+// Espelha src/shared/types/domain.ts para que a troca do store mock pelas
+// rotas /api/* seja transparente para telas e hooks:
+//  - ids são String gerados pela aplicação (genId) — o prefixo "kit-" é
+//    load-bearing (isKitId em lib/data/entities);
+//  - padrao/upgrades de Componente referenciam Material OU Kit por id
+//    (polimórfico, sem FK) e kitQtds é Json, como no domínio — a normalização
+//    em ComponentMaterial/KitItem fica para a reintegração ao nk-admin-portal;
+//  - datas de exibição ("DD/MM/AAAA HH:mm") são String, verbatim como as telas
+//    esperam; bookkeeping usa DateTime createdAt/updatedAt;
+//  - custos em Float (double precision) — mesmo semântico dos numbers do app.
 //
-// Tenancy: every domain row is org-scoped via `organizationId` so beta users from
-// different organizations are isolated (kept intentionally simple).
+// Tenancy: toda linha de domínio carrega organizationId (orgs beta isoladas).
+// CellOverride/BaseCost (estado de sessão do orçamento, §12) e CanvasNote/
+// MediaAsset (adiados nas fases 5–6) ficam de fora por enquanto.
 
 generator client {
   provider = "prisma-client-js"
@@ -41,4 +47,287 @@ model Membership {
   @@unique([authUserId, organizationId])
   @@index([organizationId])
   @@map("memberships")
+}
+
+// ─── Enums do domínio ──────────────────────────────────────────────────
+
+enum ProjectStatus {
+  rascunho
+  em_preenchimento
+  em_revisao
+  publicado
+}
+
+enum TipologiaStatus {
+  completa
+  incompleta
+}
+
+enum ColumnKind {
+  free
+  rowTotal
+  rowAvg
+}
+
+enum CommentAutor {
+  construtora
+  incorporadora
+}
+
+// ─── Projeto / colunas do orçamento ────────────────────────────────────
+
+model Project {
+  id                String         @id
+  nome              String
+  torre             String
+  incorporadora     String
+  construtora       String
+  status            ProjectStatus  @default(rascunho)
+  /// Datas de exibição "DD/MM/AAAA" (verbatim das telas).
+  enviadoEm         String?        @map("enviado_em")
+  prazo             String?
+  /// "DD/MM/AAAA HH:mm" — gravado ao publicar (trava read-only).
+  publicadoEm       String?        @map("publicado_em")
+  totalItens        Int            @default(0) @map("total_itens")
+  itensPreenchidos  Int            @default(0) @map("itens_preenchidos")
+  /// Data base INCC ("MM/AAAA").
+  inccBase          String?        @map("incc_base")
+  emailConstrutora  String?        @map("email_construtora")
+  /// Taxas globais legadas {construtora, incc, incorporadora} (compat protótipo).
+  taxas             Json?
+  organizationId    String         @map("organization_id")
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+  taxColumns        BudgetColumn[]
+
+  @@index([organizationId])
+  @@map("projects")
+}
+
+/// Coluna configurável do Construtor de Preço (taxColumns do projeto).
+model BudgetColumn {
+  id             String     @id
+  projectId      String     @map("project_id")
+  project        Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  nome           String
+  kind           ColumnKind
+  /// Expressão padrão: número fixo ou fórmula iniciada por "=".
+  expr           String
+  visivel        Boolean    @default(false)
+  ordem          Int
+  organizationId String     @map("organization_id")
+
+  @@index([projectId])
+  @@index([organizationId])
+  @@map("budget_columns")
+}
+
+// ─── Catálogo ──────────────────────────────────────────────────────────
+
+model Material {
+  id             String @id
+  codigo         String
+  nome           String
+  fabricante     String
+  categoria      String
+  unidade        String
+  /// Custo de material (R$/unidade).
+  custoMat       Float  @map("custo_mat")
+  /// Custo de mão de obra (R$/unidade).
+  custoMO        Float  @map("custo_mo")
+  organizationId String @map("organization_id")
+
+  @@index([organizationId])
+  @@map("materiais")
+}
+
+/// Kit agrupa materiais avulsos; custo = soma dos sub-itens.
+model Kit {
+  id             String   @id
+  codigo         String
+  nome           String
+  categoria      String
+  /// Ids de Material, na ordem de exibição.
+  itens          String[]
+  organizationId String   @map("organization_id")
+
+  @@index([organizationId])
+  @@map("kits")
+}
+
+// ─── Tipologias / ambientes / componentes ──────────────────────────────
+
+model Tipologia {
+  id             String          @id
+  nome           String
+  metragem       Float
+  descricao      String
+  unidades       Int
+  status         TipologiaStatus @default(incompleta)
+  ordem          Int
+  organizationId String          @map("organization_id")
+  ambientes      Ambiente[]
+
+  @@index([organizationId])
+  @@map("tipologias")
+}
+
+model Ambiente {
+  id             String       @id
+  tipologiaId    String       @map("tipologia_id")
+  tipologia      Tipologia    @relation(fields: [tipologiaId], references: [id], onDelete: Cascade)
+  nome           String
+  icon           String?
+  /// {name, url} (AmbienteImagem) — upload real fica para depois.
+  imagem         Json?
+  /// RoomShape (rect/poly) — reservado até haver plantas reais.
+  local          Json?
+  ordem          Int
+  organizationId String       @map("organization_id")
+  componentes    Componente[]
+
+  @@index([tipologiaId])
+  @@index([organizationId])
+  @@map("ambientes")
+}
+
+model Componente {
+  id             String   @id
+  ambienteId     String   @map("ambiente_id")
+  ambiente       Ambiente @relation(fields: [ambienteId], references: [id], onDelete: Cascade)
+  nome           String
+  unidade        String
+  qtd            Float
+  /// Reserva técnica (%) → qtdComRT = qtd * (1 + rt/100).
+  rt             Float
+  /// Id de Material/Kit padrão (crédito) — polimórfico, sem FK.
+  padrao         String?
+  /// Ids de Material/Kit oferecidos como upgrade, na ordem de exibição.
+  upgrades       String[]
+  /// Override de taxa por componente — reservado (§6).
+  taxaEspecifica Json?    @map("taxa_especifica")
+  ghost          Boolean  @default(false)
+  ordem          Int
+  /// kitId → (matId → quantitativo do sub-item).
+  kitQtds        Json?    @map("kit_qtds")
+  organizationId String   @map("organization_id")
+
+  @@index([ambienteId])
+  @@index([organizationId])
+  @@map("componentes")
+}
+
+/// Compartilhamento de ambientes entre tipologias (sharedReg/ambShared do
+/// domínio): cada linha diz a que grupo (shareId) um ambiente pertence.
+model AmbienteShared {
+  ambienteId     String @id @map("ambiente_id")
+  shareId        String @map("share_id")
+  tipologiaId    String @map("tipologia_id")
+  organizationId String @map("organization_id")
+
+  @@index([shareId])
+  @@index([organizationId])
+  @@map("ambientes_compartilhados")
+}
+
+// ─── Torres / grupos de unidades ───────────────────────────────────────
+
+model Tower {
+  id             String @id
+  nome           String
+  ordem          Int
+  organizationId String @map("organization_id")
+
+  @@index([organizationId])
+  @@map("torres")
+}
+
+model UnitGroup {
+  id             String   @id
+  nome           String
+  torre          String
+  unidades       String[]
+  organizationId String   @map("organization_id")
+
+  @@index([organizationId])
+  @@map("unit_groups")
+}
+
+// ─── Orçamento: pendências e versões ───────────────────────────────────
+
+/// Linha do orçamento sem custo base (chaves `${compId}-${optId}` ou
+/// `${compId}-${kitId}-${matId}`) — o Set PENDING_ITEMS do domínio.
+model PendingItem {
+  key            String @id
+  organizationId String @map("organization_id")
+
+  @@index([organizationId])
+  @@map("pending_items")
+}
+
+model BudgetVersion {
+  id             String  @id
+  /// "v1", "v2"…
+  label          String
+  /// Data de exibição "DD/MM/AAAA às HH:mm" (verbatim das telas).
+  criadoEm       String  @map("criado_em")
+  createdBy      String  @map("created_by")
+  isCurrent      Boolean @default(false) @map("is_current")
+  summary        String
+  /// VersionChanges {materiais, custos, taxas, tipologias}.
+  changes        Json
+  ordem          Int
+  organizationId String  @map("organization_id")
+
+  @@index([organizationId])
+  @@map("budget_versions")
+}
+
+// ─── Comentários (threads por linha) ───────────────────────────────────
+
+model Comment {
+  id             String       @id @default(uuid())
+  /// `${compId}-${optId}` — chave da thread.
+  rowKey         String       @map("row_key")
+  autor          CommentAutor
+  texto          String
+  /// Data de exibição "DD/MM/AAAA HH:mm".
+  data           String
+  organizationId String       @map("organization_id")
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  @@index([rowKey])
+  @@index([organizationId])
+  @@map("comments")
+}
+
+// ─── Link de preenchimento + portal do terceiro (Fase 8) ───────────────
+
+model FillLink {
+  id             String   @id
+  token          String   @unique
+  tipologiaIds   String[] @map("tipologia_ids")
+  /// FillLinkCampos {mat, mo, comment}.
+  campos         Json
+  prazo          String?
+  /// Senha em claro no MVP (hash entra com auth de terceiros, se necessário).
+  senha          String?
+  /// "DD/MM/AAAA HH:mm".
+  criadoEm       String   @map("criado_em")
+  organizationId String   @map("organization_id")
+
+  @@index([organizationId])
+  @@map("fill_links")
+}
+
+/// Custos/comentário preenchidos pelo terceiro no portal (matId → fill).
+model PortalFill {
+  materialId     String @map("material_id")
+  mat            String
+  mo             String
+  comment        String
+  organizationId String @map("organization_id")
+
+  @@id([organizationId, materialId])
+  @@map("portal_fills")
 }

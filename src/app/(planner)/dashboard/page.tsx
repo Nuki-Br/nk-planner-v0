@@ -1,42 +1,6 @@
-import { Card, CardBody, CardHeader } from "@heroui/react";
+import { DashboardScreen } from "@/features/dashboard/components/DashboardScreen";
 
-const SUMMARY = [
-  { label: "Empreendimentos", value: "—" },
-  { label: "Em andamento", value: "—" },
-  { label: "Publicados", value: "—" },
-  { label: "Rascunhos", value: "—" },
-];
-
-// Placeholder dashboard — proves the shell + tokens render. Real content is
-// migrated from the prototype in Phase 4.
+// Tela 1 — Dashboard de empreendimentos.
 export default function DashboardPage() {
-  return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h2 className="text-title-3 text-neutral-gray-10">Dashboard</h2>
-        <p className="text-sm-p text-neutral-gray-7">
-          Visão geral dos empreendimentos em planejamento.
-        </p>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        {SUMMARY.map((s) => (
-          <Card key={s.label} shadow="sm" className="border border-neutral-gray-4">
-            <CardHeader className="pb-0 text-sm-p text-neutral-gray-7">
-              {s.label}
-            </CardHeader>
-            <CardBody className="pt-1 text-title-2 text-neutral-gray-10">
-              {s.value}
-            </CardBody>
-          </Card>
-        ))}
-      </div>
-
-      <Card shadow="sm" className="border border-neutral-gray-4">
-        <CardBody className="py-16 text-center text-sm-p text-neutral-gray-6">
-          Skeleton pronto. As telas do protótipo serão migradas nas próximas fases.
-        </CardBody>
-      </Card>
-    </div>
-  );
+  return <DashboardScreen />;
 }
