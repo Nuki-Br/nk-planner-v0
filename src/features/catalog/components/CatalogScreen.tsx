@@ -2,6 +2,7 @@
 
 import React from "react";
 import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import { Input as HeroInput } from "@heroui/react";
 
 import {
@@ -26,12 +27,17 @@ import type { Kit, Material } from "@/shared/types/domain";
 
 import { getUsageCounts } from "../usage";
 import { AddSplitButton } from "./AddSplitButton";
-import { CsvImportModal } from "./CsvImportModal";
 import { ActiveChip, FilterMenu } from "./FilterMenu";
 import { KitBadge } from "./KitBadge";
 import { KitModal } from "./KitModal";
 import { MaterialModal } from "./MaterialModal";
 import { UsageModal } from "./UsageModal";
+
+// Import dinâmico: o CsvImportModal (e o papaparse ~45kB dentro dele) só entra
+// no bundle quando o import de CSV é aberto — fora do First Load JS do catálogo.
+const CsvImportModal = dynamic(() =>
+  import("./CsvImportModal").then((m) => m.CsvImportModal)
+);
 
 type TypeFilter = "" | "Material" | "Kit";
 

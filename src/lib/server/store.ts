@@ -1188,23 +1188,36 @@ export async function submitPortalFills(
     }),
   ]);
 
-  let applied = 0;
+  // Aplica todos os custos preenchidos em paralelo e limpa as pendências
+  // relacionadas com UM deleteMany (evita o N+1 de update+delete sequenciais).
   const pendentes = await prisma.pendingItem.findMany({ where: { organizationId } });
-  for (const [materialId, fill] of Object.entries(fills)) {
-    const custoMat = parseFloat(fill.mat);
-    if (!(custoMat > 0)) continue;
-    const res = await prisma.material.updateMany({
-      where: { id: materialId, organizationId },
-      data: { custoMat, custoMO: parseFloat(fill.mo) > 0 ? parseFloat(fill.mo) : 0 },
-    });
-    if (res.count === 0) continue;
+  const paraAplicar = Object.entries(fills).filter(([, f]) => parseFloat(f.mat) > 0);
+  const resultados = await Promise.all(
+    paraAplicar.map(async ([materialId, fill]) => {
+      const res = await prisma.material.updateMany({
+        where: { id: materialId, organizationId },
+        data: {
+          custoMat: parseFloat(fill.mat),
+          custoMO: parseFloat(fill.mo) > 0 ? parseFloat(fill.mo) : 0,
+        },
+      });
+      return { materialId, ok: res.count > 0 };
+    })
+  );
+
+  let applied = 0;
+  const keysParaRemover: string[] = [];
+  for (const { materialId, ok } of resultados) {
+    if (!ok) continue;
     applied += 1;
-    const keys = pendentes
-      .filter((pi) => pi.key.endsWith(`-${materialId}`))
-      .map((pi) => pi.key);
-    if (keys.length > 0) {
-      await prisma.pendingItem.deleteMany({ where: { key: { in: keys }, organizationId } });
+    for (const pi of pendentes) {
+      if (pi.key.endsWith(`-${materialId}`)) keysParaRemover.push(pi.key);
     }
+  }
+  if (keysParaRemover.length > 0) {
+    await prisma.pendingItem.deleteMany({
+      where: { key: { in: keysParaRemover }, organizationId },
+    });
   }
 
   if (applied > 0) {

@@ -197,6 +197,9 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   if (tipsLoading) return <LoadingState label="Carregando orçamento…" />;
   if (!tip) return null;
   const colCount = 7 + cols.length;
+  // Total por ambiente calculado UMA vez e reusado no cabeçalho de cada ambiente
+  // e no grand-total (antes o motor rodava 2× por ambiente a cada render).
+  const ambTotals = tip.ambientes.map((amb) => ambTotal(deps, amb));
 
   // ── colunas (persistem no store) ──
   const persistCols = (next: BudgetColumn[]) => updateCols.mutate({ projectId, cols: next });
@@ -580,8 +583,8 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
               </tr>
             </thead>
             <tbody>
-              {tip.ambientes.map((amb) => {
-                const total = ambTotal(deps, amb);
+              {tip.ambientes.map((amb, ambIdx) => {
+                const total = ambTotals[ambIdx];
                 return (
                   <React.Fragment key={amb.id}>
                     <tr>
@@ -1078,7 +1081,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                 </td>
                 <td className="bg-primary-7 px-2.5 py-3 text-right">
                   <span className="text-[15px] font-extrabold text-white">
-                    {fmtBRL(tip.ambientes.reduce((acc, a) => acc + ambTotal(deps, a), 0))}
+                    {fmtBRL(ambTotals.reduce((acc, v) => acc + v, 0))}
                   </span>
                 </td>
                 <td className="bg-neutral-gray-3" />
