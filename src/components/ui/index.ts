@@ -14,6 +14,4 @@ export { Select, type SelectOption, type SelectProps } from "./Select";
 export { Spinner } from "./Spinner";
 export { StatCard } from "./StatCard";
 export { StatusBadge } from "./StatusBadge";
-export { StepNav, type Step } from "./StepNav";
-export { Tabs, type TabItem } from "./Tabs";
 export { Textarea, type TextareaProps } from "./Textarea";

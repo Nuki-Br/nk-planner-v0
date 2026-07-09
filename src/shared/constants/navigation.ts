@@ -29,12 +29,3 @@ export const WORKFLOW_NAV: NavEntry[] = [
 
 /** Rotas que mantêm a sidebar em modo dashboard (como no protótipo: dashboard e project-setup). */
 export const DASHBOARD_MODE_ROUTES = ["/dashboard", "/config-base"];
-
-/** Passos do StepNav no topo das telas (ALL_STEPS + STEP_LABELS do protótipo). */
-export const PLANNER_STEPS = [
-  { key: "project-setup", label: "Configuração" },
-  { key: "typologies", label: "Tipologias" },
-  { key: "materials-catalog", label: "Materiais" },
-  { key: "budget-table", label: "Construtor de Preço" },
-  { key: "publish", label: "Publicação" },
-] as const;
