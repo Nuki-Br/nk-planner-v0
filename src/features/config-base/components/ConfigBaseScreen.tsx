@@ -4,7 +4,7 @@ import React from "react";
 import { useRouter } from "next/navigation";
 
 import { Button, Card, Input, LoadingState, PageHeader } from "@/components/ui";
-import { SEED_ACTIVE_PROJECT_ID } from "@/lib/data/seed";
+import { ACTIVE_PROJECT_ID } from "@/shared/constants/project";
 import { useProject, useUpdateProject } from "@/lib/hooks/useProjects";
 import { useSelection } from "@/lib/store/selection";
 import { parseBR } from "@/lib/utils";
@@ -49,7 +49,7 @@ function SectionTitle({ children, sub }: { children: React.ReactNode; sub?: stri
 export function ConfigBaseScreen() {
   const router = useRouter();
   const activeProjectId = useSelection((s) => s.activeProjectId);
-  const projectId = activeProjectId ?? SEED_ACTIVE_PROJECT_ID;
+  const projectId = activeProjectId ?? ACTIVE_PROJECT_ID;
   const { data: project, isLoading: projectLoading } = useProject(projectId);
   const updateProject = useUpdateProject();
 

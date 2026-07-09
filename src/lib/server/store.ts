@@ -10,6 +10,7 @@ import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { TAX_COLUMNS_DEFAULT } from "@/shared/constants/budget";
+import { ACTIVE_PROJECT_ID } from "@/shared/constants/project";
 import type {
   Ambiente,
   AmbienteImagem,
@@ -32,8 +33,6 @@ import type {
   UnitGroup,
   VersionChanges,
 } from "@/shared/types/domain";
-
-export const ACTIVE_PROJECT_ID = "p001";
 
 function genId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;

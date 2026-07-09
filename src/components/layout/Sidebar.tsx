@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { Icon, StatusBadge, type IconName } from "@/components/ui";
-import { SEED_ACTIVE_PROJECT_ID } from "@/lib/data/seed";
+import { ACTIVE_PROJECT_ID } from "@/shared/constants/project";
 import { useProject } from "@/lib/hooks/useProjects";
 import { useSelection } from "@/lib/store/selection";
 import { cn } from "@/lib/utils";
@@ -67,7 +67,7 @@ export function Sidebar() {
     if (pathname === "/dashboard") {
       clearSelection();
     } else if (!isDashboardMode && useSelection.getState().activeProjectId === null) {
-      setActiveProject(SEED_ACTIVE_PROJECT_ID);
+      setActiveProject(ACTIVE_PROJECT_ID);
     }
   }, [pathname, isDashboardMode, setActiveProject, clearSelection]);
 

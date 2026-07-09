@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Button, Card, Icon, LoadingState, Modal, PageHeader, StatusBadge } from "@/components/ui";
 import { calcBudgetRow, upgradeKey } from "@/lib/budget";
 import { getMaterial } from "@/lib/data/entities";
-import { SEED_ACTIVE_PROJECT_ID } from "@/lib/data/seed";
+import { ACTIVE_PROJECT_ID } from "@/shared/constants/project";
 import { useBudgetColumns } from "@/lib/hooks/useBudgetColumns";
 import { useMateriais } from "@/lib/hooks/useMateriais";
 import { usePendingItems } from "@/lib/hooks/usePendingItems";
@@ -58,7 +58,7 @@ function ChecklistRow({ item }: { item: ChecklistItem }) {
 export function PublishScreen() {
   const router = useRouter();
   const activeProjectId = useSelection((s) => s.activeProjectId);
-  const projectId = activeProjectId ?? SEED_ACTIVE_PROJECT_ID;
+  const projectId = activeProjectId ?? ACTIVE_PROJECT_ID;
   const { data: project, isLoading: projectLoading } = useProject(projectId);
   const { data: tipologias = [] } = useTipologias();
   const { data: materiais = [] } = useMateriais();

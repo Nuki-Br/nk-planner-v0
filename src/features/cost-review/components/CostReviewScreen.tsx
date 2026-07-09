@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Button, Icon, LoadingState, PageHeader, StatusBadge } from "@/components/ui";
 import { upgradeKey } from "@/lib/budget";
 import { getMaterial } from "@/lib/data/entities";
-import { SEED_ACTIVE_PROJECT_ID } from "@/lib/data/seed";
+import { ACTIVE_PROJECT_ID } from "@/shared/constants/project";
 import { useCommentThreads } from "@/lib/hooks/useComments";
 import { useMateriais, useUpdateMaterial } from "@/lib/hooks/useMateriais";
 import { useProject } from "@/lib/hooks/useProjects";
@@ -111,7 +111,7 @@ function Th({
 export function CostReviewScreen() {
   const router = useRouter();
   const activeProjectId = useSelection((s) => s.activeProjectId);
-  const { data: project } = useProject(activeProjectId ?? SEED_ACTIVE_PROJECT_ID);
+  const { data: project } = useProject(activeProjectId ?? ACTIVE_PROJECT_ID);
   const { data: tipologias = [], isLoading: tipsLoading } = useTipologias();
   const { data: materiais = [] } = useMateriais();
   const { data: threads = {} } = useCommentThreads();

@@ -3,7 +3,7 @@
 import { usePathname } from "next/navigation";
 
 import { Icon } from "@/components/ui";
-import { SEED_ACTIVE_PROJECT_ID } from "@/lib/data/seed";
+import { ACTIVE_PROJECT_ID } from "@/shared/constants/project";
 import { useProject } from "@/lib/hooks/useProjects";
 import { useSelection } from "@/lib/store/selection";
 import { DASHBOARD_MODE_ROUTES } from "@/shared/constants/navigation";
@@ -13,7 +13,7 @@ import { DASHBOARD_MODE_ROUTES } from "@/shared/constants/navigation";
 export function ReadOnlyBanner() {
   const pathname = usePathname();
   const activeProjectId = useSelection((s) => s.activeProjectId);
-  const { data: project } = useProject(activeProjectId ?? SEED_ACTIVE_PROJECT_ID);
+  const { data: project } = useProject(activeProjectId ?? ACTIVE_PROJECT_ID);
 
   const isDashboardMode = DASHBOARD_MODE_ROUTES.some(
     (route) => pathname === route || pathname.startsWith(`${route}/`)

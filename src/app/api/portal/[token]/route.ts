@@ -2,13 +2,13 @@ import type { NextRequest } from "next/server";
 
 import { fail, publicRoute } from "@/lib/api/handler";
 import {
-  ACTIVE_PROJECT_ID,
   getFillLinkByToken,
   getPortalFills,
   getProject,
   listMateriais,
   listTipologias,
 } from "@/lib/server/store";
+import { ACTIVE_PROJECT_ID } from "@/shared/constants/project";
 import type { PortalData } from "@/shared/types/api";
 
 // Rota PÚBLICA do portal do terceiro: resolve token → escopo no servidor.

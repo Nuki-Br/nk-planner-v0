@@ -13,7 +13,7 @@ import {
   StatCard,
   Textarea,
 } from "@/components/ui";
-import { SEED_ACTIVE_PROJECT_ID } from "@/lib/data/seed";
+import { ACTIVE_PROJECT_ID } from "@/shared/constants/project";
 import { useCreateFillLink } from "@/lib/hooks/useFillLinks";
 import { useProject, useUpdateProject } from "@/lib/hooks/useProjects";
 import { useTipologias } from "@/lib/hooks/useTipologias";
@@ -40,7 +40,7 @@ function todayBR(): string {
 export function SendBuilderScreen() {
   const router = useRouter();
   const activeProjectId = useSelection((s) => s.activeProjectId);
-  const projectId = activeProjectId ?? SEED_ACTIVE_PROJECT_ID;
+  const projectId = activeProjectId ?? ACTIVE_PROJECT_ID;
   const { data: project, isLoading: projectLoading } = useProject(projectId);
   const { data: tipologias = [] } = useTipologias();
   const createLink = useCreateFillLink();
