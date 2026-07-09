@@ -4,9 +4,8 @@ import React from "react";
 import { useRouter } from "next/navigation";
 
 import { Button, Card, Input, LoadingState, PageHeader } from "@/components/ui";
-import { ACTIVE_PROJECT_ID } from "@/shared/constants/project";
+import { useActiveProjectId } from "@/lib/hooks/useActiveProject";
 import { useProject, useUpdateProject } from "@/lib/hooks/useProjects";
-import { useSelection } from "@/lib/store/selection";
 import { parseBR } from "@/lib/utils";
 import type { Project } from "@/shared/types/domain";
 
@@ -48,8 +47,7 @@ function SectionTitle({ children, sub }: { children: React.ReactNode; sub?: stri
 // como no mock original.
 export function ConfigBaseScreen() {
   const router = useRouter();
-  const activeProjectId = useSelection((s) => s.activeProjectId);
-  const projectId = activeProjectId ?? ACTIVE_PROJECT_ID;
+  const projectId = useActiveProjectId();
   const { data: project, isLoading: projectLoading } = useProject(projectId);
   const updateProject = useUpdateProject();
 
@@ -67,7 +65,8 @@ export function ConfigBaseScreen() {
     []
   );
 
-  if (projectLoading) return <LoadingState label="Carregando dados do empreendimento…" />;
+  if (!projectId || projectLoading)
+    return <LoadingState label="Carregando dados do empreendimento…" />;
   if (!form) return null;
 
   const set = (key: keyof FormState) => (value: string) =>
@@ -143,7 +142,7 @@ export function ConfigBaseScreen() {
             />
           </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <Input label="Incorporadora" value="Grupo Axis Incorporações" isDisabled />
+            <Input label="Incorporadora" value={project?.incorporadora ?? ""} isDisabled />
             <Input
               label="Data base INCC"
               value={form.inccBase}

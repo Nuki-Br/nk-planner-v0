@@ -21,8 +21,8 @@ export const DASHBOARD_ITEM: NavEntry = {
 
 /** Passos do fluxo na sidebar em modo projeto ativo (WORKFLOW_STEPS do protótipo). */
 export const WORKFLOW_NAV: NavEntry[] = [
-  { key: "typologies", label: "Tipologias", href: "/tipologias", icon: "layers" },
   { key: "materials-catalog", label: "Catálogo de materiais", href: "/catalogo", icon: "box" },
+  { key: "typologies", label: "Tipologias", href: "/tipologias", icon: "layers" },
   { key: "budget-table", label: "Construtor de Preço", href: "/orcamento", icon: "calculator" },
   { key: "publish", label: "Publicação", href: "/publicacao", icon: "check_circle" },
 ];

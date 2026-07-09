@@ -35,7 +35,7 @@ export function useUpdateProject() {
   });
 }
 
-/** Publica o orçamento (Fase 9) — o store passa a ser somente leitura. */
+/** Marca o planejamento como concluído (status "publicado") — sem bloquear edição. */
 export function usePublishProject() {
   const queryClient = useQueryClient();
   return useMutation({

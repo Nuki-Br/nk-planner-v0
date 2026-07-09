@@ -4,15 +4,14 @@
 // espelham o mock para a troca da camada de dados ser transparente.
 //
 // Nota (beta): o domínio é escopado por ORG (não por projeto), como no mock —
-// o "projeto ativo" é o p001 e a trava de publicação olha para ele
-// (ACTIVE_PROJECT_ID). Escopo por projeto entra quando houver multiprojeto.
+// o "projeto ativo" da org é resolvido por getActiveProjectId (o projeto mais
+// antigo da org). Escopo por projeto entra quando houver multiprojeto.
 import { randomBytes, randomUUID } from "crypto";
 
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { TAX_COLUMNS_DEFAULT } from "@/shared/constants/budget";
-import { ACTIVE_PROJECT_ID } from "@/shared/constants/project";
 import type {
   Ambiente,
   AmbienteImagem,
@@ -52,17 +51,6 @@ function nowBR(): string {
 /** Interfaces do domínio → coluna Json do Prisma. */
 function json<T extends object>(v: T | null | undefined): Prisma.InputJsonValue | undefined {
   return v == null ? undefined : (v as unknown as Prisma.InputJsonValue);
-}
-
-/** Trava da Fase 9: projeto ativo publicado ⇒ somente leitura. */
-async function assertEditable(organizationId: string): Promise<void> {
-  const p = await prisma.project.findFirst({
-    where: { id: ACTIVE_PROJECT_ID, organizationId },
-    select: { status: true },
-  });
-  if (p?.status === "publicado") {
-    throw new Error("Empreendimento publicado — somente leitura.");
-  }
 }
 
 // ─── Mapeadores linha do banco → domínio ──────────────────────────────
@@ -244,7 +232,6 @@ export async function updateProject(
   id: string,
   patch: ProjectPatch
 ): Promise<Project> {
-  await assertEditable(organizationId);
   const exists = await prisma.project.findFirst({ where: { id, organizationId } });
   if (!exists) throw new Error("Empreendimento não encontrado.");
   const { taxas, ...rest } = patch;
@@ -267,6 +254,20 @@ export async function publishProject(organizationId: string, id: string): Promis
   return toProject(row);
 }
 
+/**
+ * Projeto âncora da org (MVP single-project): o mais antigo criado. Substitui o
+ * antigo ACTIVE_PROJECT_ID fixo — cada org resolve o seu. null se a org ainda
+ * não tem projeto.
+ */
+export async function getActiveProjectId(organizationId: string): Promise<string | null> {
+  const p = await prisma.project.findFirst({
+    where: { organizationId },
+    orderBy: { createdAt: "asc" },
+    select: { id: true },
+  });
+  return p?.id ?? null;
+}
+
 export async function getBudgetColumns(
   organizationId: string,
   projectId: string
@@ -283,7 +284,6 @@ export async function updateBudgetColumns(
   projectId: string,
   cols: BudgetColumn[]
 ): Promise<BudgetColumn[]> {
-  await assertEditable(organizationId);
   const p = await prisma.project.findFirst({ where: { id: projectId, organizationId } });
   if (!p) throw new Error("Empreendimento não encontrado.");
   await prisma.$transaction([
@@ -311,7 +311,6 @@ export async function createMaterial(
   organizationId: string,
   input: MaterialInput
 ): Promise<Material> {
-  await assertEditable(organizationId);
   const row = await prisma.material.create({
     data: { id: genId("mat"), ...input, organizationId },
   });
@@ -322,7 +321,6 @@ export async function createMateriais(
   organizationId: string,
   inputs: MaterialInput[]
 ): Promise<Material[]> {
-  await assertEditable(organizationId);
   const data = inputs.map((input) => ({ id: genId("mat"), ...input, organizationId }));
   await prisma.material.createMany({ data });
   const rows = await prisma.material.findMany({
@@ -337,7 +335,6 @@ export async function updateMaterial(
   id: string,
   patch: Partial<MaterialInput>
 ): Promise<Material> {
-  await assertEditable(organizationId);
   const exists = await prisma.material.findFirst({ where: { id, organizationId } });
   if (!exists) throw new Error("Material não encontrado.");
   const row = await prisma.material.update({ where: { id }, data: patch });
@@ -345,7 +342,6 @@ export async function updateMaterial(
 }
 
 export async function deleteMaterial(organizationId: string, id: string): Promise<void> {
-  await assertEditable(organizationId);
   const res = await prisma.material.deleteMany({ where: { id, organizationId } });
   if (res.count === 0) throw new Error("Material não encontrado.");
 }
@@ -360,7 +356,6 @@ export async function listKits(organizationId: string): Promise<Kit[]> {
 }
 
 export async function createKit(organizationId: string, input: KitInput): Promise<Kit> {
-  await assertEditable(organizationId);
   const row = await prisma.kit.create({ data: { id: genId("kit"), ...input, organizationId } });
   return toKit(row);
 }
@@ -370,7 +365,6 @@ export async function updateKit(
   id: string,
   patch: Partial<KitInput>
 ): Promise<Kit> {
-  await assertEditable(organizationId);
   const exists = await prisma.kit.findFirst({ where: { id, organizationId } });
   if (!exists) throw new Error("Kit não encontrado.");
   const row = await prisma.kit.update({ where: { id }, data: patch });
@@ -378,7 +372,6 @@ export async function updateKit(
 }
 
 export async function deleteKit(organizationId: string, id: string): Promise<void> {
-  await assertEditable(organizationId);
   const res = await prisma.kit.deleteMany({ where: { id, organizationId } });
   if (res.count === 0) throw new Error("Kit não encontrado.");
 }
@@ -417,7 +410,6 @@ export async function createTipologia(
   organizationId: string,
   input: TipologiaInput
 ): Promise<Tipologia> {
-  await assertEditable(organizationId);
   const agg = await prisma.tipologia.aggregate({
     where: { organizationId },
     _max: { ordem: true },
@@ -440,7 +432,6 @@ export async function updateTipologia(
   id: string,
   patch: Partial<TipologiaInput & { status: TipologiaStatus }>
 ): Promise<Tipologia> {
-  await assertEditable(organizationId);
   await findTipologia(organizationId, id);
   const row = await prisma.tipologia.update({
     where: { id },
@@ -451,7 +442,6 @@ export async function updateTipologia(
 }
 
 export async function deleteTipologia(organizationId: string, id: string): Promise<void> {
-  await assertEditable(organizationId);
   const res = await prisma.tipologia.deleteMany({ where: { id, organizationId } });
   if (res.count === 0) throw new Error("Tipologia não encontrada.");
 }
@@ -461,7 +451,6 @@ export async function duplicateTipologia(
   organizationId: string,
   id: string
 ): Promise<Tipologia> {
-  await assertEditable(organizationId);
   const src = await findTipologia(organizationId, id);
   const agg = await prisma.tipologia.aggregate({
     where: { organizationId },
@@ -520,7 +509,6 @@ export async function createAmbiente(
   tipologiaId: string,
   input: AmbienteInput
 ): Promise<Ambiente> {
-  await assertEditable(organizationId);
   await findTipologia(organizationId, tipologiaId);
   const agg = await prisma.ambiente.aggregate({
     where: { tipologiaId, organizationId },
@@ -548,7 +536,6 @@ export async function updateAmbiente(
   ambienteId: string,
   patch: Partial<AmbienteInput>
 ): Promise<Ambiente> {
-  await assertEditable(organizationId);
   await findAmbiente(organizationId, tipologiaId, ambienteId);
   const { imagem, local, ...rest } = patch;
   const row = await prisma.ambiente.update({
@@ -568,7 +555,6 @@ export async function deleteAmbiente(
   tipologiaId: string,
   ambienteId: string
 ): Promise<void> {
-  await assertEditable(organizationId);
   await findAmbiente(organizationId, tipologiaId, ambienteId);
   await prisma.$transaction([
     // Desvincula do grupo compartilhado, se houver (como no mock).
@@ -582,7 +568,6 @@ export async function cloneAmbiente(
   tipologiaId: string,
   ambienteId: string
 ): Promise<Ambiente> {
-  await assertEditable(organizationId);
   const src = await findAmbiente(organizationId, tipologiaId, ambienteId);
   const agg = await prisma.ambiente.aggregate({
     where: { tipologiaId, organizationId },
@@ -625,7 +610,6 @@ export async function reorderAmbientes(
   tipologiaId: string,
   orderedIds: string[]
 ): Promise<void> {
-  await assertEditable(organizationId);
   const tip = await findTipologia(organizationId, tipologiaId);
   const atuais = new Set(tip.ambientes.map((a) => a.id));
   if (orderedIds.length !== atuais.size || orderedIds.some((id) => !atuais.has(id))) {
@@ -649,7 +633,6 @@ export async function createComponente(
   ambienteId: string,
   input: ComponenteInput
 ): Promise<Componente> {
-  await assertEditable(organizationId);
   await findAmbiente(organizationId, tipologiaId, ambienteId);
   const agg = await prisma.componente.aggregate({
     where: { ambienteId, organizationId },
@@ -677,7 +660,6 @@ export async function updateComponente(
   componenteId: string,
   patch: Partial<ComponenteInput>
 ): Promise<Componente> {
-  await assertEditable(organizationId);
   await findAmbiente(organizationId, tipologiaId, ambienteId);
   await findComponente(organizationId, ambienteId, componenteId);
   const row = await prisma.componente.update({
@@ -693,7 +675,6 @@ export async function deleteComponente(
   ambienteId: string,
   componenteId: string
 ): Promise<void> {
-  await assertEditable(organizationId);
   await findAmbiente(organizationId, tipologiaId, ambienteId);
   const res = await prisma.componente.deleteMany({
     where: { id: componenteId, ambienteId, organizationId },
@@ -707,7 +688,6 @@ export async function reorderComponentes(
   ambienteId: string,
   orderedIds: string[]
 ): Promise<void> {
-  await assertEditable(organizationId);
   const amb = await findAmbiente(organizationId, tipologiaId, ambienteId);
   const atuais = new Set(amb.componentes.map((c) => c.id));
   if (orderedIds.length !== atuais.size || orderedIds.some((id) => !atuais.has(id))) {
@@ -727,7 +707,6 @@ export async function setPadrao(
   componenteId: string,
   padraoId: string | null
 ): Promise<Componente> {
-  await assertEditable(organizationId);
   await findAmbiente(organizationId, tipologiaId, ambienteId);
   await findComponente(organizationId, ambienteId, componenteId);
   const row = await prisma.componente.update({
@@ -744,7 +723,6 @@ export async function addUpgrade(
   componenteId: string,
   upgradeId: string
 ): Promise<Componente> {
-  await assertEditable(organizationId);
   await findAmbiente(organizationId, tipologiaId, ambienteId);
   const comp = await findComponente(organizationId, ambienteId, componenteId);
   const upgrades = comp.upgrades.includes(upgradeId)
@@ -766,7 +744,6 @@ export async function replaceUpgrade(
   oldId: string,
   newId: string
 ): Promise<Componente> {
-  await assertEditable(organizationId);
   await findAmbiente(organizationId, tipologiaId, ambienteId);
   const comp = await findComponente(organizationId, ambienteId, componenteId);
   const upgrades = [...comp.upgrades];
@@ -789,7 +766,6 @@ export async function removeUpgrade(
   componenteId: string,
   upgradeId: string
 ): Promise<Componente> {
-  await assertEditable(organizationId);
   await findAmbiente(organizationId, tipologiaId, ambienteId);
   const comp = await findComponente(organizationId, ambienteId, componenteId);
   const upgrades = comp.upgrades.filter((u) => u !== upgradeId);
@@ -811,7 +787,6 @@ export async function setKitQtds(
   kitId: string,
   qtds: Record<string, number>
 ): Promise<Componente> {
-  await assertEditable(organizationId);
   await findAmbiente(organizationId, tipologiaId, ambienteId);
   const comp = await findComponente(organizationId, ambienteId, componenteId);
   const kitQtds = {
@@ -855,7 +830,6 @@ export async function linkAmbiente(
   srcTipologiaId: string,
   srcAmbienteId: string
 ): Promise<Ambiente> {
-  await assertEditable(organizationId);
   await findTipologia(organizationId, targetTipologiaId);
   const srcAmb = await findAmbiente(organizationId, srcTipologiaId, srcAmbienteId);
   const existing = await prisma.ambienteShared.findFirst({
@@ -939,7 +913,6 @@ export async function createUnitGroup(
   organizationId: string,
   input: UnitGroupInput
 ): Promise<UnitGroup> {
-  await assertEditable(organizationId);
   const row = await prisma.unitGroup.create({
     data: { id: genId("ug"), ...input, organizationId },
   });
@@ -951,7 +924,6 @@ export async function updateUnitGroup(
   id: string,
   patch: Partial<UnitGroupInput>
 ): Promise<UnitGroup> {
-  await assertEditable(organizationId);
   const exists = await prisma.unitGroup.findFirst({ where: { id, organizationId } });
   if (!exists) throw new Error("Grupo de unidades não encontrado.");
   const row = await prisma.unitGroup.update({ where: { id }, data: patch });
@@ -959,7 +931,6 @@ export async function updateUnitGroup(
 }
 
 export async function deleteUnitGroup(organizationId: string, id: string): Promise<void> {
-  await assertEditable(organizationId);
   const res = await prisma.unitGroup.deleteMany({ where: { id, organizationId } });
   if (res.count === 0) throw new Error("Grupo de unidades não encontrado.");
 }
@@ -1004,7 +975,6 @@ export async function createVersion(
   organizationId: string,
   input: VersionInput
 ): Promise<BudgetVersion> {
-  await assertEditable(organizationId);
   const count = await prisma.budgetVersion.count({ where: { organizationId } });
   const agg = await prisma.budgetVersion.aggregate({
     where: { organizationId },
@@ -1037,7 +1007,6 @@ export async function restoreVersion(
   organizationId: string,
   id: string
 ): Promise<BudgetVersion> {
-  await assertEditable(organizationId);
   const exists = await prisma.budgetVersion.findFirst({ where: { id, organizationId } });
   if (!exists) throw new Error("Versão não encontrada.");
   const [, row] = await prisma.$transaction([
@@ -1087,7 +1056,6 @@ export async function appendComment(
   rowKey: string,
   input: CommentInput
 ): Promise<Comment> {
-  await assertEditable(organizationId);
   const row = await prisma.comment.create({
     data: { rowKey, autor: input.autor, texto: input.texto, data: nowBR(), organizationId },
   });
@@ -1102,7 +1070,6 @@ export async function listPendingItems(organizationId: string): Promise<string[]
 }
 
 export async function addPendingItem(organizationId: string, key: string): Promise<void> {
-  await assertEditable(organizationId);
   await prisma.pendingItem.upsert({
     where: { key },
     update: {},
@@ -1111,7 +1078,6 @@ export async function addPendingItem(organizationId: string, key: string): Promi
 }
 
 export async function removePendingItem(organizationId: string, key: string): Promise<void> {
-  await assertEditable(organizationId);
   await prisma.pendingItem.deleteMany({ where: { key, organizationId } });
 }
 
@@ -1135,7 +1101,6 @@ export async function createFillLink(
   organizationId: string,
   input: FillLinkInput
 ): Promise<FillLink> {
-  await assertEditable(organizationId);
   const row = await prisma.fillLink.create({
     data: {
       id: genId("fl"),
@@ -1205,7 +1170,6 @@ export async function submitPortalFills(
   fills: Record<string, PortalFill>,
   allowedMaterialIds: Set<string>
 ): Promise<number> {
-  await assertEditable(organizationId);
 
   // Escopo do link: descarta fills de materiais fora das tipologias liberadas —
   // o terceiro não pode sobrescrever custos de materiais que o link não abriu.
@@ -1259,10 +1223,13 @@ export async function submitPortalFills(
   }
 
   if (applied > 0) {
-    await prisma.project.updateMany({
-      where: { id: ACTIVE_PROJECT_ID, organizationId },
-      data: { status: "em_revisao" },
-    });
+    const activeId = await getActiveProjectId(organizationId);
+    if (activeId) {
+      await prisma.project.updateMany({
+        where: { id: activeId, organizationId },
+        data: { status: "em_revisao" },
+      });
+    }
   }
   return applied;
 }

@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Button, Icon, LoadingState, Modal, PageHeader, Textarea } from "@/components/ui";
 import { upgradeKey } from "@/lib/budget";
 import { getKit, getMaterial, isKitId } from "@/lib/data/entities";
-import { ACTIVE_PROJECT_ID } from "@/shared/constants/project";
+import { useActiveProjectId } from "@/lib/hooks/useActiveProject";
 import { useBudgetColumns, useUpdateBudgetColumns } from "@/lib/hooks/useBudgetColumns";
 import { useCommentThreads } from "@/lib/hooks/useComments";
 import { useKits } from "@/lib/hooks/useKits";
@@ -15,7 +15,6 @@ import { usePendingItems } from "@/lib/hooks/usePendingItems";
 import { useProject } from "@/lib/hooks/useProjects";
 import { useTipologias } from "@/lib/hooks/useTipologias";
 import { useCreateVersion, useRestoreVersion, useVersions } from "@/lib/hooks/useVersions";
-import { useSelection } from "@/lib/store/selection";
 import { cn, fmtBRL, fmtNum } from "@/lib/utils";
 import { CommentThreadPanel, type ThreadRow } from "@/features/construtor-shared/CommentThreadPanel";
 import { LinkFillModal } from "@/features/construtor-shared/LinkFillModal";
@@ -140,8 +139,7 @@ function FillInput({
 // (snapshot real por versão fica adiado — §12).
 export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: PendingFillMode }) {
   const router = useRouter();
-  const activeProjectId = useSelection((s) => s.activeProjectId);
-  const projectId = activeProjectId ?? ACTIVE_PROJECT_ID;
+  const projectId = useActiveProjectId();
   const { data: project } = useProject(projectId);
   const { data: tipologias = [], isLoading: tipsLoading } = useTipologias();
   const { data: materiais = [] } = useMateriais();
@@ -194,7 +192,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
     [materiais, kits, cols, overrides, baseCosts, pendingSet]
   );
 
-  if (tipsLoading) return <LoadingState label="Carregando orçamento…" />;
+  if (!projectId || tipsLoading) return <LoadingState label="Carregando orçamento…" />;
   if (!tip) return null;
   const colCount = 7 + cols.length;
   // Total por ambiente calculado UMA vez e reusado no cabeçalho de cada ambiente
