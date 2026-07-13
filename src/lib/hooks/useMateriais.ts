@@ -33,6 +33,8 @@ export function useUpdateMaterial() {
       updateMaterial(id, patch),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.materiais });
+      // custoMat > 0 remove a pendência no servidor — refletir na UI.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.pendingItems });
     },
   });
 }

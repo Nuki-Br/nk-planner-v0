@@ -1,60 +1,103 @@
-// Modelo de domínio do Planner (fonte: docs/plano-mvp-funcional.md §6 +
-// docs/prototype-src/data.js). Toda entidade ganha organizationId na Fase 10.
-// Preços/custos em BRL (número decimal).
+// Modelo de domínio do Planner — realinhado ao schema relacional (API-aligned).
+// O BANCO usa nomes PascalCase/ids Int (Enterprise/Blueprint/Room/RoomComponent/
+// Material/BaseMaterial); estes tipos TS são a camada interna do app: mantêm os
+// nomes de entidade do planner (Project/Tipologia/Ambiente/Componente/Material/
+// Kit) e mudam só os SHAPES forçados pela normalização — ids numéricos, opções
+// como linhas (não array polimórfico), quantidade por planta, custo no catálogo.
+// Os mappers do store traduzem DB↔domínio. Custos em BRL (número; 0 = pendente).
 import type { Categoria } from "@/shared/constants/categorias";
 import type { Unidade } from "@/shared/constants/unidades";
 
 export type { Categoria } from "@/shared/constants/categorias";
 export type { Unidade } from "@/shared/constants/unidades";
 
+// ─── Catálogo (BaseMaterial: single | kit) ──────────────────────────────
+
+/** Sub-item de um kit (composição de catálogo — MaterialKitItem). */
+export interface KitItem {
+  /** MaterialKitItem id. */
+  id: number;
+  /** BaseMaterial filho (o material do sub-item). */
+  materialId: number;
+  nome: string;
+  fabricante: string;
+  unidade: Unidade;
+  /** Custo do sub-material (R$/unidade; 0 = pendente). */
+  custoMat: number;
+  custoMO: number;
+}
+
+/** Material avulso do catálogo (BaseMaterial Type="single"). */
 export interface Material {
-  id: string;
+  id: number;
   codigo: string;
   nome: string;
   fabricante: string;
   categoria: Categoria;
   unidade: Unidade;
-  /** Custo de material (R$/unidade). */
+  /** Custo de material (R$/unidade; 0 = pendente = custo NULL no banco). */
   custoMat: number;
-  /** Custo de mão de obra (R$/unidade). */
+  /** Custo de mão de obra (R$/unidade; 0 = pendente). */
   custoMO: number;
 }
 
-/** Agrupa materiais avulsos; custo = soma dos sub-itens (sem custo próprio). */
+/** Kit do catálogo (BaseMaterial Type="kit"); custo = soma dos sub-itens. */
 export interface Kit {
-  /** Sempre começa com "kit-" (ver isKitId em lib/data/entities). */
-  id: string;
-  tipo: "kit";
+  id: number;
   codigo: string;
   nome: string;
   categoria: Categoria;
-  /** Ids de Material. */
-  itens: string[];
+  /** Sub-itens (composição). */
+  itens: KitItem[];
 }
 
-/** Ponto de personalização dentro de um ambiente. */
+/** Item de catálogo unificado (Material ou Kit) — para telas que listam ambos. */
+export type CatalogEntity =
+  | ({ isKit: false } & Material)
+  | ({ isKit: true } & Kit);
+
+// ─── Estrutura: Componente / Ambiente / Tipologia (por planta) ──────────
+
+/** Opção de material de um componente (linha Material; era item de upgrades[]). */
+export interface MaterialOption {
+  /** Material id (linha de opção). */
+  id: number;
+  /** BaseMaterial referenciado (resolve custo/nome no catálogo). */
+  baseId: number;
+  /** É um kit? (BaseMaterial.Type === "kit") */
+  isKit: boolean;
+  isDefault: boolean;
+  ordem: number;
+}
+
+/**
+ * Componente resolvido PARA UMA PLANTA: a paleta (opções + default) é
+ * compartilhada (RoomComponent); a quantidade/RT vêm da instância por planta
+ * (BlueprintRoomComponent).
+ */
 export interface Componente {
-  id: string;
+  /** RoomComponent id (paleta compartilhada). */
+  id: number;
   nome: string;
   unidade: Unidade;
+  /** BlueprintRoomComponent id (instância por planta) — alvo de qtd/RT/kitQtds. */
+  instanceId: number;
+  /** Quantidade nesta planta. */
   qtd: number;
-  /** Reserva técnica (%) → qtdComRT = qtd * (1 + rt/100). */
+  /** Reserva técnica (%) nesta planta → qtdComRT = qtd * (1 + rt/100). */
   rt: number;
-  /** Id de Material/Kit padrão (crédito). */
-  padrao: string | null;
-  /** Ids de Material/Kit oferecidos como upgrade. */
-  upgrades: string[];
-  /** Override de taxa por componente — reservado (§6; sem shape definido ainda). */
-  taxaEspecifica: null;
+  /** Opção default (crédito) — Material option id. */
+  padrao: number | null;
+  /** Opções oferecidas (padrão + upgrades). */
+  options: MaterialOption[];
   /** Componente "fantasma". */
-  ghost?: boolean;
-  /** Ordem de renderização. */
-  ordem?: number;
-  /** kitId → (matId → quantitativo do sub-item). */
-  kitQtds?: Record<string, Record<string, number>>;
+  ghost: boolean;
+  ordem: number;
+  /** kitItemId → quantitativo do sub-item, nesta planta (era kitQtds). */
+  kitQtds: Record<number, number>;
 }
 
-/** Posição de um ambiente na planta (rect/poly) — reservado até haver plantas reais. */
+/** Posição de um ambiente na planta (rect/poly). */
 export type RoomShape =
   | { type: "rect"; x: number; y: number; w: number; h: number }
   | { type: "poly"; pts: [number, number][] };
@@ -64,9 +107,12 @@ export interface AmbienteImagem {
   url: string;
 }
 
-/** "Room"; pode ser compartilhado entre tipologias (Fase 5 clona). */
+/** Ambiente (Room) resolvido para uma planta (via BlueprintRoom). */
 export interface Ambiente {
-  id: string;
+  /** Room id (compartilhado entre plantas). */
+  id: number;
+  /** BlueprintRoom id (a aparição do room NESTA planta). */
+  blueprintRoomId: number;
   nome: string;
   componentes: Componente[];
   icon?: string;
@@ -76,9 +122,9 @@ export interface Ambiente {
 
 export type TipologiaStatus = "completa" | "incompleta";
 
-/** "Blueprint" / planta. */
+/** Tipologia (Blueprint). */
 export interface Tipologia {
-  id: string;
+  id: number;
   nome: string;
   metragem: number;
   descricao: string;
@@ -88,7 +134,7 @@ export interface Tipologia {
 }
 
 export interface UnitGroup {
-  id: string;
+  id: number;
   nome: string;
   torre: string;
   unidades: string[];
@@ -98,10 +144,10 @@ export type ColumnKind = "free" | "rowTotal" | "rowAvg";
 
 /** Coluna configurável do Construtor de Preço. */
 export interface BudgetColumn {
-  id: string;
+  id: number;
   nome: string;
   kind: ColumnKind;
-  /** Expressão padrão da coluna: número fixo ou fórmula iniciada por "=". */
+  /** Expressão padrão: número fixo ou fórmula iniciada por "=". */
   expr: string;
   visivel: boolean;
 }
@@ -109,7 +155,7 @@ export interface BudgetColumn {
 export interface Comment {
   autor: "construtora" | "incorporadora";
   texto: string;
-  /** "DD/MM/AAAA HH:mm" (string fixa no mock). */
+  /** "DD/MM/AAAA HH:mm". */
   data: string;
 }
 
@@ -126,7 +172,7 @@ export interface VersionChanges {
 }
 
 export interface BudgetVersion {
-  id: string;
+  id: number;
   /** "v1", "v2"… */
   label: string;
   createdAt: string;
@@ -136,29 +182,27 @@ export interface BudgetVersion {
   changes: VersionChanges;
 }
 
-/** Campos que o terceiro pode preencher via link (config do LinkFillModal). */
+/** Campos que o terceiro pode preencher via link. */
 export interface FillLinkCampos {
   mat: boolean;
   mo: boolean;
   comment: boolean;
 }
 
-/** Link tokenizado de preenchimento de custos (token real no servidor: Fase 10). */
+/** Link tokenizado de preenchimento de custos. */
 export interface FillLink {
-  id: string;
+  id: number;
   /** Segmento da URL /portal/[token]. */
   token: string;
-  tipologiaIds: string[];
+  /** Blueprints (tipologias) liberados. */
+  tipologiaIds: number[];
   campos: FillLinkCampos;
-  /** "DD/MM/AAAA" ou null (opcional). */
   prazo: string | null;
-  /** Senha em claro no mock — hash/validação no servidor entram na Fase 10. */
   senha: string | null;
-  /** "DD/MM/AAAA HH:mm". */
   criadoEm: string;
 }
 
-/** Preenchimento do terceiro por material (strings de input, como BaseCosts). */
+/** Preenchimento do terceiro por material de catálogo (strings de input). */
 export interface PortalFill {
   mat: string;
   mo: string;
@@ -177,8 +221,9 @@ export interface ProjectTaxas {
   incorporadora: number;
 }
 
+/** Empreendimento (Enterprise). */
 export interface Project {
-  id: string;
+  id: number;
   nome: string;
   torre: string;
   incorporadora: string;
@@ -186,17 +231,12 @@ export interface Project {
   status: ProjectStatus;
   enviadoEm: string | null;
   prazo: string | null;
-  /** "DD/MM/AAAA HH:mm" — gravado ao publicar (Fase 9). */
   publicadoEm?: string | null;
   totalItens: number;
-  /** NOTA: o mock original trazia o typo "itensPrenchidos" (corrigido, §6). */
   itensPreenchidos: number;
-  /** Data base INCC ("MM/AAAA"). */
   inccBase?: string;
   emailConstrutora?: string;
-  /** Taxas globais legadas (compat com o protótipo; a fonte viva são as taxColumns). */
+  /** Taxas globais legadas (fonte viva são as taxColumns). */
   taxas?: ProjectTaxas;
   taxColumns?: BudgetColumn[];
-  /** Não usado pelo store mock — tipologias vivem na coleção flat (scoping na Fase 10). */
-  tipologias?: Tipologia[];
 }

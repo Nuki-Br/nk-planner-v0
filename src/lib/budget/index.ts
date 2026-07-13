@@ -1,13 +1,10 @@
-// Motor de cálculo do Construtor de Preço — porte fiel de
-// docs/prototype-src/data.js (calcBudgetRow linhas 468-507, calcKitRow
-// linhas 308-351). Puro: sem React/DOM. O resolver de materiais é injetado
-// (o protótipo fechava sobre o global MATERIAIS); os legados calcPreco/
-// calcPrecoV2 do mock foram descartados (código morto).
+// Motor de cálculo do Construtor de Preço — puro (sem React/DOM/dados). No
+// modelo normalizado, o CHAMADOR resolve as opções (padrão + upgrade) para suas
+// entidades de catálogo e passa-as prontas; o kit traz seus sub-itens inline
+// (KitItem) e a quantidade/pendência vêm da linha por planta. Pendência é
+// derivada do custo (custo 0 = pendente), não mais de um Set externo.
 import { evalCell, normName, type Scope } from "@/lib/formula";
-import type { BudgetColumn, Componente, Kit, Material } from "@/shared/types/domain";
-
-/** Resolver injetado — o motor não importa a camada de dados. */
-export type GetMaterial = (id: string) => Material | undefined;
+import type { BudgetColumn, Componente, Kit, KitItem, Material } from "@/shared/types/domain";
 
 export interface ColResult {
   value: number;
@@ -18,10 +15,10 @@ export interface ColResult {
   overridden: boolean;
 }
 
-/** colId → resultado da célula. */
+/** colId (String(id)) → resultado da célula. */
 export type ColResults = Record<string, ColResult>;
 
-/** colId → expressão de override por célula. */
+/** colId (String(id)) → expressão de override por célula. */
 export type RowOverrides = Record<string, string>;
 
 export interface BudgetRowResult {
@@ -37,7 +34,7 @@ export interface BudgetRowResult {
 }
 
 export interface KitSubItemResult {
-  mat: Material;
+  item: KitItem;
   subQtd: number;
   valUn: number;
   line: number;
@@ -51,29 +48,21 @@ export interface KitRowResult {
   kitMaterialTotal: number;
   padCredit: number;
   qtdComRT: number;
-  /** = kitMaterialTotal. */
   valUnUpg: number;
   custoDeTroca: number;
   colResults: ColResults;
   sumFree: number;
-  /** custoDeTroca + sumFree — kit NÃO multiplica por qtdComRT (extensão já está nos sub-itens). */
+  /** custoDeTroca + sumFree — kit NÃO multiplica por qtdComRT. */
   total: number;
 }
 
-/** Chave de upgrade em PENDING_ITEMS/COMMENTS: `${compId}-${optId}`. */
-export function upgradeKey(compId: string, optId: string): string {
-  return `${compId}-${optId}`;
+/** rowKey de override/comentário: o id da opção (linha Material). */
+export function rowKey(optionId: number): string {
+  return String(optionId);
 }
 
-/** Chave de sub-item de kit em PENDING_ITEMS: `${compId}-${kitId}-${matId}`. */
-export function kitSubItemKey(compId: string, kitId: string, matId: string): string {
-  return `${compId}-${kitId}-${matId}`;
-}
-
-// Laço de colunas comum aos dois cálculos (esquerda → direita):
-//  - rowTotal/rowAvg → soma/média APENAS das colunas free à esquerda
-//  - free → override da célula se houver, senão col.expr; avalia com evalCell
-//    e injeta scope[normName(col.nome)] = value (0 em caso de erro)
+// Laço de colunas (esquerda → direita): rowTotal/rowAvg somam/mediam as colunas
+// free à esquerda; free avalia override-da-célula ou col.expr e injeta no scope.
 function runColumns(
   scope: Scope,
   cols: BudgetColumn[],
@@ -83,17 +72,18 @@ function runColumns(
   const freeLeft: number[] = [];
   let sumFree = 0;
   for (const col of cols) {
+    const cid = String(col.id);
     if (col.kind === "rowTotal" || col.kind === "rowAvg") {
       const sum = freeLeft.reduce((a, b) => a + b, 0);
       const val = col.kind === "rowAvg" ? (freeLeft.length ? sum / freeLeft.length : 0) : sum;
-      colResults[col.id] = { value: val, error: null, computed: true, overridden: false };
+      colResults[cid] = { value: val, error: null, computed: true, overridden: false };
       scope[normName(col.nome)] = val;
     } else {
-      const override = rowOverrides[col.id];
+      const override = rowOverrides[cid];
       const hasOvr = override != null;
       const expr = hasOvr ? override : col.expr || "";
       const ev = evalCell(expr, scope);
-      colResults[col.id] = { value: ev.value, error: ev.error, computed: false, overridden: hasOvr };
+      colResults[cid] = { value: ev.value, error: ev.error, computed: false, overridden: hasOvr };
       if (!ev.error) {
         sumFree += ev.value;
         freeLeft.push(ev.value);
@@ -107,24 +97,22 @@ function runColumns(
 }
 
 /**
- * Cálculo por linha (upgrade de MATERIAL) com as colunas configuráveis.
- * Retorna null quando falta padrão ou upgrade. A exclusão de itens pendentes
- * dos totais é contrato do CHAMADOR (o motor não conhece pendência).
+ * Cálculo por linha (upgrade de MATERIAL). Recebe as entidades já resolvidas
+ * (upgrade + padrão). Null quando falta padrão ou upgrade. A exclusão de itens
+ * pendentes dos totais é contrato do CHAMADOR.
  */
 export function calcBudgetRow(
-  getMaterial: GetMaterial,
   upgradeMat: Material | undefined,
-  padraoMatId: string | null,
+  padraoMat: Material | undefined,
   qtd: number,
   rt: number,
   cols: BudgetColumn[],
   rowOverrides: RowOverrides = {}
 ): BudgetRowResult | null {
-  const padrao = padraoMatId != null ? getMaterial(padraoMatId) : undefined;
-  if (!padrao || !upgradeMat) return null;
+  if (!padraoMat || !upgradeMat) return null;
   const qtdComRT = qtd * (1 + rt / 100);
   const valUnUpg = upgradeMat.custoMat + upgradeMat.custoMO;
-  const valUnPad = padrao.custoMat + padrao.custoMO;
+  const valUnPad = padraoMat.custoMat + padraoMat.custoMO;
   const custoDeTroca = valUnUpg - valUnPad;
 
   const scope: Scope = {
@@ -140,37 +128,31 @@ export function calcBudgetRow(
 }
 
 /**
- * Cálculo por linha (upgrade de KIT): as colunas monetárias do kit são a soma
- * dos sub-itens (quantitativos de comp.kitQtds); as colunas configuráveis
- * operam sobre o custo de troca agregado — já estendido pelos sub-itens, por
- * isso `total` NÃO multiplica por qtdComRT.
+ * Cálculo por linha (upgrade de KIT): as colunas monetárias são a soma dos
+ * sub-itens (quantitativos por planta em comp.kitQtds, keyed por KitItem id);
+ * `total` NÃO multiplica por qtdComRT (extensão já está nos sub-itens).
  */
 export function calcKitRow(
-  getMaterial: GetMaterial,
   kit: Kit,
   comp: Componente,
+  padraoMat: Material | undefined,
   cols: BudgetColumn[],
-  rowOverrides: RowOverrides = {},
-  pendingSet?: ReadonlySet<string>
+  rowOverrides: RowOverrides = {}
 ): KitRowResult {
-  const padrao = comp.padrao != null ? getMaterial(comp.padrao) : undefined;
-  const qtds = comp.kitQtds?.[kit.id] ?? {};
+  const qtds = comp.kitQtds ?? {};
   const subItems: KitSubItemResult[] = [];
-  for (const mid of kit.itens) {
-    const mat = getMaterial(mid);
-    if (!mat) continue;
-    const subQtd = qtds[mid] ?? 0;
-    const valUn = mat.custoMat + mat.custoMO;
+  for (const item of kit.itens) {
+    const subQtd = qtds[item.id] ?? 0;
+    const valUn = item.custoMat + item.custoMO;
     const line = valUn * subQtd;
-    const pending =
-      (pendingSet?.has(kitSubItemKey(comp.id, kit.id, mid)) ?? false) || mat.custoMat <= 0;
-    subItems.push({ mat, subQtd, valUn, line, pending });
+    const pending = item.custoMat <= 0;
+    subItems.push({ item, subQtd, valUn, line, pending });
   }
 
   const anyPending = subItems.some((s) => s.pending);
   const kitMaterialTotal = subItems.reduce((a, s) => a + s.line, 0);
   const qtdComRT = comp.qtd * (1 + comp.rt / 100);
-  const padCredit = padrao ? (padrao.custoMat + padrao.custoMO) * qtdComRT : 0;
+  const padCredit = padraoMat ? (padraoMat.custoMat + padraoMat.custoMO) * qtdComRT : 0;
   const custoDeTroca = kitMaterialTotal - padCredit;
 
   const scope: Scope = {

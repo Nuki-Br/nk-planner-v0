@@ -15,10 +15,12 @@ function CostField({
   value,
   isPending,
   onChange,
+  onCommit,
 }: {
   value: string;
   isPending: boolean;
   onChange: (v: string) => void;
+  onCommit?: (v: string) => void;
 }) {
   const filledNow = value !== "" && parseFloat(value) > 0;
   return (
@@ -32,6 +34,7 @@ function CostField({
         value={value}
         placeholder="0,00"
         onChange={(e) => onChange(e.target.value)}
+        onBlur={(e) => onCommit?.(e.target.value)}
         className={cn(
           "h-[34px] w-[118px] rounded-md border py-0 pl-[26px] pr-2 text-right text-[12.5px] outline-none",
           isPending && !filledNow
@@ -53,10 +56,12 @@ interface CostBaseViewProps {
   pendingSet: ReadonlySet<string>;
   comments: Record<string, Comment[]>;
   onOpenThread: (row: ThreadRow) => void;
+  /** Persiste o custo no material ao sair do campo (blur). */
+  onPersist: (uid: string, mat: string, mo: string) => void;
 }
 
-// Visão Custos base — grade editável de custo mat/MO por item (compartilha
-// o mesmo baseCosts da visão Preço: preencher aqui tira a pendência de lá).
+// Visão Custos base — grade editável de custo mat/MO por item. Preencher e sair
+// do campo (blur) persiste o custo no material via onPersist (e some a pendência).
 export function CostBaseView({
   tip,
   materiais,
@@ -65,6 +70,7 @@ export function CostBaseView({
   pendingSet,
   comments,
   onOpenThread,
+  onPersist,
 }: CostBaseViewProps) {
   const setField = (uid: string, fld: "mat" | "mo", val: string) =>
     setBaseCosts((p) => {
@@ -175,6 +181,7 @@ export function CostBaseView({
                             value={matV}
                             isPending={isPending}
                             onChange={(v) => setField(uid, "mat", v)}
+                            onCommit={(v) => onPersist(uid, v, moV)}
                           />
                         </td>
                         <td className="px-3 py-[5px] text-right">
@@ -182,6 +189,7 @@ export function CostBaseView({
                             value={moV}
                             isPending={isPending}
                             onChange={(v) => setField(uid, "mo", v)}
+                            onCommit={(v) => onPersist(uid, matV, v)}
                           />
                         </td>
                         <td

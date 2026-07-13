@@ -10,7 +10,7 @@ import { useActiveProjectId } from "@/lib/hooks/useActiveProject";
 import { useBudgetColumns, useUpdateBudgetColumns } from "@/lib/hooks/useBudgetColumns";
 import { useCommentThreads } from "@/lib/hooks/useComments";
 import { useKits } from "@/lib/hooks/useKits";
-import { useMateriais } from "@/lib/hooks/useMateriais";
+import { useMateriais, useUpdateMaterial } from "@/lib/hooks/useMateriais";
 import { usePendingItems } from "@/lib/hooks/usePendingItems";
 import { useProject } from "@/lib/hooks/useProjects";
 import { useTipologias } from "@/lib/hooks/useTipologias";
@@ -149,6 +149,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   const { data: versions = [] } = useVersions();
   const { data: commentThreads = {} } = useCommentThreads();
   const updateCols = useUpdateBudgetColumns();
+  const updateMaterial = useUpdateMaterial();
   const createVersion = useCreateVersion();
   const restoreVersion = useRestoreVersion();
 
@@ -266,10 +267,22 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
     });
   const setDraftField = (uid: string, fld: "mat" | "mo", val: string) =>
     setFillDraft((p) => ({ ...p, [uid]: { ...(p[uid] ?? { mat: "", mo: "" }), [fld]: val } }));
+  // Persiste o custo base digitado no material (custoMat/custoMO) — o servidor
+  // remove a pendência quando custoMat > 0, então o item deixa de aparecer como
+  // "sem custo" no catálogo, na revisão de custos e nas tipologias.
+  const persistBaseCost = (uid: string, matStr: string, moStr: string) => {
+    const custoMat = parseFloat(String(matStr).replace(",", ".")) || 0;
+    const custoMO = parseFloat(String(moStr).replace(",", ".")) || 0;
+    if (custoMat <= 0) return;
+    const m = materiais.find((x) => x.id === uid);
+    if (m && m.custoMat === custoMat && m.custoMO === custoMO) return;
+    updateMaterial.mutate({ id: uid, patch: { custoMat, custoMO } });
+  };
   const commitFill = (rowKey: string, uid: string) => {
     const d = fillDraft[uid] ?? { mat: "", mo: "" };
     setBaseCosts((p) => ({ ...p, [uid]: { mat: d.mat, mo: d.mo } }));
     closeFill(rowKey);
+    persistBaseCost(uid, d.mat, d.mo);
   };
 
   const toggleKit = (key: string) =>
@@ -547,6 +560,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
           pendingSet={pendingSet}
           comments={commentThreads}
           onOpenThread={setOpenThread}
+          onPersist={persistBaseCost}
         />
       )}
 

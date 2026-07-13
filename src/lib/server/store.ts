@@ -338,6 +338,13 @@ export async function updateMaterial(
   const exists = await prisma.material.findFirst({ where: { id, organizationId } });
   if (!exists) throw new Error("Material não encontrado.");
   const row = await prisma.material.update({ where: { id }, data: patch });
+  // Custo de material preenchido ⇒ o item deixa de ser pendente em qualquer
+  // componente/kit que o use (chaves `${compId}-${id}` ou `${compId}-${kitId}-${id}`).
+  if (patch.custoMat !== undefined && patch.custoMat > 0) {
+    await prisma.pendingItem.deleteMany({
+      where: { organizationId, key: { endsWith: `-${id}` } },
+    });
+  }
   return toMaterial(row);
 }
 

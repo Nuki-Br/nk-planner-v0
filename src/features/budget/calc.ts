@@ -1,22 +1,30 @@
-// Orquestração de cálculo do Construtor de Preço — funções puras sobre o
-// motor da Fase 1 (calcBudgetRow/calcKitRow). Porte de budget-table.jsx
-// (effMaterial/isBasePending/calcAnyRow/ambTotal/buildScopeRefs).
+// Orquestração de cálculo do Construtor de Preço — funções puras sobre o motor
+// (calcBudgetRow/calcKitRow). No modelo normalizado a linha é uma OPÇÃO
+// (MaterialOption); o custo base preenchido na sessão sobrepõe o do catálogo
+// (keyed por id de BaseMaterial); a pendência é derivada do custo (custo 0).
 import {
   calcBudgetRow,
   calcKitRow,
-  upgradeKey,
+  rowKey,
   type BudgetRowResult,
   type KitRowResult,
   type RowOverrides,
 } from "@/lib/budget";
 import { normName } from "@/lib/formula";
-import { getKit, getMaterial, isKitId } from "@/lib/data/entities";
+import { getKit, getMaterial, getOptionEntity } from "@/lib/data/entities";
 import { fmtBRL } from "@/lib/utils";
-import type { Ambiente, BudgetColumn, Componente, Kit, Material } from "@/shared/types/domain";
+import type {
+  Ambiente,
+  BudgetColumn,
+  Componente,
+  Kit,
+  Material,
+  MaterialOption,
+} from "@/shared/types/domain";
 
-/** Custos base preenchidos na tela (uid → {mat, mo} como strings de input). */
-export type BaseCosts = Record<string, { mat: string; mo: string }>;
-/** Overrides por célula: rowKey → colId → expressão. */
+/** Custos base preenchidos na tela (baseMaterialId → {mat, mo} strings de input). */
+export type BaseCosts = Record<number, { mat: string; mo: string }>;
+/** Overrides por célula: rowKey (id da opção) → colId → expressão. */
 export type CellOverrides = Record<string, RowOverrides>;
 
 export interface BudgetDeps {
@@ -25,79 +33,102 @@ export interface BudgetDeps {
   cols: BudgetColumn[];
   overrides: CellOverrides;
   baseCosts: BaseCosts;
-  pendingSet: ReadonlySet<string>;
 }
 
-/** Material efetivo: custo base preenchido na tela sobrepõe o do catálogo. */
-export function effMaterial(baseCosts: BaseCosts, uid: string, upgMat: Material): Material {
-  const f = baseCosts[uid];
+/** Custo de material efetivo (override da sessão sobrepõe o catálogo). */
+export function effCustoMat(baseCosts: BaseCosts, baseId: number, custoMat: number): number {
+  const f = baseCosts[baseId];
+  if (f && parseFloat(f.mat) > 0) return parseFloat(f.mat) || 0;
+  return custoMat;
+}
+
+/** Material com custo base da sessão aplicado. */
+export function effMaterial(baseCosts: BaseCosts, mat: Material): Material {
+  const f = baseCosts[mat.id];
   if (f && parseFloat(f.mat) > 0) {
-    return { ...upgMat, custoMat: parseFloat(f.mat) || 0, custoMO: parseFloat(f.mo) || 0 };
+    return { ...mat, custoMat: parseFloat(f.mat) || 0, custoMO: parseFloat(f.mo) || 0 };
   }
-  return upgMat;
+  return mat;
 }
 
-/** Linha pendente: chave em PENDING_ITEMS e ainda sem custo base preenchido. */
-export function isBasePending(
-  pendingSet: ReadonlySet<string>,
-  baseCosts: BaseCosts,
-  rowKey: string,
-  uid: string
-): boolean {
-  const f = baseCosts[uid];
-  return pendingSet.has(rowKey) && !(f !== undefined && parseFloat(f.mat) > 0);
+/** Kit com custo base da sessão aplicado nos sub-itens. */
+function effKit(baseCosts: BaseCosts, kit: Kit): Kit {
+  return {
+    ...kit,
+    itens: kit.itens.map((it) => {
+      const f = baseCosts[it.materialId];
+      if (f && parseFloat(f.mat) > 0) {
+        return { ...it, custoMat: parseFloat(f.mat) || 0, custoMO: parseFloat(f.mo) || 0 };
+      }
+      return it;
+    }),
+  };
+}
+
+/** Uma opção está pendente quando o custo (efetivo) de material é <= 0. */
+export function isOptionPending(deps: BudgetDeps, opt: MaterialOption): boolean {
+  const ent = getOptionEntity(deps.materiais, deps.kits, opt);
+  if (!ent) return false;
+  if (ent.isKit) {
+    return ent.itens.some((it) => effCustoMat(deps.baseCosts, it.materialId, it.custoMat) <= 0);
+  }
+  return effCustoMat(deps.baseCosts, ent.id, ent.custoMat) <= 0;
 }
 
 export type AnyRowResult =
   | { kind: "kit"; result: KitRowResult }
   | { kind: "material"; result: BudgetRowResult };
 
-/** Cálculo unificado da linha: kit → calcKitRow; material → calcBudgetRow. */
+/** Material padrão (crédito) do componente — só conta se a opção default for Material. */
+function padraoMaterial(deps: BudgetDeps, comp: Componente): Material | undefined {
+  const def = comp.options.find((o) => o.id === comp.padrao);
+  if (!def || def.isKit) return undefined;
+  const mat = getMaterial(deps.materiais, def.baseId);
+  return mat ? effMaterial(deps.baseCosts, mat) : undefined;
+}
+
+/** Cálculo unificado da linha (opção): kit → calcKitRow; material → calcBudgetRow. */
 export function calcAnyRow(
   deps: BudgetDeps,
   comp: Componente,
-  uid: string,
-  rowKey: string
+  opt: MaterialOption
 ): AnyRowResult | null {
-  const resolve = (id: string) => getMaterial(deps.materiais, id);
-  if (isKitId(uid)) {
-    const kit = getKit(deps.kits, uid);
+  const ovr = deps.overrides[rowKey(opt.id)] ?? {};
+  const padraoMat = padraoMaterial(deps, comp);
+  if (opt.isKit) {
+    const kit = getKit(deps.kits, opt.baseId);
     if (!kit) return null;
     return {
       kind: "kit",
-      result: calcKitRow(resolve, kit, comp, deps.cols, deps.overrides[rowKey] ?? {}, deps.pendingSet),
+      result: calcKitRow(effKit(deps.baseCosts, kit), comp, padraoMat, deps.cols, ovr),
     };
   }
-  const upgMat = getMaterial(deps.materiais, uid);
-  if (!upgMat) return null;
-  const eff = effMaterial(deps.baseCosts, uid, upgMat);
+  const upg = getMaterial(deps.materiais, opt.baseId);
+  if (!upg) return null;
   const result = calcBudgetRow(
-    resolve,
-    eff,
-    comp.padrao,
+    effMaterial(deps.baseCosts, upg),
+    padraoMat,
     comp.qtd,
     comp.rt,
     deps.cols,
-    deps.overrides[rowKey] ?? {}
+    ovr
   );
   return result ? { kind: "material", result } : null;
 }
 
-/** Total do ambiente — pendências (chave ou sub-item de kit) ficam de fora. */
+/** Total do ambiente — pendências (kit ou material) ficam de fora. */
 export function ambTotal(deps: BudgetDeps, amb: Ambiente): number {
   let t = 0;
   for (const comp of amb.componentes) {
-    for (const uid of comp.upgrades) {
-      const rowKey = upgradeKey(comp.id, uid);
-      if (isKitId(uid)) {
-        const r = calcAnyRow(deps, comp, uid, rowKey);
-        if (r?.kind === "kit" && !r.result.anyPending) {
-          t += r.result.total;
-        }
+    for (const opt of comp.options) {
+      if (opt.isDefault) continue;
+      if (opt.isKit) {
+        const r = calcAnyRow(deps, comp, opt);
+        if (r?.kind === "kit" && !r.result.anyPending) t += r.result.total;
         continue;
       }
-      if (isBasePending(deps.pendingSet, deps.baseCosts, rowKey, uid)) continue;
-      const r = calcAnyRow(deps, comp, uid, rowKey);
+      if (isOptionPending(deps, opt)) continue;
+      const r = calcAnyRow(deps, comp, opt);
       if (r?.kind === "material") t += r.result.total;
     }
   }
@@ -135,7 +166,7 @@ export function buildScopeRefs(
   for (let j = 0; j < colIdx; j++) {
     const cj = cols[j];
     if (!cj) continue;
-    const cr = r.colResults[cj.id];
+    const cr = r.colResults[String(cj.id)];
     const tok = normName(cj.nome);
     const v = cr && !cr.error ? cr.value : 0;
     scope[tok] = v;
