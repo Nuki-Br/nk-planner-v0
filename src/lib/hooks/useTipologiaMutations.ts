@@ -58,24 +58,24 @@ export function useCreateTipologia() {
 
 export function useUpdateTipologia() {
   return useTreeMutation(
-    ({ id, patch }: { id: string; patch: Partial<TipologiaInput & Pick<Tipologia, "status">> }) =>
+    ({ id, patch }: { id: number; patch: Partial<TipologiaInput & Pick<Tipologia, "status">> }) =>
       updateTipologia(id, patch)
   );
 }
 
 export function useDeleteTipologia() {
-  return useTreeMutation((id: string) => deleteTipologia(id));
+  return useTreeMutation((id: number) => deleteTipologia(id));
 }
 
 export function useDuplicateTipologia() {
-  return useTreeMutation((id: string) => duplicateTipologia(id));
+  return useTreeMutation((id: number) => duplicateTipologia(id));
 }
 
 // ─── Ambientes ────────────────────────────────────────────────────────
 
 export function useCreateAmbiente() {
   return useTreeMutation(
-    ({ tipologiaId, input }: { tipologiaId: string; input: AmbienteInput }) =>
+    ({ tipologiaId, input }: { tipologiaId: number; input: AmbienteInput }) =>
       createAmbiente(tipologiaId, input)
   );
 }
@@ -87,8 +87,8 @@ export function useUpdateAmbiente() {
       ambienteId,
       patch,
     }: {
-      tipologiaId: string;
-      ambienteId: string;
+      tipologiaId: number;
+      ambienteId: number;
       patch: Partial<AmbienteInput>;
     }) => updateAmbiente(tipologiaId, ambienteId, patch)
   );
@@ -96,7 +96,7 @@ export function useUpdateAmbiente() {
 
 export function useDeleteAmbiente() {
   return useTreeMutation(
-    ({ tipologiaId, ambienteId }: { tipologiaId: string; ambienteId: string }) =>
+    ({ tipologiaId, ambienteId }: { tipologiaId: number; ambienteId: number }) =>
       deleteAmbiente(tipologiaId, ambienteId),
     [queryKeys.sharedAmbientes]
   );
@@ -104,14 +104,14 @@ export function useDeleteAmbiente() {
 
 export function useCloneAmbiente() {
   return useTreeMutation(
-    ({ tipologiaId, ambienteId }: { tipologiaId: string; ambienteId: string }) =>
+    ({ tipologiaId, ambienteId }: { tipologiaId: number; ambienteId: number }) =>
       cloneAmbiente(tipologiaId, ambienteId)
   );
 }
 
 export function useReorderAmbientes() {
   return useTreeMutation(
-    ({ tipologiaId, orderedIds }: { tipologiaId: string; orderedIds: string[] }) =>
+    ({ tipologiaId, orderedIds }: { tipologiaId: number; orderedIds: number[] }) =>
       reorderAmbientes(tipologiaId, orderedIds)
   );
 }
@@ -126,13 +126,11 @@ export function useLinkAmbiente() {
   return useTreeMutation(
     ({
       targetTipologiaId,
-      srcTipologiaId,
       srcAmbienteId,
     }: {
-      targetTipologiaId: string;
-      srcTipologiaId: string;
-      srcAmbienteId: string;
-    }) => linkAmbiente(targetTipologiaId, srcTipologiaId, srcAmbienteId),
+      targetTipologiaId: number;
+      srcAmbienteId: number;
+    }) => linkAmbiente(targetTipologiaId, srcAmbienteId),
     [queryKeys.sharedAmbientes]
   );
 }
@@ -140,9 +138,9 @@ export function useLinkAmbiente() {
 // ─── Componentes ──────────────────────────────────────────────────────
 
 interface CompPath {
-  tipologiaId: string;
-  ambienteId: string;
-  componenteId: string;
+  tipologiaId: number;
+  ambienteId: number;
+  componenteId: number;
 }
 
 export function useCreateComponente() {
@@ -152,8 +150,8 @@ export function useCreateComponente() {
       ambienteId,
       input,
     }: {
-      tipologiaId: string;
-      ambienteId: string;
+      tipologiaId: number;
+      ambienteId: number;
       input: ComponenteInput;
     }) => createComponente(tipologiaId, ambienteId, input)
   );
@@ -178,22 +176,22 @@ export function useReorderComponentes() {
       ambienteId,
       orderedIds,
     }: {
-      tipologiaId: string;
-      ambienteId: string;
-      orderedIds: string[];
+      tipologiaId: number;
+      ambienteId: number;
+      orderedIds: number[];
     }) => reorderComponentes(tipologiaId, ambienteId, orderedIds)
   );
 }
 
 export function useSetPadrao() {
-  return useTreeMutation(({ tipologiaId, ambienteId, componenteId, padraoId }: CompPath & { padraoId: string | null }) =>
-    setPadrao(tipologiaId, ambienteId, componenteId, padraoId)
+  return useTreeMutation(({ tipologiaId, ambienteId, componenteId, padraoBaseId }: CompPath & { padraoBaseId: number | null }) =>
+    setPadrao(tipologiaId, ambienteId, componenteId, padraoBaseId)
   );
 }
 
 export function useAddUpgrade() {
-  return useTreeMutation(({ tipologiaId, ambienteId, componenteId, upgradeId }: CompPath & { upgradeId: string }) =>
-    addUpgrade(tipologiaId, ambienteId, componenteId, upgradeId)
+  return useTreeMutation(({ tipologiaId, ambienteId, componenteId, baseId }: CompPath & { baseId: number }) =>
+    addUpgrade(tipologiaId, ambienteId, componenteId, baseId)
   );
 }
 
@@ -203,16 +201,16 @@ export function useReplaceUpgrade() {
       tipologiaId,
       ambienteId,
       componenteId,
-      oldId,
-      newId,
-    }: CompPath & { oldId: string; newId: string }) =>
-      replaceUpgrade(tipologiaId, ambienteId, componenteId, oldId, newId)
+      optionId,
+      newBaseId,
+    }: CompPath & { optionId: number; newBaseId: number }) =>
+      replaceUpgrade(tipologiaId, ambienteId, componenteId, optionId, newBaseId)
   );
 }
 
 export function useRemoveUpgrade() {
-  return useTreeMutation(({ tipologiaId, ambienteId, componenteId, upgradeId }: CompPath & { upgradeId: string }) =>
-    removeUpgrade(tipologiaId, ambienteId, componenteId, upgradeId)
+  return useTreeMutation(({ tipologiaId, ambienteId, componenteId, optionId }: CompPath & { optionId: number }) =>
+    removeUpgrade(tipologiaId, ambienteId, componenteId, optionId)
   );
 }
 
@@ -222,9 +220,8 @@ export function useSetKitQtds() {
       tipologiaId,
       ambienteId,
       componenteId,
-      kitId,
       qtds,
-    }: CompPath & { kitId: string; qtds: Record<string, number> }) =>
-      setKitQtds(tipologiaId, ambienteId, componenteId, kitId, qtds)
+    }: CompPath & { qtds: Record<number, number> }) =>
+      setKitQtds(tipologiaId, ambienteId, componenteId, qtds)
   );
 }

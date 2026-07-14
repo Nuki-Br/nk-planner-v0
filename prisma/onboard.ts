@@ -75,37 +75,36 @@ async function main(): Promise<void> {
     create: { authUserId, email, role: "owner", organizationId: orgId },
   });
 
-  // ── Projeto âncora vazio (só se a org ainda não tiver projeto) ──
-  // getActiveProjectId resolve o projeto ativo da org por este registro. As
-  // colunas de cálculo recebem ids namespaced pela org — BudgetColumn.id é PK
-  // GLOBAL, então não podem reusar os ids default (tc1/tc2/tc3) de outra org.
-  const existing = await prisma.project.findFirst({ where: { organizationId: orgId } });
+  // ── Empreendimento âncora vazio (só se a org ainda não tiver um) ──
+  // getActiveProjectId resolve o empreendimento ativo (o mais antigo). Ids Int
+  // autoincrement — as colunas de cálculo não precisam mais de namespacing por org.
+  const existing = await prisma.enterprise.findFirst({ where: { OrganizationId: orgId } });
   if (!existing) {
-    const projectId = `${orgId}-prj-1`;
-    await prisma.project.create({
+    const enterprise = await prisma.enterprise.create({
       data: {
-        id: projectId,
-        nome: projectNome,
-        torre: "",
-        incorporadora: orgName,
-        construtora: "",
-        status: "rascunho",
-        totalItens: 0,
-        itensPreenchidos: 0,
-        organizationId: orgId,
-        taxColumns: {
+        Name: projectNome,
+        TowerLabel: "",
+        Developer: orgName,
+        Builder: "",
+        Status: "rascunho",
+        TotalItems: 0,
+        FilledItems: 0,
+        OrganizationId: orgId,
+        BudgetColumns: {
           create: TAX_COLUMNS_DEFAULT.map((c, i) => ({
-            ...c,
-            id: `${projectId}-${c.id}`,
-            ordem: i,
-            organizationId: orgId,
+            Name: c.nome,
+            Kind: c.kind,
+            Expr: c.expr,
+            Visible: c.visivel,
+            Position: i,
           })),
         },
       },
+      select: { Id: true },
     });
-    console.log(`  · Projeto âncora criado: "${projectNome}" (${projectId})`);
+    console.log(`  · Empreendimento âncora criado: "${projectNome}" (#${enterprise.Id})`);
   } else {
-    console.log(`  · Org já possui projeto (${existing.id}) — mantido.`);
+    console.log(`  · Org já possui empreendimento (#${existing.Id}) — mantido.`);
   }
 
   console.log(`✓ Onboarding OK — org "${orgName}" (${orgId}), login ${email}.`);

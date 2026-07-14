@@ -8,7 +8,7 @@ import { getMaterial } from "@/lib/data/entities";
 import { useCreateKit, useUpdateKit } from "@/lib/hooks/useKits";
 import { cn } from "@/lib/utils";
 import { CAT_COLORS, CATEGORIAS, type Categoria } from "@/shared/constants/categorias";
-import type { Kit, Material } from "@/shared/types/domain";
+import type { Kit, KitItem, Material } from "@/shared/types/domain";
 
 interface KitModalProps {
   open: boolean;
@@ -43,7 +43,7 @@ export function KitModal({ open, onClose, kit, materiais }: KitModalProps) {
 
   const [nome, setNome] = React.useState("");
   const [categoria, setCategoria] = React.useState("");
-  const [itens, setItens] = React.useState<string[]>([]);
+  const [itens, setItens] = React.useState<KitItem[]>([]);
   const [search, setSearch] = React.useState("");
 
   React.useEffect(() => {
@@ -54,12 +54,29 @@ export function KitModal({ open, onClose, kit, materiais }: KitModalProps) {
     setSearch("");
   }, [open, kit]);
 
-  const addItem = (id: string) => setItens((xs) => (xs.includes(id) ? xs : [...xs, id]));
-  const removeItem = (id: string) => setItens((xs) => xs.filter((x) => x !== id));
+  const addItem = (m: Material) =>
+    setItens((xs) =>
+      xs.some((it) => it.materialId === m.id)
+        ? xs
+        : [
+            ...xs,
+            {
+              id: 0,
+              materialId: m.id,
+              nome: m.nome,
+              fabricante: m.fabricante,
+              unidade: m.unidade,
+              custoMat: m.custoMat,
+              custoMO: m.custoMO,
+            },
+          ]
+    );
+  const removeItem = (materialId: number) =>
+    setItens((xs) => xs.filter((it) => it.materialId !== materialId));
 
   const candidates = materiais
     .filter((m) => categoria === "" || m.categoria === categoria)
-    .filter((m) => !itens.includes(m.id))
+    .filter((m) => !itens.some((it) => it.materialId === m.id))
     .filter(
       (m) =>
         m.nome.toLowerCase().includes(search.toLowerCase()) ||
@@ -131,12 +148,12 @@ export function KitModal({ open, onClose, kit, materiais }: KitModalProps) {
             </div>
           ) : (
             <div className="mb-3.5 flex flex-col gap-1.5">
-              {itens.map((mid) => {
-                const m = getMaterial(materiais, mid);
+              {itens.map((it) => {
+                const m = getMaterial(materiais, it.materialId);
                 if (!m) return null;
                 return (
                   <div
-                    key={mid}
+                    key={it.materialId}
                     className="flex items-center gap-2.5 rounded-lg border border-neutral-gray-4 bg-neutral-gray-2 px-3 py-[9px]"
                   >
                     <span className="h-[7px] w-[7px] shrink-0 rounded-full bg-primary-7" />
@@ -162,7 +179,7 @@ export function KitModal({ open, onClose, kit, materiais }: KitModalProps) {
                     </span>
                     <button
                       type="button"
-                      onClick={() => removeItem(mid)}
+                      onClick={() => removeItem(it.materialId)}
                       title="Remover do kit"
                       className="flex p-1 text-neutral-gray-7 hover:text-functional-error"
                     >
@@ -194,7 +211,7 @@ export function KitModal({ open, onClose, kit, materiais }: KitModalProps) {
               <button
                 key={m.id}
                 type="button"
-                onClick={() => addItem(m.id)}
+                onClick={() => addItem(m)}
                 className="flex w-full items-center gap-3 border-b border-neutral-gray-4 px-3 py-[9px] text-left last:border-b-0 hover:bg-primary-1"
               >
                 <Icon name="plus" size={14} className="shrink-0 text-primary-7" />

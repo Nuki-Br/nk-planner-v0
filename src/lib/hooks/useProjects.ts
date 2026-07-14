@@ -16,10 +16,10 @@ export function useProjects() {
   return useQuery({ queryKey: queryKeys.projects, queryFn: listProjects });
 }
 
-export function useProject(id: string | null) {
+export function useProject(id: number | null) {
   return useQuery({
-    queryKey: queryKeys.project(id ?? ""),
-    queryFn: () => getProject(id ?? ""),
+    queryKey: queryKeys.project(id ?? 0),
+    queryFn: () => getProject(id ?? 0),
     enabled: id !== null,
   });
 }
@@ -27,7 +27,7 @@ export function useProject(id: string | null) {
 export function useUpdateProject() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, patch }: { id: string; patch: ProjectPatch }) => updateProject(id, patch),
+    mutationFn: ({ id, patch }: { id: number; patch: ProjectPatch }) => updateProject(id, patch),
     onSuccess: (project) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.projects });
       void queryClient.invalidateQueries({ queryKey: queryKeys.project(project.id) });
@@ -39,7 +39,7 @@ export function useUpdateProject() {
 export function usePublishProject() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => publishProject(id),
+    mutationFn: (id: number) => publishProject(id),
     onSuccess: (project) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.projects });
       void queryClient.invalidateQueries({ queryKey: queryKeys.project(project.id) });

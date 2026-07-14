@@ -4,7 +4,7 @@ import React from "react";
 import { useRouter } from "next/navigation";
 
 import { Button, Icon, LoadingState, PageHeader, StatusBadge } from "@/components/ui";
-import { upgradeKey } from "@/lib/budget";
+import { rowKey } from "@/lib/budget";
 import { getMaterial } from "@/lib/data/entities";
 import { useActiveProjectId } from "@/lib/hooks/useActiveProject";
 import { useCommentThreads } from "@/lib/hooks/useComments";
@@ -23,7 +23,7 @@ import type { Comment, Tipologia } from "@/shared/types/domain";
 
 interface ReviewRow {
   key: string;
-  matId: string;
+  matId: number;
   ambiente: string;
   componente: string;
   especificacao: string;
@@ -48,10 +48,12 @@ function buildRows(
   const rows: ReviewRow[] = [];
   for (const amb of tip.ambientes) {
     for (const comp of amb.componentes) {
-      for (const uid of comp.upgrades) {
-        const mat = getMaterial(materiais ?? [], uid);
-        if (!mat) continue; // kits ficam de fora da revisão (custos são dos sub-itens)
-        const key = upgradeKey(comp.id, mat.id);
+      for (const opt of comp.options) {
+        if (opt.isDefault) continue; // só upgrades (o padrão é crédito, não linha)
+        if (opt.isKit) continue; // kits ficam de fora da revisão (custos são dos sub-itens)
+        const mat = getMaterial(materiais ?? [], opt.baseId);
+        if (!mat) continue;
+        const key = rowKey(opt.id);
         const ov = overrides[key] ?? {};
         const custoMat = ov.mat != null ? parseFloat(ov.mat) || 0 : mat.custoMat;
         const custoMO = ov.mo != null ? parseFloat(ov.mo) || 0 : mat.custoMO;
@@ -61,7 +63,7 @@ function buildRows(
         const isModified = ov.mat != null || ov.mo != null;
         rows.push({
           key,
-          matId: mat.id,
+          matId: opt.baseId,
           ambiente: amb.nome,
           componente: comp.nome,
           especificacao: mat.nome,
@@ -116,7 +118,7 @@ export function CostReviewScreen() {
   const { data: threads = {} } = useCommentThreads();
   const updateMaterial = useUpdateMaterial();
 
-  const [tipFilter, setTipFilter] = React.useState<string | null>(null);
+  const [tipFilter, setTipFilter] = React.useState<number | null>(null);
   const [openThread, setOpenThread] = React.useState<string | null>(null);
   const [editCell, setEditCell] = React.useState<EditCellRef | null>(null);
   const [overrides, setOverrides] = React.useState<CostOverrides>({});
@@ -144,13 +146,12 @@ export function CostReviewScreen() {
 
   // Persiste os overrides no catálogo (updateMaterial) e limpa a edição.
   const handleSave = async () => {
-    const patches = new Map<string, { custoMat?: number; custoMO?: number }>();
-    for (const [rowKey, ov] of Object.entries(overrides)) {
+    const patches = new Map<number, { custoMat?: number; custoMO?: number }>();
+    for (const [key, ov] of Object.entries(overrides)) {
       if (!ov || (ov.mat == null && ov.mo == null)) continue;
-      const row = rows.find((r) => r.key === rowKey);
-      // Override de outra tipologia: resolve o material pelo sufixo da chave.
-      const matId = row?.matId ?? materiais.find((m) => rowKey.endsWith(`-${m.id}`))?.id;
-      if (!matId) continue;
+      // A linha já conhece seu material (matId = baseId da opção).
+      const matId = rows.find((r) => r.key === key)?.matId;
+      if (matId == null) continue;
       const patch = patches.get(matId) ?? {};
       if (ov.mat != null) patch.custoMat = parseFloat(ov.mat) || 0;
       if (ov.mo != null) patch.custoMO = parseFloat(ov.mo) || 0;

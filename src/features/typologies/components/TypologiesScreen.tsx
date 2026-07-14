@@ -57,7 +57,10 @@ import { NewTipologiaModal } from "./modals/NewTipologiaModal";
 const totalComps = (tip: Tipologia) =>
   tip.ambientes.reduce((a, b) => a + b.componentes.length, 0);
 const configuredComps = (tip: Tipologia) =>
-  tip.ambientes.reduce((a, b) => a + b.componentes.filter((c) => c.upgrades.length > 0).length, 0);
+  tip.ambientes.reduce(
+    (a, b) => a + b.componentes.filter((c) => c.options.some((o) => !o.isDefault)).length,
+    0
+  );
 
 // Tela 3 — Tipologias e componentes (protótipo: TypologiesScreen).
 // Master-detail: lista de tipologias à esquerda, acordeão de ambientes →
@@ -75,11 +78,11 @@ export function TypologiesScreen() {
   const { data: project } = useProject(activeProjectId);
 
   // Seleção: default = TIPOLOGIAS[1] como no protótipo (Planta B).
-  const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [selectedId, setSelectedId] = React.useState<number | null>(null);
   const selectedTip =
     tipologias.find((t) => t.id === selectedId) ?? tipologias[1] ?? tipologias[0] ?? null;
 
-  const [expandedRooms, setExpandedRooms] = React.useState<string[]>([]);
+  const [expandedRooms, setExpandedRooms] = React.useState<number[]>([]);
   const bootstrappedRef = React.useRef(false);
   React.useEffect(() => {
     if (bootstrappedRef.current || !selectedTip) return;
@@ -131,35 +134,37 @@ export function TypologiesScreen() {
     );
   const tip = selectedTip;
 
-  const toggleRoom = (id: string) =>
+  const toggleRoom = (id: number) =>
     setExpandedRooms((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   // ── Compartilhamento ──
   const ambShared = sharedInfo?.ambShared ?? {};
   const sharedReg = sharedInfo?.sharedReg ?? {};
-  const tipNameById = (id: string) => tipologias.find((t) => t.id === id)?.nome ?? id;
-  const getSourceSid = (ambId: string) => ambShared[ambId] ?? `sh-${ambId}`;
-  const sharedInfoFor = (ambId: string): SharedBadgeInfo | null => {
-    const sid = ambShared[ambId];
+  const tipNameById = (id: string) => tipologias.find((t) => String(t.id) === id)?.nome ?? id;
+  const getSourceSid = (roomId: number) => ambShared[String(roomId)] ?? String(roomId);
+  const sharedInfoFor = (roomId: number): SharedBadgeInfo | null => {
+    const sid = ambShared[String(roomId)];
     if (sid === undefined) return null;
     const reg = sharedReg[sid];
     if (!reg || reg.tips.length < 2) return null;
     return {
       allNames: reg.tips.map(tipNameById),
-      otherNames: reg.tips.filter((id) => id !== tip.id).map(tipNameById),
+      otherNames: reg.tips.filter((id) => id !== String(tip.id)).map(tipNameById),
     };
   };
   const linkedShareIds = new Set(
-    tip.ambientes.map((a) => ambShared[a.id]).filter((sid): sid is string => sid !== undefined)
+    tip.ambientes
+      .map((a) => ambShared[String(a.id)])
+      .filter((sid): sid is string => sid !== undefined)
   );
 
   // ── Handlers ──
   const handleAmbDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    const ids = tip.ambientes.map((a) => a.id);
-    const from = ids.indexOf(String(active.id));
-    const to = ids.indexOf(String(over.id));
+    const ids = tip.ambientes.map((a) => a.blueprintRoomId);
+    const from = ids.indexOf(Number(active.id));
+    const to = ids.indexOf(Number(over.id));
     if (from < 0 || to < 0) return;
     reorderAmbientes.mutate({ tipologiaId: tip.id, orderedIds: arrayMove(ids, from, to) });
   };
@@ -169,7 +174,7 @@ export function TypologiesScreen() {
       updateAmbiente.mutate(
         {
           tipologiaId: tip.id,
-          ambienteId: ambModal.amb.id,
+          ambienteId: ambModal.amb.blueprintRoomId,
           patch: { nome: value.nome, icon: value.icon, imagem: value.imagem },
         },
         { onSuccess: () => setAmbModal(null) }
@@ -192,7 +197,7 @@ export function TypologiesScreen() {
     updateComponente.mutate(
       {
         tipologiaId: tip.id,
-        ambienteId: editComp.amb.id,
+        ambienteId: editComp.amb.blueprintRoomId,
         componenteId: editComp.comp.id,
         patch: value,
       },
@@ -200,9 +205,9 @@ export function TypologiesScreen() {
     );
   };
 
-  const handleLink = (srcTip: Tipologia, srcAmb: Ambiente) => {
+  const handleLink = (_srcTip: Tipologia, srcAmb: Ambiente) => {
     linkAmbiente.mutate(
-      { targetTipologiaId: tip.id, srcTipologiaId: srcTip.id, srcAmbienteId: srcAmb.id },
+      { targetTipologiaId: tip.id, srcAmbienteId: srcAmb.blueprintRoomId },
       {
         onSuccess: (a) => {
           setExpandedRooms((r) => [...r, a.id]);
@@ -341,7 +346,7 @@ export function TypologiesScreen() {
               onDragEnd={handleAmbDragEnd}
             >
               <SortableContext
-                items={tip.ambientes.map((a) => a.id)}
+                items={tip.ambientes.map((a) => a.blueprintRoomId)}
                 strategy={verticalListSortingStrategy}
               >
                 {tip.ambientes.map((amb) => (
@@ -355,7 +360,7 @@ export function TypologiesScreen() {
                     onToggle={() => toggleRoom(amb.id)}
                     onEditAmb={(a) => setAmbModal({ mode: "edit", amb: a })}
                     onCloneAmb={(a) =>
-                      cloneAmbiente.mutate({ tipologiaId: tip.id, ambienteId: a.id })
+                      cloneAmbiente.mutate({ tipologiaId: tip.id, ambienteId: a.blueprintRoomId })
                     }
                     onDeleteAmb={setDeleteAmb}
                     onAddComp={setAddCompAmb}
@@ -366,7 +371,7 @@ export function TypologiesScreen() {
                     onReorderComps={(a, orderedIds) =>
                       reorderComponentes.mutate({
                         tipologiaId: tip.id,
-                        ambienteId: a.id,
+                        ambienteId: a.blueprintRoomId,
                         orderedIds,
                       })
                     }
@@ -454,7 +459,7 @@ export function TypologiesScreen() {
               onPress={() => {
                 if (!deleteAmb) return;
                 deleteAmbiente.mutate(
-                  { tipologiaId: tip.id, ambienteId: deleteAmb.id },
+                  { tipologiaId: tip.id, ambienteId: deleteAmb.blueprintRoomId },
                   { onSuccess: () => setDeleteAmb(null) }
                 );
               }}

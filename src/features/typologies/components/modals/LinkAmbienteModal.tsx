@@ -17,7 +17,7 @@ interface LinkAmbienteModalProps {
   tipologias: Tipologia[];
   /** shareIds já vinculados nesta tipologia (evita vínculo duplicado). */
   linkedShareIds: Set<string>;
-  getSourceSid: (ambId: string) => string;
+  getSourceSid: (roomId: number) => string;
   onPick: (srcTip: Tipologia, srcAmb: Ambiente) => void;
 }
 

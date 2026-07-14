@@ -4,15 +4,16 @@ import React from "react";
 import { Input as HeroInput } from "@heroui/react";
 
 import { Button, Icon, Modal } from "@/components/ui";
-import { getEntity, getMaterial, isKitId } from "@/lib/data/entities";
+import { getMaterial, type Entity } from "@/lib/data/entities";
 import { cn, fmtBRL, parseBR } from "@/lib/utils";
 import { KitBadge } from "@/features/catalog/components/KitBadge";
 import type { Categoria, Kit, Material } from "@/shared/types/domain";
 
 export interface SelectionResult {
-  id: string;
-  /** Quantitativos por sub-item quando a seleção é um kit. */
-  kitQtds: Record<string, number> | null;
+  /** Id de catálogo (BaseMaterial) escolhido. */
+  id: number;
+  /** Quantitativos por sub-item (keyed por KitItem id) quando a seleção é um kit. */
+  kitQtds: Record<number, number> | null;
 }
 
 interface SelectEntityModalProps {
@@ -23,10 +24,10 @@ interface SelectEntityModalProps {
   categoria: Categoria;
   materiais: Material[];
   kits: Kit[];
-  /** Ids excluídos da lista (padrão atual e upgrades já usados). */
-  excludeIds: Set<string>;
-  /** Quantitativos já gravados (pré-preenche o passo 2). */
-  existingKitQtds: Record<string, Record<string, number>>;
+  /** Ids de catálogo excluídos da lista (padrão atual e upgrades já usados). */
+  excludeIds: Set<number>;
+  /** Quantitativos já gravados (keyed por KitItem id) — pré-preenche o passo 2. */
+  existingKitQtds: Record<number, number>;
   compNome: string;
   tipNome: string;
   confirming?: boolean;
@@ -49,8 +50,8 @@ export function SelectEntityModal({
   confirming,
 }: SelectEntityModalProps) {
   const [step, setStep] = React.useState<1 | 2>(1);
-  const [picked, setPicked] = React.useState<string | null>(null);
-  const [qtds, setQtds] = React.useState<Record<string, string>>({});
+  const [picked, setPicked] = React.useState<number | null>(null);
+  const [qtds, setQtds] = React.useState<Record<number, string>>({});
   const [search, setSearch] = React.useState("");
 
   React.useEffect(() => {
@@ -61,13 +62,12 @@ export function SelectEntityModal({
     setSearch("");
   }, [open]);
 
-  const candidates = [
-    ...kits.filter((k) => k.categoria === categoria).map((k) => getEntity(materiais, kits, k.id)),
+  const candidates: Entity[] = [
+    ...kits.filter((k) => k.categoria === categoria).map((k): Entity => ({ ...k, isKit: true })),
     ...materiais
       .filter((m) => m.categoria === categoria)
-      .map((m) => getEntity(materiais, kits, m.id)),
+      .map((m): Entity => ({ ...m, isKit: false })),
   ]
-    .filter((e): e is NonNullable<typeof e> => e !== null)
     .filter((e) => !excludeIds.has(e.id))
     .filter(
       (e) =>
@@ -75,14 +75,14 @@ export function SelectEntityModal({
         e.codigo.toLowerCase().includes(search.toLowerCase())
     );
 
-  const pickedKit = picked !== null && isKitId(picked) ? kits.find((k) => k.id === picked) : null;
+  const pickedKit = picked !== null ? (kits.find((k) => k.id === picked) ?? null) : null;
 
   const goToQtds = () => {
-    if (!pickedKit || picked === null) return;
-    const seeded: Record<string, string> = {};
-    for (const mid of pickedKit.itens) {
-      const existing = existingKitQtds[picked]?.[mid];
-      seeded[mid] = existing !== undefined ? String(existing).replace(".", ",") : "";
+    if (!pickedKit) return;
+    const seeded: Record<number, string> = {};
+    for (const it of pickedKit.itens) {
+      const existing = existingKitQtds[it.id];
+      seeded[it.id] = existing !== undefined ? String(existing).replace(".", ",") : "";
     }
     setQtds(seeded);
     setStep(2);
@@ -90,7 +90,7 @@ export function SelectEntityModal({
 
   const confirmPick = () => {
     if (picked === null) return;
-    if (isKitId(picked)) {
+    if (pickedKit) {
       goToQtds();
       return;
     }
@@ -99,8 +99,8 @@ export function SelectEntityModal({
 
   const confirmKitQtds = () => {
     if (picked === null) return;
-    const parsed: Record<string, number> = {};
-    for (const [mid, raw] of Object.entries(qtds)) parsed[mid] = parseBR(raw);
+    const parsed: Record<number, number> = {};
+    for (const [mid, raw] of Object.entries(qtds)) parsed[Number(mid)] = parseBR(raw);
     onConfirm({ id: picked, kitQtds: parsed });
   };
 
@@ -132,7 +132,7 @@ export function SelectEntityModal({
               Cancelar
             </Button>
             <Button onPress={confirmPick} isDisabled={picked === null} isLoading={confirming}>
-              {picked !== null && isKitId(picked)
+              {pickedKit
                 ? "Continuar →"
                 : mode === "padrao"
                   ? "Definir padrão"
@@ -230,12 +230,12 @@ export function SelectEntityModal({
             .
           </p>
           <div className="flex flex-col gap-2">
-            {pickedKit.itens.map((mid) => {
-              const m = getMaterial(materiais, mid);
+            {pickedKit.itens.map((it) => {
+              const m = getMaterial(materiais, it.materialId);
               if (!m) return null;
               return (
                 <div
-                  key={mid}
+                  key={it.id}
                   className="flex items-center gap-3 rounded-lg border border-neutral-gray-4 px-3 py-2"
                 >
                   <div className="min-w-0 flex-1">
@@ -246,9 +246,9 @@ export function SelectEntityModal({
                   </div>
                   <div className="flex items-center gap-1.5">
                     <input
-                      value={qtds[mid] ?? ""}
+                      value={qtds[it.id] ?? ""}
                       onChange={(e) =>
-                        setQtds((prev) => ({ ...prev, [mid]: e.target.value }))
+                        setQtds((prev) => ({ ...prev, [it.id]: e.target.value }))
                       }
                       placeholder="0,00"
                       className="h-9 w-[90px] rounded-lg border border-neutral-gray-5 px-2.5 text-right text-[13px] text-neutral-gray-11 outline-none focus:border-primary-7"

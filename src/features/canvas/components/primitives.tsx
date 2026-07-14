@@ -184,7 +184,7 @@ export function MenuRow({
   add = false,
 }: {
   materiais: Material[];
-  swatchId?: string | null;
+  swatchId?: number | null;
   isKit?: boolean;
   label: string;
   name?: string;
@@ -193,7 +193,7 @@ export function MenuRow({
   add?: boolean;
 }) {
   const [h, setH] = React.useState(false);
-  const mat = swatchId && !isKit ? getMaterial(materiais, swatchId) : null;
+  const mat = swatchId != null && !isKit ? getMaterial(materiais, swatchId) : null;
   return (
     <div
       onMouseEnter={() => setH(true)}

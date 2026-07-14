@@ -4,12 +4,11 @@ import React from "react";
 import { useRouter } from "next/navigation";
 
 import { Button, Card, Icon, LoadingState, Modal, PageHeader, StatusBadge } from "@/components/ui";
-import { calcBudgetRow, upgradeKey } from "@/lib/budget";
+import { calcBudgetRow } from "@/lib/budget";
 import { getMaterial } from "@/lib/data/entities";
 import { useActiveProjectId } from "@/lib/hooks/useActiveProject";
 import { useBudgetColumns } from "@/lib/hooks/useBudgetColumns";
 import { useMateriais } from "@/lib/hooks/useMateriais";
-import { usePendingItems } from "@/lib/hooks/usePendingItems";
 import { useProject, usePublishProject } from "@/lib/hooks/useProjects";
 import { useTipologias } from "@/lib/hooks/useTipologias";
 import { cn, fmtBRL } from "@/lib/utils";
@@ -61,7 +60,6 @@ export function PublishScreen() {
   const { data: project, isLoading: projectLoading } = useProject(projectId);
   const { data: tipologias = [] } = useTipologias();
   const { data: materiais = [] } = useMateriais();
-  const { data: pendingSet = new Set<string>() } = usePendingItems();
   const { data: cols = [] } = useBudgetColumns(projectId);
   const publish = usePublishProject();
 
@@ -70,19 +68,23 @@ export function PublishScreen() {
   if (!projectId || projectLoading) return <LoadingState label="Carregando publicação…" />;
   if (!project) return null;
 
-  const resolve = (id: string): Material | undefined => getMaterial(materiais, id);
+  const resolve = (id: number): Material | undefined => getMaterial(materiais, id);
 
   // Preço mín./máx. por tipologia sobre os upgrades com custo (kits ficam de
-  // fora, como no protótipo — o preço deles depende dos quantitativos).
+  // fora, como no protótipo — o preço deles depende dos quantitativos). O padrão
+  // (crédito) é a opção default do componente, resolvida como material.
   const tipSummary = tipologias.map((tip: Tipologia) => {
     const totals: number[] = [];
     for (const amb of tip.ambientes) {
       for (const comp of amb.componentes) {
-        for (const uid of comp.upgrades) {
-          const mat = getMaterial(materiais, uid);
-          if (!mat) continue;
-          if (pendingSet.has(upgradeKey(comp.id, uid))) continue;
-          const r = calcBudgetRow(resolve, mat, comp.padrao, comp.qtd, comp.rt, cols, {});
+        const def = comp.options.find((o) => o.isDefault);
+        const padMat = def && !def.isKit ? resolve(def.baseId) : undefined;
+        for (const opt of comp.options) {
+          if (opt.isDefault || opt.isKit) continue;
+          const upgMat = resolve(opt.baseId);
+          if (!upgMat) continue;
+          if (upgMat.custoMat <= 0) continue; // pendência: fora do mín./máx.
+          const r = calcBudgetRow(upgMat, padMat, comp.qtd, comp.rt, cols, {});
           if (r) totals.push(r.total);
         }
       }
@@ -95,15 +97,19 @@ export function PublishScreen() {
     };
   });
 
-  // Pendências reais por tipologia (chaves de linha e de sub-item de kit).
+  // Pendências reais por tipologia — upgrades (opções não-default) sem custo.
   const pendingByTip = tipologias
     .map((tip) => {
-      const compIds = new Set(
-        tip.ambientes.flatMap((amb) => amb.componentes.map((c) => c.id))
-      );
-      const count = [...pendingSet].filter((key) =>
-        [...compIds].some((cid) => key.startsWith(`${cid}-`))
-      ).length;
+      let count = 0;
+      for (const amb of tip.ambientes) {
+        for (const comp of amb.componentes) {
+          for (const opt of comp.options) {
+            if (opt.isDefault || opt.isKit) continue;
+            const mat = resolve(opt.baseId);
+            if (mat && mat.custoMat <= 0) count++;
+          }
+        }
+      }
       return { tip, count };
     })
     .filter((e) => e.count > 0);

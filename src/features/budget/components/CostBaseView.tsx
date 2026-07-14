@@ -3,8 +3,8 @@
 import React from "react";
 
 import { Icon, StatusBadge } from "@/components/ui";
-import { upgradeKey } from "@/lib/budget";
-import { getMaterial, isKitId } from "@/lib/data/entities";
+import { rowKey } from "@/lib/budget";
+import { getMaterial } from "@/lib/data/entities";
 import { cn, fmtBRL } from "@/lib/utils";
 import type { ThreadRow } from "@/features/construtor-shared/CommentThreadPanel";
 import type { Comment, Material, Tipologia } from "@/shared/types/domain";
@@ -53,11 +53,10 @@ interface CostBaseViewProps {
   materiais: Material[];
   baseCosts: BaseCosts;
   setBaseCosts: React.Dispatch<React.SetStateAction<BaseCosts>>;
-  pendingSet: ReadonlySet<string>;
   comments: Record<string, Comment[]>;
   onOpenThread: (row: ThreadRow) => void;
-  /** Persiste o custo no material ao sair do campo (blur). */
-  onPersist: (uid: string, mat: string, mo: string) => void;
+  /** Persiste o custo no material ao sair do campo (blur) — keyed por baseId. */
+  onPersist: (baseId: number, mat: string, mo: string) => void;
 }
 
 // Visão Custos base — grade editável de custo mat/MO por item. Preencher e sair
@@ -67,19 +66,18 @@ export function CostBaseView({
   materiais,
   baseCosts,
   setBaseCosts,
-  pendingSet,
   comments,
   onOpenThread,
   onPersist,
 }: CostBaseViewProps) {
-  const setField = (uid: string, fld: "mat" | "mo", val: string) =>
+  const setField = (baseId: number, fld: "mat" | "mo", val: string) =>
     setBaseCosts((p) => {
-      const cur = p[uid] ?? { mat: "", mo: "" };
-      return { ...p, [uid]: { ...cur, [fld]: val } };
+      const cur = p[baseId] ?? { mat: "", mo: "" };
+      return { ...p, [baseId]: { ...cur, [fld]: val } };
     });
 
-  const valOf = (uid: string, m: Material, fld: "mat" | "mo"): string => {
-    const f = baseCosts[uid];
+  const valOf = (baseId: number, m: Material, fld: "mat" | "mo"): string => {
+    const f = baseCosts[baseId];
     const filled = f?.[fld];
     if (filled !== undefined && filled !== "") return filled;
     const orig = fld === "mat" ? m.custoMat : m.custoMO;
@@ -129,21 +127,21 @@ export function CostBaseView({
                 </td>
               </tr>
               {amb.componentes.map((comp) =>
-                comp.upgrades
-                  .filter((uid) => !isKitId(uid))
-                  .map((uid) => {
-                    const m = getMaterial(materiais, uid);
+                comp.options
+                  .filter((opt) => !opt.isKit && !opt.isDefault)
+                  .map((opt) => {
+                    const m = getMaterial(materiais, opt.baseId);
                     if (!m) return null;
-                    const rowKey = upgradeKey(comp.id, uid);
-                    const matV = valOf(uid, m, "mat");
-                    const moV = valOf(uid, m, "mo");
+                    const rk = rowKey(opt.id);
+                    const matV = valOf(opt.baseId, m, "mat");
+                    const moV = valOf(opt.baseId, m, "mo");
                     const matN = parseFloat(matV) || 0;
                     const moN = parseFloat(moV) || 0;
-                    const isPending = pendingSet.has(rowKey) && !(matN > 0);
-                    const cmts = comments[rowKey] ?? [];
+                    const isPending = m.custoMat <= 0 && !(matN > 0);
+                    const cmts = comments[rk] ?? [];
                     return (
                       <tr
-                        key={rowKey}
+                        key={rk}
                         className={cn(
                           "border-b border-neutral-gray-4",
                           isPending
@@ -180,16 +178,16 @@ export function CostBaseView({
                           <CostField
                             value={matV}
                             isPending={isPending}
-                            onChange={(v) => setField(uid, "mat", v)}
-                            onCommit={(v) => onPersist(uid, v, moV)}
+                            onChange={(v) => setField(opt.baseId, "mat", v)}
+                            onCommit={(v) => onPersist(opt.baseId, v, moV)}
                           />
                         </td>
                         <td className="px-3 py-[5px] text-right">
                           <CostField
                             value={moV}
                             isPending={isPending}
-                            onChange={(v) => setField(uid, "mo", v)}
-                            onCommit={(v) => onPersist(uid, matV, v)}
+                            onChange={(v) => setField(opt.baseId, "mo", v)}
+                            onCommit={(v) => onPersist(opt.baseId, matV, v)}
                           />
                         </td>
                         <td
@@ -208,7 +206,7 @@ export function CostBaseView({
                             type="button"
                             onClick={() =>
                               onOpenThread({
-                                key: rowKey,
+                                key: rk,
                                 especificacao: m.nome,
                                 ambiente: amb.nome,
                                 componente: comp.nome,

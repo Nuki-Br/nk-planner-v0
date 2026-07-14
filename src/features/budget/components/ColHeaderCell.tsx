@@ -19,11 +19,11 @@ const KIND_DEFAULT_NAME: Record<ColumnKind, string> = {
 
 interface ColHeaderCellProps {
   col: BudgetColumn;
-  onRename: (id: string, nome: string) => void;
-  onDelete: (id: string) => void;
-  onDragStart: (id: string) => void;
-  onDragEnter: (id: string) => void;
-  onDrop: (id: string) => void;
+  onRename: (id: number, nome: string) => void;
+  onDelete: (id: number) => void;
+  onDragStart: (id: number) => void;
+  onDragEnter: (id: number) => void;
+  onDrop: (id: number) => void;
   isDragTarget: boolean;
 }
 

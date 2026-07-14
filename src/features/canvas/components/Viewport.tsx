@@ -5,7 +5,6 @@ import { motion } from "framer-motion";
 
 import { Icon } from "@/components/ui";
 import { CV, PLANE_W } from "@/lib/canvas/buildLayout";
-import { getMaterial } from "@/lib/data/entities";
 import type { Material } from "@/shared/types/domain";
 
 import { swatchStyle } from "../swatch";
@@ -40,7 +39,7 @@ function ZoomBtn({
 }
 
 function CanvasLegend({ materiais }: { materiais: Material[] }) {
-  const sample = getMaterial(materiais, "piso-001");
+  const sample = materiais[0];
   const items: { node: React.ReactNode; label: string }[] = [
     {
       node: (

@@ -4,14 +4,13 @@ import React from "react";
 import { useRouter } from "next/navigation";
 
 import { Button, Icon, LoadingState, Modal, PageHeader, Textarea } from "@/components/ui";
-import { upgradeKey } from "@/lib/budget";
-import { getKit, getMaterial, isKitId } from "@/lib/data/entities";
+import { rowKey } from "@/lib/budget";
+import { getKit, getMaterial } from "@/lib/data/entities";
 import { useActiveProjectId } from "@/lib/hooks/useActiveProject";
 import { useBudgetColumns, useUpdateBudgetColumns } from "@/lib/hooks/useBudgetColumns";
 import { useCommentThreads } from "@/lib/hooks/useComments";
 import { useKits } from "@/lib/hooks/useKits";
 import { useMateriais, useUpdateMaterial } from "@/lib/hooks/useMateriais";
-import { usePendingItems } from "@/lib/hooks/usePendingItems";
 import { useProject } from "@/lib/hooks/useProjects";
 import { useTipologias } from "@/lib/hooks/useTipologias";
 import { useCreateVersion, useRestoreVersion, useVersions } from "@/lib/hooks/useVersions";
@@ -24,7 +23,7 @@ import {
   ambTotal,
   buildScopeRefs,
   calcAnyRow,
-  isBasePending,
+  isOptionPending,
   type BaseCosts,
   type BudgetDeps,
   type CellOverrides,
@@ -38,7 +37,7 @@ type PendingFillMode = "inline" | "expandRow";
 
 interface EditingCell {
   rowKey: string;
-  colId: string;
+  colId: number;
 }
 
 function Th({
@@ -144,7 +143,6 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   const { data: tipologias = [], isLoading: tipsLoading } = useTipologias();
   const { data: materiais = [] } = useMateriais();
   const { data: kits = [] } = useKits();
-  const { data: pendingSet = new Set<string>() } = usePendingItems();
   const { data: cols = [] } = useBudgetColumns(projectId);
   const { data: versions = [] } = useVersions();
   const { data: commentThreads = {} } = useCommentThreads();
@@ -153,7 +151,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   const createVersion = useCreateVersion();
   const restoreVersion = useRestoreVersion();
 
-  const [activeTipId, setActiveTipId] = React.useState<string | null>(null);
+  const [activeTipId, setActiveTipId] = React.useState<number | null>(null);
   const [view, setView] = React.useState<"preco" | "custos">("preco");
   const [baseCosts, setBaseCosts] = React.useState<BaseCosts>({});
   const [fillOpen, setFillOpen] = React.useState<Set<string>>(new Set());
@@ -162,8 +160,8 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   const [overrides, setOverrides] = React.useState<CellOverrides>({});
   const [editingCell, setEditingCell] = React.useState<EditingCell | null>(null);
   const [showAdd, setShowAdd] = React.useState(false);
-  const [dragId, setDragId] = React.useState<string | null>(null);
-  const [dragTarget, setDragTarget] = React.useState<string | null>(null);
+  const [dragId, setDragId] = React.useState<number | null>(null);
+  const [dragTarget, setDragTarget] = React.useState<number | null>(null);
   const [collapsedKits, setCollapsedKits] = React.useState<Set<string>>(new Set());
   const [showDrawer, setShowDrawer] = React.useState(false);
   const [showLinkModal, setShowLinkModal] = React.useState(false);
@@ -189,8 +187,8 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   const currentVersion = versions.find((v) => v.isCurrent) ?? versions[0] ?? null;
 
   const deps = React.useMemo<BudgetDeps>(
-    () => ({ materiais, kits, cols, overrides, baseCosts, pendingSet }),
-    [materiais, kits, cols, overrides, baseCosts, pendingSet]
+    () => ({ materiais, kits, cols, overrides, baseCosts }),
+    [materiais, kits, cols, overrides, baseCosts]
   );
 
   if (!projectId || tipsLoading) return <LoadingState label="Carregando orçamento…" />;
@@ -203,12 +201,12 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   // ── colunas (persistem no store) ──
   const persistCols = (next: BudgetColumn[]) => updateCols.mutate({ projectId, cols: next });
   const addColumn = ({ nome, kind }: { nome: string; kind: ColumnKind }) => {
-    persistCols([...cols, { id: "col_" + Date.now(), nome, kind, expr: "", visivel: false }]);
+    persistCols([...cols, { id: Date.now(), nome, kind, expr: "", visivel: false }]);
     setShowAdd(false);
   };
-  const renameColumn = (id: string, nome: string) =>
+  const renameColumn = (id: number, nome: string) =>
     persistCols(cols.map((c) => (c.id === id ? { ...c, nome } : c)));
-  const deleteColumn = (id: string) => {
+  const deleteColumn = (id: number) => {
     persistCols(cols.filter((c) => c.id !== id));
     setOverrides((prev) => {
       const next: CellOverrides = {};
@@ -221,7 +219,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
     });
     if (editingCell?.colId === id) setEditingCell(null);
   };
-  const reorder = (fromId: string | null, toId: string) => {
+  const reorder = (fromId: number | null, toId: number) => {
     if (!fromId || fromId === toId) return;
     const arr = [...cols];
     const fi = arr.findIndex((c) => c.id === fromId);
@@ -234,9 +232,9 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   };
 
   // ── overrides por célula ──
-  const setOverride = (rowKey: string, colId: string, expr: string) =>
+  const setOverride = (rowKey: string, colId: number, expr: string) =>
     setOverrides((prev) => ({ ...prev, [rowKey]: { ...prev[rowKey], [colId]: expr } }));
-  const clearOverride = (rowKey: string, colId: string) =>
+  const clearOverride = (rowKey: string, colId: number) =>
     setOverrides((prev) => {
       const next = { ...prev };
       const row = { ...next[rowKey] };
@@ -246,12 +244,12 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
     });
 
   // ── preenchimento de custo pendente ──
-  const openFill = (rowKey: string, uid: string) => {
-    const m = getMaterial(materiais, uid);
+  const openFill = (rowKey: string, baseId: number) => {
+    const m = getMaterial(materiais, baseId);
     setFillDraft((p) => ({
       ...p,
-      [uid]:
-        p[uid] ??
+      [baseId]:
+        p[baseId] ??
         {
           mat: m && m.custoMat > 0 ? String(m.custoMat) : "",
           mo: m && m.custoMO > 0 ? String(m.custoMO) : "",
@@ -265,24 +263,24 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
       next.delete(rowKey);
       return next;
     });
-  const setDraftField = (uid: string, fld: "mat" | "mo", val: string) =>
-    setFillDraft((p) => ({ ...p, [uid]: { ...(p[uid] ?? { mat: "", mo: "" }), [fld]: val } }));
+  const setDraftField = (baseId: number, fld: "mat" | "mo", val: string) =>
+    setFillDraft((p) => ({ ...p, [baseId]: { ...(p[baseId] ?? { mat: "", mo: "" }), [fld]: val } }));
   // Persiste o custo base digitado no material (custoMat/custoMO) — o servidor
   // remove a pendência quando custoMat > 0, então o item deixa de aparecer como
   // "sem custo" no catálogo, na revisão de custos e nas tipologias.
-  const persistBaseCost = (uid: string, matStr: string, moStr: string) => {
+  const persistBaseCost = (baseId: number, matStr: string, moStr: string) => {
     const custoMat = parseFloat(String(matStr).replace(",", ".")) || 0;
     const custoMO = parseFloat(String(moStr).replace(",", ".")) || 0;
     if (custoMat <= 0) return;
-    const m = materiais.find((x) => x.id === uid);
+    const m = materiais.find((x) => x.id === baseId);
     if (m && m.custoMat === custoMat && m.custoMO === custoMO) return;
-    updateMaterial.mutate({ id: uid, patch: { custoMat, custoMO } });
+    updateMaterial.mutate({ id: baseId, patch: { custoMat, custoMO } });
   };
-  const commitFill = (rowKey: string, uid: string) => {
-    const d = fillDraft[uid] ?? { mat: "", mo: "" };
-    setBaseCosts((p) => ({ ...p, [uid]: { mat: d.mat, mo: d.mo } }));
+  const commitFill = (rowKey: string, baseId: number) => {
+    const d = fillDraft[baseId] ?? { mat: "", mo: "" };
+    setBaseCosts((p) => ({ ...p, [baseId]: { mat: d.mat, mo: d.mo } }));
     closeFill(rowKey);
-    persistBaseCost(uid, d.mat, d.mo);
+    persistBaseCost(baseId, d.mat, d.mo);
   };
 
   const toggleKit = (key: string) =>
@@ -327,12 +325,12 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   let excludedCount = 0;
   for (const amb of tip.ambientes) {
     for (const comp of amb.componentes) {
-      for (const uid of comp.upgrades) {
-        const rowKey = upgradeKey(comp.id, uid);
-        if (isKitId(uid)) {
-          const r = calcAnyRow(deps, comp, uid, rowKey);
+      for (const opt of comp.options) {
+        if (opt.isDefault) continue;
+        if (opt.isKit) {
+          const r = calcAnyRow(deps, comp, opt);
           if (r?.kind === "kit" && r.result.anyPending) excludedCount++;
-        } else if (isBasePending(pendingSet, baseCosts, rowKey, uid)) {
+        } else if (isOptionPending(deps, opt)) {
           excludedCount++;
         }
       }
@@ -557,7 +555,6 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
           materiais={materiais}
           baseCosts={baseCosts}
           setBaseCosts={setBaseCosts}
-          pendingSet={pendingSet}
           comments={commentThreads}
           onOpenThread={setOpenThread}
           onPersist={persistBaseCost}
@@ -617,8 +614,9 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                       </td>
                     </tr>
                     {amb.componentes.map((comp) => {
+                      const def = comp.options.find((o) => o.id === comp.padrao);
                       const padMat =
-                        comp.padrao !== null ? getMaterial(materiais, comp.padrao) : undefined;
+                        def && !def.isKit ? getMaterial(materiais, def.baseId) : undefined;
                       if (!padMat) return null;
                       const qtdComRT = comp.qtd * (1 + comp.rt / 100);
                       const valUnit = padMat.custoMat + padMat.custoMO;
@@ -666,26 +664,27 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                       </td>
                     </tr>
                     {amb.componentes.map((comp) =>
-                      comp.upgrades.map((uid) => {
-                        const rowKey = upgradeKey(comp.id, uid);
+                      comp.options.map((opt) => {
+                        if (opt.isDefault) return null;
+                        const rk = rowKey(opt.id);
 
                         // ── KIT: linha principal + sub-itens ──
-                        if (isKitId(uid)) {
-                          const kit = getKit(kits, uid);
+                        if (opt.isKit) {
+                          const kit = getKit(kits, opt.baseId);
                           if (!kit) return null;
-                          const rr = calcAnyRow(deps, comp, uid, rowKey);
+                          const rr = calcAnyRow(deps, comp, opt);
                           const r = rr?.kind === "kit" ? rr.result : null;
                           const pending = r ? r.anyPending : true;
-                          const expanded = !collapsedKits.has(rowKey);
+                          const expanded = !collapsedKits.has(rk);
                           const kitBg = pending ? "bg-functional-warning-light" : "bg-[#fbf6ff]";
                           return (
-                            <React.Fragment key={rowKey}>
+                            <React.Fragment key={rk}>
                               <tr>
                                 <Td sticky className={kitBg}>
                                   <div className="flex items-start gap-1.5">
                                     <button
                                       type="button"
-                                      onClick={() => toggleKit(rowKey)}
+                                      onClick={() => toggleKit(rk)}
                                       title={expanded ? "Recolher kit" : "Expandir kit"}
                                       className="flex pt-px text-neutral-gray-7"
                                     >
@@ -751,7 +750,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                   {r && !pending ? fmtBRL(r.custoDeTroca) : "—"}
                                 </Td>
                                 {cols.map((col, colIdx) =>
-                                  renderConfigCell(col, colIdx, pending ? null : rr, rowKey, kitBg)
+                                  renderConfigCell(col, colIdx, pending ? null : rr, rk, kitBg)
                                 )}
                                 <Td className={kitBg} />
                                 <Td right className={r && !pending ? "bg-primary-1" : kitBg}>
@@ -766,7 +765,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                               </tr>
                               {expanded &&
                                 r?.subItems.map((s, si) => (
-                                  <tr key={`${rowKey}-${s.mat.id}`}>
+                                  <tr key={`${rk}-${s.item.id}`}>
                                     <Td sticky className="bg-white !pl-0">
                                       <div className="flex items-stretch">
                                         <span className="relative w-[26px] shrink-0">
@@ -787,10 +786,10 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                             )}
                                           >
                                             <span className="mr-1 text-neutral-gray-5">·</span>
-                                            {s.mat.nome}
+                                            {s.item.nome}
                                           </div>
                                           <code className="text-[10px] text-neutral-gray-6">
-                                            {s.mat.codigo}
+                                            {s.item.fabricante}
                                             {s.pending && (
                                               <span className="ml-1.5 font-bold text-tint-orange-fg">
                                                 aguardando
@@ -801,7 +800,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                       </div>
                                     </Td>
                                     <Td right className="bg-white text-neutral-gray-7">
-                                      {fmtNum(s.subQtd, 2)} {s.mat.unidade}
+                                      {fmtNum(s.subQtd, 2)} {s.item.unidade}
                                     </Td>
                                     <Td right className="bg-white text-neutral-gray-7">
                                       {fmtBRL(s.valUn)}
@@ -827,20 +826,20 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                         }
 
                         // ── MATERIAL: linha + preenchimento de custo base ──
-                        const upgMat = getMaterial(materiais, uid);
+                        const upgMat = getMaterial(materiais, opt.baseId);
                         if (!upgMat) return null;
-                        const pending = isBasePending(pendingSet, baseCosts, rowKey, uid);
-                        const rr = pending ? null : calcAnyRow(deps, comp, uid, rowKey);
+                        const pending = isOptionPending(deps, opt);
+                        const rr = pending ? null : calcAnyRow(deps, comp, opt);
                         const r = rr?.kind === "material" ? rr.result : null;
                         const rowBg = pending ? "bg-functional-warning-light" : "bg-white";
-                        const cmts = commentThreads[rowKey] ?? [];
-                        const filling = fillOpen.has(rowKey);
+                        const cmts = commentThreads[rk] ?? [];
+                        const filling = fillOpen.has(rk);
                         const inlineFill = pending && filling && pendingFill === "inline";
-                        const draft = fillDraft[uid] ?? { mat: "", mo: "" };
+                        const draft = fillDraft[opt.baseId] ?? { mat: "", mo: "" };
                         const fillCell = inlineFill ? "bg-primary-1" : rowBg;
 
                         return (
-                          <React.Fragment key={rowKey}>
+                          <React.Fragment key={rk}>
                             <tr>
                               <Td sticky className={rowBg}>
                                 <div className="flex items-start gap-1.5">
@@ -869,7 +868,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                     {pending && !inlineFill && !(filling && pendingFill === "expandRow") && (
                                       <button
                                         type="button"
-                                        onClick={() => openFill(rowKey, uid)}
+                                        onClick={() => openFill(rk, opt.baseId)}
                                         className="mt-1.5 inline-flex items-center gap-[5px] rounded-full border border-primary-7 bg-white px-2.5 py-1 text-[11px] font-bold text-primary-7"
                                       >
                                         <Icon name="plus" size={12} /> Preencher custo base
@@ -883,7 +882,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                     type="button"
                                     onClick={() =>
                                       setOpenThread({
-                                        key: rowKey,
+                                        key: rk,
                                         especificacao: upgMat.nome,
                                         ambiente: amb.nome,
                                         componente: comp.nome,
@@ -932,9 +931,9 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                     <FillInput
                                       autoFocus
                                       value={draft.mat}
-                                      onChange={(v) => setDraftField(uid, "mat", v)}
-                                      onEnter={() => commitFill(rowKey, uid)}
-                                      onEscape={() => closeFill(rowKey)}
+                                      onChange={(v) => setDraftField(opt.baseId, "mat", v)}
+                                      onEnter={() => commitFill(rk, opt.baseId)}
+                                      onEscape={() => closeFill(rk)}
                                     />
                                   </div>
                                 ) : r ? (
@@ -951,9 +950,9 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                     </span>
                                     <FillInput
                                       value={draft.mo}
-                                      onChange={(v) => setDraftField(uid, "mo", v)}
-                                      onEnter={() => commitFill(rowKey, uid)}
-                                      onEscape={() => closeFill(rowKey)}
+                                      onChange={(v) => setDraftField(opt.baseId, "mo", v)}
+                                      onEnter={() => commitFill(rk, opt.baseId)}
+                                      onEscape={() => closeFill(rk)}
                                     />
                                   </div>
                                 ) : r ? (
@@ -975,7 +974,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                   <div className="flex justify-end gap-1">
                                     <button
                                       type="button"
-                                      onClick={() => commitFill(rowKey, uid)}
+                                      onClick={() => commitFill(rk, opt.baseId)}
                                       title="Salvar"
                                       className="rounded bg-primary-7 px-[9px] py-1 text-[11px] font-bold text-white"
                                     >
@@ -983,7 +982,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                     </button>
                                     <button
                                       type="button"
-                                      onClick={() => closeFill(rowKey)}
+                                      onClick={() => closeFill(rk)}
                                       title="Cancelar"
                                       className="rounded border border-neutral-gray-5 px-[7px] py-1 text-[11px] text-neutral-gray-7"
                                     >
@@ -997,7 +996,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                 )}
                               </Td>
                               {cols.map((col, colIdx) =>
-                                renderConfigCell(col, colIdx, pending ? null : rr, rowKey, rowBg)
+                                renderConfigCell(col, colIdx, pending ? null : rr, rk, rowBg)
                               )}
                               <Td className={rowBg} />
                               <Td right className={r ? "bg-primary-1" : rowBg}>
@@ -1033,9 +1032,9 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                         autoFocus
                                         big
                                         value={draft.mat}
-                                        onChange={(v) => setDraftField(uid, "mat", v)}
-                                        onEnter={() => commitFill(rowKey, uid)}
-                                        onEscape={() => closeFill(rowKey)}
+                                        onChange={(v) => setDraftField(opt.baseId, "mat", v)}
+                                        onEnter={() => commitFill(rk, opt.baseId)}
+                                        onEscape={() => closeFill(rk)}
                                       />
                                     </label>
                                     <label className="flex flex-col gap-1">
@@ -1045,16 +1044,16 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                       <FillInput
                                         big
                                         value={draft.mo}
-                                        onChange={(v) => setDraftField(uid, "mo", v)}
-                                        onEnter={() => commitFill(rowKey, uid)}
-                                        onEscape={() => closeFill(rowKey)}
+                                        onChange={(v) => setDraftField(opt.baseId, "mo", v)}
+                                        onEnter={() => commitFill(rk, opt.baseId)}
+                                        onEscape={() => closeFill(rk)}
                                       />
                                     </label>
                                     <div className="flex-1" />
-                                    <Button variant="bordered" size="sm" onPress={() => closeFill(rowKey)}>
+                                    <Button variant="bordered" size="sm" onPress={() => closeFill(rk)}>
                                       Cancelar
                                     </Button>
-                                    <Button size="sm" icon="check" onPress={() => commitFill(rowKey, uid)}>
+                                    <Button size="sm" icon="check" onPress={() => commitFill(rk, opt.baseId)}>
                                       Salvar custo base
                                     </Button>
                                   </div>

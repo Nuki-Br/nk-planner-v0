@@ -16,8 +16,8 @@ export default function ComponentePage({
   const setSelectedTipologia = useSelection((s) => s.setSelectedTipologia);
   const setSelectedComponent = useSelection((s) => s.setSelectedComponent);
   React.useEffect(() => {
-    setSelectedTipologia(params.id);
-    setSelectedComponent(params.cid);
+    setSelectedTipologia(Number(params.id));
+    setSelectedComponent(Number(params.cid));
   }, [params.id, params.cid, setSelectedTipologia, setSelectedComponent]);
 
   return <MaterialsConfigScreen tipologiaId={params.id} componenteId={params.cid} />;

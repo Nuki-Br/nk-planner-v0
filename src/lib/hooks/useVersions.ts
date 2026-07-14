@@ -23,7 +23,7 @@ export function useCreateVersion() {
 export function useRestoreVersion() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => restoreVersion(id),
+    mutationFn: (id: number) => restoreVersion(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.versions });
     },

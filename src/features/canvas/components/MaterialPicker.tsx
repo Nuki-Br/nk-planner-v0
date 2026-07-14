@@ -14,11 +14,13 @@ interface MaterialPickerProps {
   open: boolean;
   title?: string;
   subtitle?: string;
-  currentId: string | null;
+  /** id de catálogo (baseId) atual, para pré-seleção. */
+  currentId: number | null;
   materiais: Material[];
   kits: Kit[];
   onClose: () => void;
-  onConfirm: (id: string) => void;
+  /** Recebe o id de catálogo (Material ou Kit) escolhido. */
+  onConfirm: (id: number) => void;
   confirming?: boolean;
 }
 
@@ -36,7 +38,7 @@ export function MaterialPicker({
 }: MaterialPickerProps) {
   const [q, setQ] = React.useState("");
   const [cat, setCat] = React.useState("");
-  const [sel, setSel] = React.useState<string | null>(null);
+  const [sel, setSel] = React.useState<number | null>(null);
   React.useEffect(() => {
     if (!open) return;
     setQ("");
@@ -62,7 +64,7 @@ export function MaterialPicker({
     isKit = false,
     mat,
   }: {
-    id: string;
+    id: number;
     nome: string;
     sub: string;
     isKit?: boolean;

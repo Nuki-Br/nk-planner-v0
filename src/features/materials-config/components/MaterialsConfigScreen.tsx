@@ -13,7 +13,7 @@ import {
   PageHeader,
   StatusBadge,
 } from "@/components/ui";
-import { getEntity, getMaterial } from "@/lib/data/entities";
+import { getMaterial, getOptionEntity } from "@/lib/data/entities";
 import { useKits } from "@/lib/hooks/useKits";
 import { useMateriais } from "@/lib/hooks/useMateriais";
 import { useProject } from "@/lib/hooks/useProjects";
@@ -65,7 +65,8 @@ export function MaterialsConfigScreen({
   componenteId: string;
 }) {
   const router = useRouter();
-  const { data: tipologia, isLoading } = useTipologia(tipologiaId);
+  const compId = Number(componenteId);
+  const { data: tipologia, isLoading } = useTipologia(Number(tipologiaId));
   const { data: materiais = [] } = useMateriais();
   const { data: kits = [] } = useKits();
   const activeProjectId = useSelection((s) => s.activeProjectId);
@@ -77,23 +78,27 @@ export function MaterialsConfigScreen({
   const setKitQtdsMut = useSetKitQtds();
 
   const [modal, setModal] = React.useState<"padrao" | "upgrade" | null>(null);
-  const [expandedUpg, setExpandedUpg] = React.useState<Set<string>>(new Set());
-  const [removeTarget, setRemoveTarget] = React.useState<string | null>(null);
+  const [expandedUpg, setExpandedUpg] = React.useState<Set<number>>(new Set());
+  const [removeTarget, setRemoveTarget] = React.useState<number | null>(null);
   const seededExpandRef = React.useRef(false);
 
   const found = React.useMemo(() => {
     if (!tipologia) return null;
     for (const amb of tipologia.ambientes) {
-      const comp = amb.componentes.find((c) => c.id === componenteId);
+      const comp = amb.componentes.find((c) => c.id === compId);
       if (comp) return { amb, comp };
     }
     return null;
-  }, [tipologia, componenteId]);
+  }, [tipologia, compId]);
 
   React.useEffect(() => {
     if (seededExpandRef.current || !found) return;
     seededExpandRef.current = true;
-    setExpandedUpg(new Set(found.comp.upgrades.filter((id) => id.startsWith("kit-"))));
+    setExpandedUpg(
+      new Set(
+        found.comp.options.filter((o) => !o.isDefault && o.isKit).map((o) => o.id)
+      )
+    );
   }, [found]);
 
   if (isLoading) return <LoadingState label="Carregando componente…" />;
@@ -116,12 +121,21 @@ export function MaterialsConfigScreen({
 
   const { amb, comp } = found;
   const qtdComRT = comp.qtd * (1 + comp.rt / 100);
-  const padrao = comp.padrao !== null ? getEntity(materiais, kits, comp.padrao) : null;
+  const def = comp.options.find((o) => o.isDefault) ?? null;
+  const padrao = def ? getOptionEntity(materiais, kits, def) : null;
   const compCat = padrao?.categoria ?? "Piso";
   const kitQtds = comp.kitQtds ?? {};
-  const path = { tipologiaId, ambienteId: amb.id, componenteId: comp.id };
+  const upgrades = comp.options.filter((o) => !o.isDefault);
+  const path = {
+    tipologiaId: tipologia.id,
+    ambienteId: amb.blueprintRoomId,
+    componenteId: comp.id,
+  };
+  const removeOpt =
+    removeTarget !== null ? comp.options.find((o) => o.id === removeTarget) ?? null : null;
+  const removeEnt = removeOpt ? getOptionEntity(materiais, kits, removeOpt) : null;
 
-  const toggleUpg = (id: string) =>
+  const toggleUpg = (id: number) =>
     setExpandedUpg((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -133,14 +147,18 @@ export function MaterialsConfigScreen({
     const finish = () => setModal(null);
     const after = () => {
       if (modal === "padrao") {
-        setPadraoMut.mutate({ ...path, padraoId: result.id }, { onSuccess: finish });
+        setPadraoMut.mutate({ ...path, padraoBaseId: result.id }, { onSuccess: finish });
       } else {
         addUpgradeMut.mutate(
-          { ...path, upgradeId: result.id },
+          { ...path, baseId: result.id },
           {
-            onSuccess: () => {
-              if (result.id.startsWith("kit-"))
-                setExpandedUpg((prev) => new Set(prev).add(result.id));
+            onSuccess: (updated) => {
+              if (result.kitQtds) {
+                const added = updated.options.find(
+                  (o) => !o.isDefault && o.baseId === result.id
+                );
+                if (added) setExpandedUpg((prev) => new Set(prev).add(added.id));
+              }
               finish();
             },
           }
@@ -148,14 +166,15 @@ export function MaterialsConfigScreen({
       }
     };
     if (result.kitQtds) {
-      setKitQtdsMut.mutate({ ...path, kitId: result.id, qtds: result.kitQtds }, { onSuccess: after });
+      setKitQtdsMut.mutate({ ...path, qtds: result.kitQtds }, { onSuccess: after });
     } else {
       after();
     }
   };
 
-  const usedIds = new Set([...(comp.padrao !== null ? [comp.padrao] : []), ...comp.upgrades]);
-  const excludeIds = modal === "upgrade" ? usedIds : new Set(comp.padrao !== null ? [comp.padrao] : []);
+  const usedIds = new Set(comp.options.map((o) => o.baseId));
+  const excludeIds =
+    modal === "upgrade" ? usedIds : new Set(def ? [def.baseId] : []);
 
   const mutating =
     setPadraoMut.isPending ||
@@ -227,16 +246,10 @@ export function MaterialsConfigScreen({
               <span className="text-[11px] text-primary-7">{padrao.itens.length} itens</span>
             </div>
             <div className="mt-2 border-t border-primary-7/20 pt-2">
-              {padrao.itens.map((mid) => {
-                const m = getMaterial(materiais, mid);
+              {padrao.itens.map((it) => {
+                const m = getMaterial(materiais, it.materialId);
                 if (!m) return null;
-                return (
-                  <SubItemRow
-                    key={mid}
-                    mat={m}
-                    qty={comp.padrao !== null ? kitQtds[comp.padrao]?.[mid] : undefined}
-                  />
-                );
+                return <SubItemRow key={it.id} mat={m} qty={kitQtds[it.id]} />;
               })}
             </div>
           </div>
@@ -263,7 +276,7 @@ export function MaterialsConfigScreen({
             Adicionar opção
           </Button>
         </div>
-        {comp.upgrades.length === 0 ? (
+        {upgrades.length === 0 ? (
           <EmptyState
             icon="box"
             title="Nenhuma opção de upgrade configurada"
@@ -286,18 +299,17 @@ export function MaterialsConfigScreen({
               </tr>
             </thead>
             <tbody>
-              {comp.upgrades.map((id) => {
-                const ent = getEntity(materiais, kits, id);
+              {upgrades.map((opt) => {
+                const ent = getOptionEntity(materiais, kits, opt);
                 if (!ent) return null;
                 if (ent.isKit) {
-                  const open = expandedUpg.has(id);
-                  const q = kitQtds[id] ?? {};
+                  const open = expandedUpg.has(opt.id);
                   return (
-                    <React.Fragment key={id}>
+                    <React.Fragment key={opt.id}>
                       <tr className="border-b border-neutral-gray-4 last:border-b-0">
                         <td className="px-3 py-2.5">
                           <div className="flex items-center gap-2">
-                            <button type="button" onClick={() => toggleUpg(id)} className="flex">
+                            <button type="button" onClick={() => toggleUpg(opt.id)} className="flex">
                               <Icon
                                 name={open ? "chevD" : "chevR"}
                                 size={15}
@@ -336,17 +348,17 @@ export function MaterialsConfigScreen({
                             size="sm"
                             icon="trash"
                             aria-label="Excluir kit"
-                            onPress={() => setRemoveTarget(id)}
+                            onPress={() => setRemoveTarget(opt.id)}
                           />
                         </td>
                       </tr>
                       {open && (
                         <tr className="border-b border-neutral-gray-4 last:border-b-0">
                           <td colSpan={6} className="bg-neutral-gray-2 px-6 pb-2.5 pt-0.5">
-                            {ent.itens.map((mid) => {
-                              const m = getMaterial(materiais, mid);
+                            {ent.itens.map((it) => {
+                              const m = getMaterial(materiais, it.materialId);
                               if (!m) return null;
-                              return <SubItemRow key={mid} mat={m} qty={q[mid]} />;
+                              return <SubItemRow key={it.id} mat={m} qty={kitQtds[it.id]} />;
                             })}
                           </td>
                         </tr>
@@ -355,7 +367,7 @@ export function MaterialsConfigScreen({
                   );
                 }
                 return (
-                  <tr key={id} className="border-b border-neutral-gray-4 last:border-b-0">
+                  <tr key={opt.id} className="border-b border-neutral-gray-4 last:border-b-0">
                     <td className="px-3 py-2.5">
                       <p className="text-[13px] font-semibold text-neutral-gray-11">{ent.nome}</p>
                       <code className="text-[10px] text-neutral-gray-6">{ent.codigo}</code>
@@ -386,7 +398,7 @@ export function MaterialsConfigScreen({
                         size="sm"
                         icon="trash"
                         aria-label="Excluir material"
-                        onPress={() => setRemoveTarget(id)}
+                        onPress={() => setRemoveTarget(opt.id)}
                       />
                     </td>
                   </tr>
@@ -428,7 +440,7 @@ export function MaterialsConfigScreen({
               onPress={() => {
                 if (removeTarget === null) return;
                 removeUpgradeMut.mutate(
-                  { ...path, upgradeId: removeTarget },
+                  { ...path, optionId: removeTarget },
                   { onSuccess: () => setRemoveTarget(null) }
                 );
               }}
@@ -441,9 +453,7 @@ export function MaterialsConfigScreen({
         <p className="text-[13px] leading-relaxed text-neutral-gray-9">
           Remover{" "}
           <strong>
-            {removeTarget !== null
-              ? (getEntity(materiais, kits, removeTarget)?.nome ?? removeTarget)
-              : ""}
+            {removeEnt?.nome ?? (removeTarget !== null ? String(removeTarget) : "")}
           </strong>{" "}
           das opções de upgrade deste componente?
         </p>

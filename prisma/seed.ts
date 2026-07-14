@@ -1,6 +1,10 @@
-// Seed do banco (Fase 10) — porta o seed mock (src/lib/data/seed.ts) para o
-// Postgres do Supabase, criando também a organização beta e o usuário de
-// teste no Supabase Auth. Idempotente: apaga e regrava os dados da org.
+// Seed do banco (realinhado) — porta o seed mock (src/lib/data/seed.ts) para o
+// Postgres do Supabase no modelo relacional novo (Enterprise/Blueprint/Room/
+// RoomComponent/Material/BaseMaterial), criando também a organização beta e o
+// usuário de teste no Supabase Auth. Idempotente: apaga e regrava os dados da org.
+//
+// Ponto-chave do modelo compartilhado: a "Sala/Living" é UM Room criado uma vez
+// e ligado a 3 plantas via BlueprintRoom (mesma paleta; qtd/RT por planta no BRC).
 //
 // Rodar com: npm run db:seed  (dotenv -e .env.local -- tsx prisma/seed.ts)
 import { Prisma, PrismaClient } from "@prisma/client";
@@ -10,9 +14,13 @@ import { createSeed } from "../src/lib/data/seed";
 
 const prisma = new PrismaClient();
 
-/** Interfaces do domínio → coluna Json do Prisma (sem index signature). */
 function json<T extends object>(v: T | null | undefined): Prisma.InputJsonValue | undefined {
   return v == null ? undefined : (v as unknown as Prisma.InputJsonValue);
+}
+
+/** Reais → centavos inteiros; 0/negativo vira NULL (= pendente). */
+function toCents(reais: number): number | null {
+  return reais > 0 ? Math.round(reais * 100) : null;
 }
 
 const ORG_ID = "org-grupo-axis";
@@ -20,10 +28,6 @@ const ORG_NAME = "Grupo Axis";
 const SEED_USER_EMAIL = process.env.SEED_USER_EMAIL ?? "beta@nukibr.com";
 const SEED_USER_PASSWORD = process.env.SEED_USER_PASSWORD;
 
-/**
- * Cria (ou reaproveita) o usuário de teste no Supabase Auth e retorna o id.
- * Falha de auth não derruba o seed do domínio — só avisa.
- */
 async function ensureAuthUser(): Promise<string | null> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const secret = process.env.SUPABASE_SECRET_KEY;
@@ -36,19 +40,15 @@ async function ensureAuthUser(): Promise<string | null> {
   const admin = createClient(url, secret, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
-
   const created = await admin.auth.admin.createUser({
     email: SEED_USER_EMAIL,
     password: SEED_USER_PASSWORD,
     email_confirm: true,
   });
   if (created.data.user) return created.data.user.id;
-
-  // Já existe? Procura na listagem (beta: poucos usuários).
   const list = await admin.auth.admin.listUsers({ page: 1, perPage: 100 });
   const existing = list.data?.users.find((u) => u.email === SEED_USER_EMAIL);
   if (existing) return existing.id;
-
   console.warn(`⚠ Não foi possível criar/achar o usuário de teste: ${created.error?.message ?? "erro desconhecido"}`);
   return null;
 }
@@ -62,7 +62,6 @@ async function main(): Promise<void> {
     update: { name: ORG_NAME },
     create: { id: ORG_ID, name: ORG_NAME },
   });
-
   const authUserId = await ensureAuthUser();
   if (authUserId) {
     await prisma.membership.upsert({
@@ -72,166 +71,261 @@ async function main(): Promise<void> {
     });
   }
 
-  // ── Limpa os dados de domínio da org (re-seed limpo) ──
-  const org = { organizationId: ORG_ID };
-  await prisma.portalFill.deleteMany({ where: org });
-  await prisma.fillLink.deleteMany({ where: org });
-  await prisma.comment.deleteMany({ where: org });
-  await prisma.budgetVersion.deleteMany({ where: org });
-  await prisma.pendingItem.deleteMany({ where: org });
-  await prisma.unitGroup.deleteMany({ where: org });
-  await prisma.tower.deleteMany({ where: org });
-  await prisma.ambienteShared.deleteMany({ where: org });
-  await prisma.tipologia.deleteMany({ where: org }); // cascata: ambientes → componentes
-  await prisma.project.deleteMany({ where: org }); // cascata: budget_columns
-  await prisma.material.deleteMany({ where: org });
-  await prisma.kit.deleteMany({ where: org });
+  // ── Limpa os dados da org (re-seed limpo) ──
+  // Enterprise cascateia Blueprints/Rooms/RoomComponents/Materials/BRC/versions/
+  // columns/comments/portal/torres/unitgroups. Kits antes dos singles (FK Restrict).
+  await prisma.enterprise.deleteMany({ where: { OrganizationId: ORG_ID } });
+  await prisma.baseMaterial.deleteMany({ where: { OrganizationId: ORG_ID, Type: "kit" } });
+  await prisma.baseMaterial.deleteMany({ where: { OrganizationId: ORG_ID, Type: "single" } });
+  await prisma.materialCategory.deleteMany({ where: { OrganizationId: ORG_ID } });
 
-  // ── Catálogo ──
-  await prisma.material.createMany({
-    data: seed.materiais.map((m) => ({ ...m, organizationId: ORG_ID })),
-  });
-  await prisma.kit.createMany({
-    data: seed.kits.map(({ tipo: _tipo, ...k }) => ({ ...k, organizationId: ORG_ID })),
-  });
+  // ── Categorias (por org) ──
+  const catNames = new Set<string>([...seed.materiais, ...seed.kits].map((x) => x.categoria));
+  const catMap = new Map<string, number>();
+  for (const name of catNames) {
+    const row = await prisma.materialCategory.create({
+      data: { OrganizationId: ORG_ID, Name: name },
+      select: { Id: true },
+    });
+    catMap.set(name, row.Id);
+  }
 
-  // ── Tipologias → ambientes → componentes (nested, preservando a ordem) ──
-  for (const [ti, tip] of seed.tipologias.entries()) {
-    await prisma.tipologia.create({
+  // ── Catálogo: BaseMaterial single + kit (+ KitItems) ──
+  const catalogMap = new Map<number, number>(); // seed catalog id → db BaseMaterial id
+  const kitItemMap = new Map<number, number>(); // seed KitItem id → db MaterialKitItem id
+  for (const m of seed.materiais) {
+    const row = await prisma.baseMaterial.create({
       data: {
-        id: tip.id,
-        nome: tip.nome,
-        metragem: tip.metragem,
-        descricao: tip.descricao,
-        unidades: tip.unidades,
-        status: tip.status,
-        ordem: ti,
-        organizationId: ORG_ID,
-        ambientes: {
-          create: tip.ambientes.map((amb, ai) => ({
-            id: amb.id,
-            nome: amb.nome,
-            icon: amb.icon ?? null,
-            imagem: json(amb.imagem),
-            local: json(amb.local),
-            ordem: ai,
-            organizationId: ORG_ID,
-            componentes: {
-              create: amb.componentes.map((c, ci) => ({
-                id: c.id,
-                nome: c.nome,
-                unidade: c.unidade,
-                qtd: c.qtd,
-                rt: c.rt,
-                padrao: c.padrao,
-                upgrades: c.upgrades,
-                taxaEspecifica: json(c.taxaEspecifica),
-                ghost: c.ghost ?? false,
-                ordem: c.ordem ?? ci,
-                kitQtds: json(c.kitQtds),
-                organizationId: ORG_ID,
-              })),
-            },
+        OrganizationId: ORG_ID,
+        CategoryId: catMap.get(m.categoria)!,
+        Type: "single",
+        ReferenceCode: m.codigo,
+        Name: m.nome,
+        Manufacturer: m.fabricante,
+        Unit: m.unidade,
+        CostMaterialInCents: toCents(m.custoMat),
+        CostLaborInCents: toCents(m.custoMO),
+      },
+      select: { Id: true },
+    });
+    catalogMap.set(m.id, row.Id);
+  }
+  for (const k of seed.kits) {
+    const row = await prisma.baseMaterial.create({
+      data: {
+        OrganizationId: ORG_ID,
+        CategoryId: catMap.get(k.categoria)!,
+        Type: "kit",
+        ReferenceCode: k.codigo,
+        Name: k.nome,
+        KitItems: {
+          create: k.itens.map((it, i) => ({
+            ChildMaterialId: catalogMap.get(it.materialId)!,
+            Position: i,
           })),
         },
       },
+      select: { Id: true, KitItems: { select: { Id: true, Position: true } } },
     });
+    catalogMap.set(k.id, row.Id);
+    for (const [i, it] of k.itens.entries()) {
+      const dbKi = row.KitItems.find((x) => x.Position === i);
+      if (dbKi) kitItemMap.set(it.id, dbKi.Id);
+    }
   }
 
-  // ── Compartilhamento de ambientes (ambShared + sharedReg) ──
-  const tipDoAmbiente = new Map<string, string>();
-  for (const tip of seed.tipologias) {
-    for (const amb of tip.ambientes) tipDoAmbiente.set(amb.id, tip.id);
+  // ── Empreendimentos (Enterprise) — projects[0] é o âncora (mais antigo) ──
+  const base = Date.now();
+  const enterpriseMap = new Map<number, number>();
+  for (const [i, p] of seed.projects.entries()) {
+    const row = await prisma.enterprise.create({
+      data: {
+        OrganizationId: ORG_ID,
+        Name: p.nome,
+        Developer: p.incorporadora,
+        Builder: p.construtora,
+        BuilderEmail: p.emailConstrutora ?? null,
+        TowerLabel: p.torre,
+        Status: p.status,
+        SubmittedAtLabel: p.enviadoEm,
+        DeadlineLabel: p.prazo,
+        PublishedAtLabel: p.publicadoEm ?? null,
+        InccBaseLabel: p.inccBase ?? null,
+        TotalItems: p.totalItens,
+        FilledItems: p.itensPreenchidos,
+        Taxes: json(p.taxas),
+        CreatedAt: new Date(base + i * 1000), // garante ordem: projects[0] = âncora
+      },
+      select: { Id: true },
+    });
+    enterpriseMap.set(p.id, row.Id);
   }
-  await prisma.ambienteShared.createMany({
-    data: Object.entries(seed.ambShared).map(([ambienteId, shareId]) => ({
-      ambienteId,
-      shareId,
-      tipologiaId: tipDoAmbiente.get(ambienteId) ?? "",
-      organizationId: ORG_ID,
+  const activeId = enterpriseMap.get(seed.projects[0]!.id)!;
+
+  // ── Colunas de orçamento do empreendimento âncora ──
+  const cols = seed.projects[0]!.taxColumns ?? [];
+  await prisma.budgetColumn.createMany({
+    data: cols.map((c, i) => ({
+      EnterpriseId: activeId,
+      Name: c.nome,
+      Kind: c.kind,
+      Expr: c.expr,
+      Visible: c.visivel,
+      Position: i,
     })),
   });
 
-  // ── Torres + grupos de unidades ──
-  await prisma.tower.createMany({
-    data: seed.torres.map((nome, i) => ({
-      id: `tower-${i + 1}`,
-      nome,
-      ordem: i,
-      organizationId: ORG_ID,
-    })),
-  });
+  // ── Tipologias → Rooms (dedupe compartilhado) → BlueprintRoom/BRC/KitUsage ──
+  interface RoomCache {
+    dbRoomId: number;
+    compMap: Map<number, number>; // seed RoomComponent id → db id
+  }
+  const roomCache = new Map<number, RoomCache>(); // seed Room id → cache
+  const optMap = new Map<number, number>(); // seed option id → db Material id (global, p/ comentários)
+
+  for (const [ti, tip] of seed.tipologias.entries()) {
+    const bp = await prisma.blueprint.create({
+      data: {
+        EnterpriseId: activeId,
+        Name: tip.nome,
+        Description: tip.descricao,
+        AreaSqM: tip.metragem,
+        UnitCount: tip.unidades,
+        Status: tip.status,
+        Position: ti,
+      },
+      select: { Id: true },
+    });
+    for (const [ai, amb] of tip.ambientes.entries()) {
+      let cache = roomCache.get(amb.id);
+      if (!cache) {
+        const dbRoom = await prisma.room.create({
+          data: {
+            EnterpriseId: activeId,
+            Name: amb.nome,
+            Icon: amb.icon ?? null,
+            BaseImageUrl: amb.imagem?.url ?? null,
+          },
+          select: { Id: true },
+        });
+        const compMap = new Map<number, number>();
+        for (const c of amb.componentes) {
+          const rc = await prisma.roomComponent.create({
+            data: { RoomId: dbRoom.Id, Name: c.nome, Unit: c.unidade, IsGhost: c.ghost, Position: c.ordem },
+            select: { Id: true },
+          });
+          compMap.set(c.id, rc.Id);
+          let defaultDbId: number | null = null;
+          for (const opt of c.options) {
+            const m = await prisma.material.create({
+              data: {
+                RoomComponentId: rc.Id,
+                RoomId: dbRoom.Id,
+                EnterpriseId: activeId,
+                BaseMaterialId: catalogMap.get(opt.baseId)!,
+                Position: opt.ordem,
+                IsDefault: opt.isDefault,
+              },
+              select: { Id: true },
+            });
+            optMap.set(opt.id, m.Id);
+            if (c.padrao === opt.id) defaultDbId = m.Id;
+          }
+          if (defaultDbId != null) {
+            await prisma.roomComponent.update({ where: { Id: rc.Id }, data: { DefaultMaterialId: defaultDbId } });
+          }
+        }
+        cache = { dbRoomId: dbRoom.Id, compMap };
+        roomCache.set(amb.id, cache);
+      }
+      const br = await prisma.blueprintRoom.create({
+        data: { BlueprintId: bp.Id, RoomId: cache.dbRoomId, Position: ai, Polygon: json(amb.local) },
+        select: { Id: true },
+      });
+      for (const c of amb.componentes) {
+        const brc = await prisma.blueprintRoomComponent.create({
+          data: {
+            BlueprintRoomId: br.Id,
+            RoomComponentId: cache.compMap.get(c.id)!,
+            UsageQuantity: c.qtd,
+            TechnicalReservePct: c.rt,
+          },
+          select: { Id: true },
+        });
+        const kitEntries = Object.entries(c.kitQtds);
+        if (kitEntries.length > 0) {
+          await prisma.materialKitUsage.createMany({
+            data: kitEntries.map(([kitItemSeedId, q]) => ({
+              BlueprintRoomComponentId: brc.Id,
+              KitItemId: kitItemMap.get(Number(kitItemSeedId))!,
+              UsageQuantity: q,
+            })),
+          });
+        }
+      }
+    }
+  }
+
+  // ── Torres + grupos de unidades (Enterprise âncora) ──
+  const towerMap = new Map<string, number>();
+  for (const [i, nome] of seed.torres.entries()) {
+    const row = await prisma.tower.create({
+      data: { EnterpriseId: activeId, Name: nome, Position: i },
+      select: { Id: true },
+    });
+    towerMap.set(nome, row.Id);
+  }
   await prisma.unitGroup.createMany({
-    data: seed.unitGroups.map((g) => ({ ...g, organizationId: ORG_ID })),
+    data: seed.unitGroups.map((g) => ({
+      EnterpriseId: activeId,
+      Name: g.nome,
+      TowerId: towerMap.get(g.torre) ?? null,
+      UnitNumbers: g.unidades,
+    })),
   });
 
-  // ── Pendências + versões ──
-  await prisma.pendingItem.createMany({
-    data: seed.pendingItems.map((key) => ({ key, organizationId: ORG_ID })),
-  });
+  // ── Versões ──
   await prisma.budgetVersion.createMany({
     data: seed.versions.map((v, i) => ({
-      id: v.id,
-      label: v.label,
-      criadoEm: v.createdAt,
-      createdBy: v.createdBy,
-      isCurrent: v.isCurrent,
-      summary: v.summary,
-      changes: json(v.changes) ?? {},
-      ordem: i,
-      organizationId: ORG_ID,
+      EnterpriseId: activeId,
+      Label: v.label,
+      CreatedAtLabel: v.createdAt,
+      CreatedBy: v.createdBy,
+      IsCurrent: v.isCurrent,
+      Summary: v.summary,
+      Changes: json(v.changes) ?? {},
+      Position: i,
     })),
   });
 
-  // ── Projetos (+ colunas de orçamento do projeto ativo) ──
-  for (const p of seed.projects) {
-    const { taxColumns, tipologias: _tips, taxas, ...rest } = p;
-    await prisma.project.create({
-      data: {
-        ...rest,
-        taxas: json(taxas),
-        organizationId: ORG_ID,
-        taxColumns: taxColumns
-          ? {
-              create: taxColumns.map((c, i) => ({
-                ...c,
-                ordem: i,
-                organizationId: ORG_ID,
-              })),
-            }
-          : undefined,
-      },
-    });
-  }
-
-  // ── Comentários (threads por rowKey, ordem preservada via createdAt) ──
-  const base = Date.now();
-  const commentRows = Object.entries(seed.comments).flatMap(([rowKey, thread]) =>
-    thread.map((c, i) => ({
-      rowKey,
-      autor: c.autor,
-      texto: c.texto,
-      data: c.data,
-      createdAt: new Date(base + i * 1000),
-      organizationId: ORG_ID,
-    }))
-  );
-  await prisma.comment.createMany({ data: commentRows });
+  // ── Comentários (thread por opção; rowKey = String(optionId) do seed) ──
+  const cbase = Date.now();
+  const commentRows = Object.entries(seed.comments).flatMap(([rowKey, thread]) => {
+    const materialId = optMap.get(Number(rowKey));
+    if (materialId == null) return [];
+    return thread.map((c, i) => ({
+      MaterialId: materialId,
+      EnterpriseId: activeId,
+      Author: c.autor,
+      Text: c.texto,
+      DateLabel: c.data,
+      CreatedAt: new Date(cbase + i * 1000),
+    }));
+  });
+  if (commentRows.length > 0) await prisma.comment.createMany({ data: commentRows });
 
   // ── Resumo ──
   const counts = {
-    materiais: await prisma.material.count({ where: org }),
-    kits: await prisma.kit.count({ where: org }),
-    tipologias: await prisma.tipologia.count({ where: org }),
-    ambientes: await prisma.ambiente.count({ where: org }),
-    componentes: await prisma.componente.count({ where: org }),
-    projects: await prisma.project.count({ where: org }),
-    budgetColumns: await prisma.budgetColumn.count({ where: org }),
-    unitGroups: await prisma.unitGroup.count({ where: org }),
-    torres: await prisma.tower.count({ where: org }),
-    pendingItems: await prisma.pendingItem.count({ where: org }),
-    versions: await prisma.budgetVersion.count({ where: org }),
-    comments: await prisma.comment.count({ where: org }),
+    baseMateriais: await prisma.baseMaterial.count({ where: { OrganizationId: ORG_ID } }),
+    blueprints: await prisma.blueprint.count({ where: { EnterpriseId: activeId } }),
+    rooms: await prisma.room.count({ where: { EnterpriseId: activeId } }),
+    blueprintRooms: await prisma.blueprintRoom.count({ where: { Blueprint: { EnterpriseId: activeId } } }),
+    roomComponents: await prisma.roomComponent.count({ where: { Room: { EnterpriseId: activeId } } }),
+    materials: await prisma.material.count({ where: { EnterpriseId: activeId } }),
+    enterprises: await prisma.enterprise.count({ where: { OrganizationId: ORG_ID } }),
+    unitGroups: await prisma.unitGroup.count({ where: { EnterpriseId: activeId } }),
+    versions: await prisma.budgetVersion.count({ where: { EnterpriseId: activeId } }),
+    comments: await prisma.comment.count({ where: { EnterpriseId: activeId } }),
   };
   console.log("Seed concluído:", counts);
   if (authUserId) {

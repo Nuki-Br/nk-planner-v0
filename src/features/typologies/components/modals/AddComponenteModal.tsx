@@ -16,7 +16,7 @@ const UNIDADE_OPTIONS = [
 interface AddComponenteModalProps {
   open: boolean;
   onClose: () => void;
-  tipologiaId: string;
+  tipologiaId: number;
   ambiente: Ambiente | null;
   materiais: Material[];
   kits: Kit[];
@@ -48,8 +48,8 @@ export function AddComponenteModal({
   }, [open]);
 
   const padraoOptions = [
-    ...materiais.map((m) => ({ value: m.id, label: `${m.nome} — ${m.fabricante}` })),
-    ...kits.map((k) => ({ value: k.id, label: `[Kit] ${k.nome} — ${k.itens.length} itens` })),
+    ...materiais.map((m) => ({ value: String(m.id), label: `${m.nome} — ${m.fabricante}` })),
+    ...kits.map((k) => ({ value: String(k.id), label: `[Kit] ${k.nome} — ${k.itens.length} itens` })),
   ];
 
   const handleAdd = () => {
@@ -57,13 +57,13 @@ export function AddComponenteModal({
     createComponente.mutate(
       {
         tipologiaId,
-        ambienteId: ambiente.id,
+        ambienteId: ambiente.blueprintRoomId,
         input: {
           nome: nome.trim(),
           unidade: unidade as Unidade,
           qtd: parseBR(qtd),
           rt: parseBR(rt),
-          padrao: padrao || null,
+          padraoBaseId: padrao ? Number(padrao) : null,
         },
       },
       { onSuccess: onClose }

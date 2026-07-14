@@ -12,7 +12,12 @@ import type { FillLink, FillLinkCampos, Tipologia } from "@/shared/types/domain"
 /** Itens preenchíveis de uma tipologia (padrão + upgrades por componente). */
 function itemCount(tip: Tipologia): number {
   return tip.ambientes.reduce(
-    (a, amb) => a + amb.componentes.reduce((c, comp) => c + comp.upgrades.length + 1, 0),
+    (a, amb) =>
+      a +
+      amb.componentes.reduce(
+        (c, comp) => c + comp.options.filter((o) => !o.isDefault).length + 1,
+        0
+      ),
     0
   );
 }

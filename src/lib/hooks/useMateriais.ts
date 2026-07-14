@@ -29,12 +29,11 @@ export function useCreateMaterial() {
 export function useUpdateMaterial() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, patch }: { id: string; patch: Partial<MaterialInput> }) =>
+    mutationFn: ({ id, patch }: { id: number; patch: Partial<MaterialInput> }) =>
       updateMaterial(id, patch),
     onSuccess: () => {
+      // custoMat > 0 tira a pendência (derivada do custo) — refletir na UI.
       void queryClient.invalidateQueries({ queryKey: queryKeys.materiais });
-      // custoMat > 0 remove a pendência no servidor — refletir na UI.
-      void queryClient.invalidateQueries({ queryKey: queryKeys.pendingItems });
     },
   });
 }

@@ -23,7 +23,7 @@ export function useCreateKit() {
 export function useUpdateKit() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, patch }: { id: string; patch: Partial<KitInput> }) =>
+    mutationFn: ({ id, patch }: { id: number; patch: Partial<KitInput> }) =>
       updateKit(id, patch),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.kits });

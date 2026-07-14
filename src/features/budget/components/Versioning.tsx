@@ -148,7 +148,7 @@ export function VersionDrawer({
   onRestore: (v: BudgetVersion) => void;
 }) {
   const current = versions.find((v) => v.isCurrent) ?? versions[0];
-  const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = React.useState<Set<number>>(new Set());
   React.useEffect(() => {
     if (open) setExpanded(new Set(current ? [current.id] : []));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -162,7 +162,7 @@ export function VersionDrawer({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
   if (!open) return null;
-  const toggle = (id: string) =>
+  const toggle = (id: number) =>
     setExpanded((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);

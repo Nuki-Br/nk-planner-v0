@@ -15,7 +15,7 @@ import {
   PageHeader,
   type DataTableColumn,
 } from "@/components/ui";
-import { getMaterial, type Entity } from "@/lib/data/entities";
+import type { Entity } from "@/lib/data/entities";
 import { useKits } from "@/lib/hooks/useKits";
 import { useMateriais } from "@/lib/hooks/useMateriais";
 import { useProject } from "@/lib/hooks/useProjects";
@@ -129,7 +129,7 @@ export function CatalogScreen() {
             <span className="font-bold text-neutral-gray-11">{r.nome}</span>
             <span className="block text-[11px] text-neutral-gray-7">
               {r.itens
-                .map((id) => getMaterial(materiais, id)?.nome)
+                .map((it) => it.nome)
                 .filter(Boolean)
                 .slice(0, 2)
                 .join(" · ")}
