@@ -1,13 +1,13 @@
 import type { NextRequest } from "next/server";
 
-import { withOrg } from "@/lib/api/handler";
+import { toInt, withOrg } from "@/lib/api/handler";
 import { linkAmbiente } from "@/lib/server/store";
 
-/** Vincula (clona + registra compartilhamento) um ambiente de outra tipologia. */
+/**
+ * Compartilha um ambiente de outra planta na planta alvo (insere um BlueprintRoom
+ * para o MESMO Room — sem clonar). `srcAmbienteId` = BlueprintRoom de origem.
+ */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  const { srcTipologiaId, srcAmbienteId } = (await req.json()) as {
-    srcTipologiaId: string;
-    srcAmbienteId: string;
-  };
-  return withOrg((org) => linkAmbiente(org, params.id, srcTipologiaId, srcAmbienteId));
+  const { srcAmbienteId } = (await req.json()) as { srcAmbienteId: number };
+  return withOrg((org) => linkAmbiente(org, toInt(params.id), srcAmbienteId));
 }

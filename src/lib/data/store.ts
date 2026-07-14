@@ -1,7 +1,7 @@
-// Camada de dados do cliente (Fase 10) — as MESMAS assinaturas do store mock
-// das fases 1–9, agora chamando as rotas /api/* via httpGet/httpSend. Hooks
-// React Query e telas permanecem intocados; a organização vem da sessão no
-// servidor (o cliente nunca envia org).
+// Camada de dados do cliente (Fase 3/4 — realinhada) — as MESMAS assinaturas do
+// store de servidor, agora chamando as rotas /api/* via httpGet/httpSend. Ids de
+// domínio em `number`; a organização vem da sessão no servidor (o cliente nunca
+// envia org). Pendência não é mais uma tabela — deriva do custo (custo 0).
 import { httpGet, httpSend } from "@/lib/api/http";
 import type {
   Ambiente,
@@ -15,6 +15,7 @@ import type {
   Project,
   Tipologia,
   TipologiaStatus,
+  Unidade,
   UnitGroup,
   VersionChanges,
 } from "@/shared/types/domain";
@@ -42,25 +43,25 @@ export async function listProjects(): Promise<Project[]> {
   return httpGet<Project[]>("/api/projects");
 }
 
-export async function getProject(id: string): Promise<Project | null> {
+export async function getProject(id: number): Promise<Project | null> {
   return httpGet<Project | null>(`/api/projects/${id}`);
 }
 
-export async function updateProject(id: string, patch: ProjectPatch): Promise<Project> {
+export async function updateProject(id: number, patch: ProjectPatch): Promise<Project> {
   return httpSend<Project, ProjectPatch>(`/api/projects/${id}`, "PATCH", patch);
 }
 
 /** Marca o planejamento como concluído (status "publicado") — não bloqueia edição. */
-export async function publishProject(id: string): Promise<Project> {
+export async function publishProject(id: number): Promise<Project> {
   return httpSend<Project>(`/api/projects/${id}/publish`, "POST");
 }
 
-export async function getBudgetColumns(projectId: string): Promise<BudgetColumn[]> {
+export async function getBudgetColumns(projectId: number): Promise<BudgetColumn[]> {
   return httpGet<BudgetColumn[]>(`/api/projects/${projectId}/columns`);
 }
 
 export async function updateBudgetColumns(
-  projectId: string,
+  projectId: number,
   cols: BudgetColumn[]
 ): Promise<BudgetColumn[]> {
   return httpSend<BudgetColumn[], BudgetColumn[]>(
@@ -70,7 +71,7 @@ export async function updateBudgetColumns(
   );
 }
 
-// ─── Materiais ────────────────────────────────────────────────────────
+// ─── Materiais (BaseMaterial single) ────────────────────────────────────
 
 export type MaterialInput = Omit<Material, "id">;
 
@@ -88,19 +89,19 @@ export async function createMateriais(inputs: MaterialInput[]): Promise<Material
 }
 
 export async function updateMaterial(
-  id: string,
+  id: number,
   patch: Partial<MaterialInput>
 ): Promise<Material> {
   return httpSend<Material, Partial<MaterialInput>>(`/api/materiais/${id}`, "PATCH", patch);
 }
 
-export async function deleteMaterial(id: string): Promise<void> {
+export async function deleteMaterial(id: number): Promise<void> {
   await httpSend<null>(`/api/materiais/${id}`, "DELETE");
 }
 
-// ─── Kits ─────────────────────────────────────────────────────────────
+// ─── Kits (BaseMaterial kit) ────────────────────────────────────────────
 
-export type KitInput = Omit<Kit, "id" | "tipo">;
+export type KitInput = Omit<Kit, "id">;
 
 export async function listKits(): Promise<Kit[]> {
   return httpGet<Kit[]>("/api/kits");
@@ -110,15 +111,15 @@ export async function createKit(input: KitInput): Promise<Kit> {
   return httpSend<Kit, KitInput>("/api/kits", "POST", input);
 }
 
-export async function updateKit(id: string, patch: Partial<KitInput>): Promise<Kit> {
+export async function updateKit(id: number, patch: Partial<KitInput>): Promise<Kit> {
   return httpSend<Kit, Partial<KitInput>>(`/api/kits/${id}`, "PATCH", patch);
 }
 
-export async function deleteKit(id: string): Promise<void> {
+export async function deleteKit(id: number): Promise<void> {
   await httpSend<null>(`/api/kits/${id}`, "DELETE");
 }
 
-// ─── Tipologias ───────────────────────────────────────────────────────
+// ─── Tipologias (Blueprint) ─────────────────────────────────────────────
 
 export type TipologiaInput = Pick<Tipologia, "nome" | "metragem" | "descricao" | "unidades">;
 
@@ -126,7 +127,7 @@ export async function listTipologias(): Promise<Tipologia[]> {
   return httpGet<Tipologia[]>("/api/tipologias");
 }
 
-export async function getTipologia(id: string): Promise<Tipologia | null> {
+export async function getTipologia(id: number): Promise<Tipologia | null> {
   return httpGet<Tipologia | null>(`/api/tipologias/${id}`);
 }
 
@@ -135,7 +136,7 @@ export async function createTipologia(input: TipologiaInput): Promise<Tipologia>
 }
 
 export async function updateTipologia(
-  id: string,
+  id: number,
   patch: Partial<TipologiaInput & Pick<Tipologia, "status">>
 ): Promise<Tipologia> {
   return httpSend<Tipologia, Partial<TipologiaInput & { status: TipologiaStatus }>>(
@@ -145,22 +146,22 @@ export async function updateTipologia(
   );
 }
 
-export async function deleteTipologia(id: string): Promise<void> {
+export async function deleteTipologia(id: number): Promise<void> {
   await httpSend<null>(`/api/tipologias/${id}`, "DELETE");
 }
 
-/** Clona a árvore inteira (ambientes/componentes) com ids novos. */
-export async function duplicateTipologia(id: string): Promise<Tipologia> {
+/** Clona a planta inteira como cópia independente. */
+export async function duplicateTipologia(id: number): Promise<Tipologia> {
   return httpSend<Tipologia>(`/api/tipologias/${id}/duplicar`, "POST");
 }
 
-// ─── Ambientes ────────────────────────────────────────────────────────
+// ─── Ambientes (Room + BlueprintRoom; ambienteId = blueprintRoomId) ─────
 
 export type AmbienteInput = Pick<Ambiente, "nome"> &
   Partial<Pick<Ambiente, "icon" | "imagem" | "local">>;
 
 export async function createAmbiente(
-  tipologiaId: string,
+  tipologiaId: number,
   input: AmbienteInput
 ): Promise<Ambiente> {
   return httpSend<Ambiente, AmbienteInput>(
@@ -171,8 +172,8 @@ export async function createAmbiente(
 }
 
 export async function updateAmbiente(
-  tipologiaId: string,
-  ambienteId: string,
+  tipologiaId: number,
+  ambienteId: number,
   patch: Partial<AmbienteInput>
 ): Promise<Ambiente> {
   return httpSend<Ambiente, Partial<AmbienteInput>>(
@@ -182,13 +183,13 @@ export async function updateAmbiente(
   );
 }
 
-export async function deleteAmbiente(tipologiaId: string, ambienteId: string): Promise<void> {
+export async function deleteAmbiente(tipologiaId: number, ambienteId: number): Promise<void> {
   await httpSend<null>(`/api/tipologias/${tipologiaId}/ambientes/${ambienteId}`, "DELETE");
 }
 
 export async function cloneAmbiente(
-  tipologiaId: string,
-  ambienteId: string
+  tipologiaId: number,
+  ambienteId: number
 ): Promise<Ambiente> {
   return httpSend<Ambiente>(
     `/api/tipologias/${tipologiaId}/ambientes/${ambienteId}/clonar`,
@@ -197,33 +198,41 @@ export async function cloneAmbiente(
 }
 
 export async function reorderAmbientes(
-  tipologiaId: string,
-  orderedIds: string[]
+  tipologiaId: number,
+  orderedIds: number[]
 ): Promise<void> {
-  await httpSend<null, { orderedIds: string[] }>(
+  await httpSend<null, { orderedIds: number[] }>(
     `/api/tipologias/${tipologiaId}/ambientes`,
     "PUT",
     { orderedIds }
   );
 }
 
-// ─── Componentes ──────────────────────────────────────────────────────
+// ─── Componentes (RoomComponent + BlueprintRoomComponent) ───────────────
 
-export type ComponenteInput = Pick<Componente, "nome" | "unidade" | "qtd" | "rt"> &
-  Partial<Pick<Componente, "ghost" | "ordem" | "padrao">>;
+export interface ComponenteInput {
+  nome: string;
+  unidade: Unidade;
+  qtd: number;
+  rt: number;
+  ghost?: boolean;
+  ordem?: number;
+  /** BaseMaterial a semear como opção default (crédito). */
+  padraoBaseId?: number | null;
+}
 
 /** Operações de padrão/upgrades/kitQtds — POST único em /opcoes. */
 type OpcaoBody =
-  | { op: "setPadrao"; padraoId: string | null }
-  | { op: "addUpgrade"; upgradeId: string }
-  | { op: "replaceUpgrade"; oldId: string; newId: string }
-  | { op: "removeUpgrade"; upgradeId: string }
-  | { op: "setKitQtds"; kitId: string; qtds: Record<string, number> };
+  | { op: "setPadrao"; padraoBaseId: number | null }
+  | { op: "addUpgrade"; baseId: number }
+  | { op: "replaceUpgrade"; optionId: number; newBaseId: number }
+  | { op: "removeUpgrade"; optionId: number }
+  | { op: "setKitQtds"; qtds: Record<number, number> };
 
 function opcao(
-  tipologiaId: string,
-  ambienteId: string,
-  componenteId: string,
+  tipologiaId: number,
+  ambienteId: number,
+  componenteId: number,
   body: OpcaoBody
 ): Promise<Componente> {
   return httpSend<Componente, OpcaoBody>(
@@ -234,8 +243,8 @@ function opcao(
 }
 
 export async function createComponente(
-  tipologiaId: string,
-  ambienteId: string,
+  tipologiaId: number,
+  ambienteId: number,
   input: ComponenteInput
 ): Promise<Componente> {
   return httpSend<Componente, ComponenteInput>(
@@ -246,9 +255,9 @@ export async function createComponente(
 }
 
 export async function updateComponente(
-  tipologiaId: string,
-  ambienteId: string,
-  componenteId: string,
+  tipologiaId: number,
+  ambienteId: number,
+  componenteId: number,
   patch: Partial<ComponenteInput>
 ): Promise<Componente> {
   return httpSend<Componente, Partial<ComponenteInput>>(
@@ -259,9 +268,9 @@ export async function updateComponente(
 }
 
 export async function deleteComponente(
-  tipologiaId: string,
-  ambienteId: string,
-  componenteId: string
+  tipologiaId: number,
+  ambienteId: number,
+  componenteId: number
 ): Promise<void> {
   await httpSend<null>(
     `/api/tipologias/${tipologiaId}/ambientes/${ambienteId}/componentes/${componenteId}`,
@@ -270,72 +279,74 @@ export async function deleteComponente(
 }
 
 export async function reorderComponentes(
-  tipologiaId: string,
-  ambienteId: string,
-  orderedIds: string[]
+  tipologiaId: number,
+  ambienteId: number,
+  orderedIds: number[]
 ): Promise<void> {
-  await httpSend<null, { orderedIds: string[] }>(
+  await httpSend<null, { orderedIds: number[] }>(
     `/api/tipologias/${tipologiaId}/ambientes/${ambienteId}/componentes`,
     "PUT",
     { orderedIds }
   );
 }
 
+/** Define o material default (crédito). padraoBaseId = BaseMaterial escolhido; null limpa. */
 export async function setPadrao(
-  tipologiaId: string,
-  ambienteId: string,
-  componenteId: string,
-  padraoId: string | null
+  tipologiaId: number,
+  ambienteId: number,
+  componenteId: number,
+  padraoBaseId: number | null
 ): Promise<Componente> {
-  return opcao(tipologiaId, ambienteId, componenteId, { op: "setPadrao", padraoId });
+  return opcao(tipologiaId, ambienteId, componenteId, { op: "setPadrao", padraoBaseId });
 }
 
+/** Adiciona uma opção (upgrade) referenciando um BaseMaterial do catálogo. */
 export async function addUpgrade(
-  tipologiaId: string,
-  ambienteId: string,
-  componenteId: string,
-  upgradeId: string
+  tipologiaId: number,
+  ambienteId: number,
+  componenteId: number,
+  baseId: number
 ): Promise<Componente> {
-  return opcao(tipologiaId, ambienteId, componenteId, { op: "addUpgrade", upgradeId });
+  return opcao(tipologiaId, ambienteId, componenteId, { op: "addUpgrade", baseId });
 }
 
-/** Troca o material de uma opção preservando a posição no array (ups[i] = novo). */
+/** Troca o BaseMaterial de uma opção (optionId → newBaseId), preservando a posição. */
 export async function replaceUpgrade(
-  tipologiaId: string,
-  ambienteId: string,
-  componenteId: string,
-  oldId: string,
-  newId: string
+  tipologiaId: number,
+  ambienteId: number,
+  componenteId: number,
+  optionId: number,
+  newBaseId: number
 ): Promise<Componente> {
-  return opcao(tipologiaId, ambienteId, componenteId, { op: "replaceUpgrade", oldId, newId });
+  return opcao(tipologiaId, ambienteId, componenteId, { op: "replaceUpgrade", optionId, newBaseId });
 }
 
+/** Remove uma opção (por id de linha Material). */
 export async function removeUpgrade(
-  tipologiaId: string,
-  ambienteId: string,
-  componenteId: string,
-  upgradeId: string
+  tipologiaId: number,
+  ambienteId: number,
+  componenteId: number,
+  optionId: number
 ): Promise<Componente> {
-  return opcao(tipologiaId, ambienteId, componenteId, { op: "removeUpgrade", upgradeId });
+  return opcao(tipologiaId, ambienteId, componenteId, { op: "removeUpgrade", optionId });
 }
 
-/** Grava os quantitativos dos sub-itens de um kit para o componente. */
+/** Grava os quantitativos de sub-itens de kit desta planta (keyed por KitItem id). */
 export async function setKitQtds(
-  tipologiaId: string,
-  ambienteId: string,
-  componenteId: string,
-  kitId: string,
-  qtds: Record<string, number>
+  tipologiaId: number,
+  ambienteId: number,
+  componenteId: number,
+  qtds: Record<number, number>
 ): Promise<Componente> {
-  return opcao(tipologiaId, ambienteId, componenteId, { op: "setKitQtds", kitId, qtds });
+  return opcao(tipologiaId, ambienteId, componenteId, { op: "setKitQtds", qtds });
 }
 
 // ─── Compartilhamento de ambientes entre tipologias ──────────────────
 
 export interface SharedInfo {
-  /** shareId → tipologias participantes. */
+  /** shareId (String(roomId)) → tipologias participantes. */
   sharedReg: Record<string, { tips: string[] }>;
-  /** ambienteId → shareId. */
+  /** String(roomId) → shareId. */
   ambShared: Record<string, string>;
 }
 
@@ -344,18 +355,17 @@ export async function getSharedInfo(): Promise<SharedInfo> {
 }
 
 /**
- * Vincula um ambiente de outra tipologia à tipologia alvo: clona o ambiente
- * (ids novos) e registra ambos no grupo compartilhado do ambiente fonte.
+ * Compartilha um ambiente de outra planta na planta alvo: insere um BlueprintRoom
+ * apontando para o MESMO Room (sem clonar). A paleta passa a propagar.
  */
 export async function linkAmbiente(
-  targetTipologiaId: string,
-  srcTipologiaId: string,
-  srcAmbienteId: string
+  targetTipologiaId: number,
+  srcBlueprintRoomId: number
 ): Promise<Ambiente> {
-  return httpSend<Ambiente, { srcTipologiaId: string; srcAmbienteId: string }>(
+  return httpSend<Ambiente, { srcAmbienteId: number }>(
     `/api/tipologias/${targetTipologiaId}/ambientes/vincular`,
     "POST",
-    { srcTipologiaId, srcAmbienteId }
+    { srcAmbienteId: srcBlueprintRoomId }
   );
 }
 
@@ -372,7 +382,7 @@ export async function createUnitGroup(input: UnitGroupInput): Promise<UnitGroup>
 }
 
 export async function updateUnitGroup(
-  id: string,
+  id: number,
   patch: Partial<UnitGroupInput>
 ): Promise<UnitGroup> {
   return httpSend<UnitGroup, Partial<UnitGroupInput>>(
@@ -382,7 +392,7 @@ export async function updateUnitGroup(
   );
 }
 
-export async function deleteUnitGroup(id: string): Promise<void> {
+export async function deleteUnitGroup(id: number): Promise<void> {
   await httpSend<null>(`/api/unit-groups/${id}`, "DELETE");
 }
 
@@ -407,11 +417,11 @@ export async function createVersion(input: VersionInput): Promise<BudgetVersion>
 }
 
 /** Marca a versão como atual (snapshot/restore real de estado — §12). */
-export async function restoreVersion(id: string): Promise<BudgetVersion> {
+export async function restoreVersion(id: number): Promise<BudgetVersion> {
   return httpSend<BudgetVersion>(`/api/versions/${id}/restore`, "POST");
 }
 
-// ─── Comments (rowKey = `${compId}-${optId}`) ─────────────────────────
+// ─── Comments (rowKey = String(optionId)) ─────────────────────────────
 
 export interface CommentInput {
   autor: Comment["autor"];
@@ -432,20 +442,6 @@ export async function appendComment(rowKey: string, input: CommentInput): Promis
     rowKey,
     input,
   });
-}
-
-// ─── Pending items ────────────────────────────────────────────────────
-
-export async function listPendingItems(): Promise<string[]> {
-  return httpGet<string[]>("/api/pending-items");
-}
-
-export async function addPendingItem(key: string): Promise<void> {
-  await httpSend<null, { key: string }>("/api/pending-items", "POST", { key });
-}
-
-export async function removePendingItem(key: string): Promise<void> {
-  await httpSend<null>(`/api/pending-items?key=${encodeURIComponent(key)}`, "DELETE");
 }
 
 // ─── Links de preenchimento (o portal usa /api/portal/[token]) ────────

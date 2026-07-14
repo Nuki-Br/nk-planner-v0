@@ -11,7 +11,7 @@ interface UnitGroupEditorProps {
   group: UnitGroup;
   torres: string[];
   onPatch: (patch: Partial<Omit<UnitGroup, "id">>) => void;
-  onRemove: (id: string) => void;
+  onRemove: (id: number) => void;
 }
 
 export function UnitGroupEditorEmpty() {

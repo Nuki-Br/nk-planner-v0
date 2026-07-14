@@ -11,15 +11,14 @@ describe("createSeed", () => {
     expect(seed.tipologias).toHaveLength(3);
     expect(seed.torres).toHaveLength(3);
     expect(seed.unitGroups).toHaveLength(5);
-    expect(seed.pendingItems).toHaveLength(5);
     expect(seed.versions).toHaveLength(3);
     expect(seed.projects).toHaveLength(5);
     expect(Object.keys(seed.comments)).toHaveLength(2);
   });
 
-  it("projects[0] carrega os extras do THE_PROJECT (typo corrigido)", () => {
+  it("projects[0] é o empreendimento âncora, com os extras", () => {
     const p = seed.projects[0];
-    expect(p?.id).toBe("p001");
+    expect(p?.nome).toBe("Parque Ibirapuera Residências");
     expect(p?.itensPreenchidos).toBe(50);
     expect(p?.inccBase).toBe("04/2026");
     expect(p?.taxas?.incorporadora).toBe(22);
@@ -28,28 +27,58 @@ describe("createSeed", () => {
   });
 
   it("estrutura das tipologias bate com o protótipo", () => {
-    const t1 = seed.tipologias.find((t) => t.id === "t1");
+    const t1 = seed.tipologias[0];
+    expect(t1?.nome).toBe("Planta A — 86m²");
     expect(t1?.ambientes).toHaveLength(5);
-    const c111 = t1?.ambientes[0]?.componentes[0];
-    expect(c111?.id).toBe("c1-1-1");
-    expect(c111?.qtd).toBe(18.4);
-    expect(c111?.rt).toBe(15);
-    expect(c111?.kitQtds?.["kit-piso-barcelona"]?.["sol-bcn"]).toBe(2);
-    const t3 = seed.tipologias.find((t) => t.id === "t3");
-    expect(t3?.status).toBe("incompleta");
+
+    const piso = t1?.ambientes[0]?.componentes[0];
+    expect(piso?.nome).toBe("Piso");
+    expect(piso?.qtd).toBe(18.4);
+    expect(piso?.rt).toBe(15);
+
+    const rodape = t1?.ambientes[0]?.componentes[1];
+    expect(rodape?.nome).toBe("Rodapé");
+    expect(rodape?.qtd).toBe(16.8);
+    expect(rodape?.rt).toBe(5);
+
+    const kitPB = seed.kits.find((k) => k.nome === "Piso Barcelona + Soleira + RT");
+    expect(kitPB?.itens).toHaveLength(3);
+
+    expect(seed.tipologias[2]?.nome).toBe("Planta C — 142m²");
+    expect(seed.tipologias[2]?.status).toBe("incompleta");
+  });
+
+  it("Sala/Living é um Room compartilhado pelas 3 plantas", () => {
+    const s1 = seed.tipologias[0]!.ambientes[0]!;
+    const s2 = seed.tipologias[1]!.ambientes[0]!;
+    const s3 = seed.tipologias[2]!.ambientes[0]!;
+
+    // mesmo Room id nas 3 plantas
+    expect(s1.id).toBe(s2.id);
+    expect(s2.id).toBe(s3.id);
+
+    // paleta compartilhada: mesmos ids de componente e de opção
+    expect(s1.componentes.map((c) => c.id)).toEqual(s2.componentes.map((c) => c.id));
+    expect(s1.componentes[0]!.options.map((o) => o.id)).toEqual(
+      s3.componentes[0]!.options.map((o) => o.id)
+    );
+
+    // só a instância por planta difere (qtd / RT / blueprintRoomId)
+    expect(s1.componentes[0]!.qtd).not.toBe(s2.componentes[0]!.qtd);
+    expect(s1.blueprintRoomId).not.toBe(s2.blueprintRoomId);
   });
 
   it("versão atual é a v3", () => {
-    expect(seed.versions.find((v) => v.isCurrent)?.id).toBe("v3");
+    expect(seed.versions.find((v) => v.isCurrent)?.label).toBe("v3");
   });
 
   it("cada chamada retorna estrutura nova e isolada", () => {
     const a = createSeed();
     const b = createSeed();
     expect(a).not.toBe(b);
-    a.materiais.push({ ...a.materiais[0]!, id: "x-teste" });
-    const t = a.tipologias[0]?.ambientes[0]?.componentes[0];
-    if (t) t.qtd = 999;
+    a.materiais.push({ ...a.materiais[0]!, id: 999999 });
+    const c = a.tipologias[0]?.ambientes[0]?.componentes[0];
+    if (c) c.qtd = 999;
     expect(b.materiais).toHaveLength(25);
     expect(b.tipologias[0]?.ambientes[0]?.componentes[0]?.qtd).toBe(18.4);
   });

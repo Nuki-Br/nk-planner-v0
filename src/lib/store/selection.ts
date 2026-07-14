@@ -6,12 +6,12 @@ import { create } from "zustand";
 // protótipo (que passava objetos vivos). Guarda APENAS ids; os dados vêm dos
 // hooks React Query a partir das rotas ([id], [cid]).
 interface SelectionState {
-  activeProjectId: string | null;
-  selectedTipologiaId: string | null;
-  selectedComponentId: string | null;
-  setActiveProject: (id: string | null) => void;
-  setSelectedTipologia: (id: string | null) => void;
-  setSelectedComponent: (id: string | null) => void;
+  activeProjectId: number | null;
+  selectedTipologiaId: number | null;
+  selectedComponentId: number | null;
+  setActiveProject: (id: number | null) => void;
+  setSelectedTipologia: (id: number | null) => void;
+  setSelectedComponent: (id: number | null) => void;
   clearSelection: () => void;
 }
 

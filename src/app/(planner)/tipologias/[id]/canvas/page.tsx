@@ -9,7 +9,7 @@ import { useSelection } from "@/lib/store/selection";
 export default function CanvasPage({ params }: { params: { id: string } }) {
   const setSelectedTipologia = useSelection((s) => s.setSelectedTipologia);
   React.useEffect(() => {
-    setSelectedTipologia(params.id);
+    setSelectedTipologia(Number(params.id));
   }, [params.id, setSelectedTipologia]);
 
   return <CanvasScreen tipologiaId={params.id} />;

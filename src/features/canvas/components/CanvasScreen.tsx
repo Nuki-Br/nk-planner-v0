@@ -7,7 +7,6 @@ import { Button, LoadingState, Modal, StatusBadge } from "@/components/ui";
 import { buildLayout, CV } from "@/lib/canvas/buildLayout";
 import { useKits } from "@/lib/hooks/useKits";
 import { useMateriais } from "@/lib/hooks/useMateriais";
-import { usePendingItems } from "@/lib/hooks/usePendingItems";
 import {
   useAddUpgrade,
   useCloneAmbiente,
@@ -45,14 +44,16 @@ import { TipFormModal, type TipFormValue } from "./TipFormModal";
 import { Viewport } from "./Viewport";
 
 interface MatPickerState {
-  ambId: string;
-  compId: string;
-  /** optId sendo trocado; null = adicionando. */
-  which: string | null;
+  /** blueprintRoomId do ambiente. */
+  ambId: number;
+  compId: number;
+  /** optId (linha de opção) sendo trocado; null = adicionando/padrão. */
+  which: number | null;
   isPadrao: boolean;
   title: string;
   subtitle: string;
-  currentId: string | null;
+  /** id de catálogo (baseId) atual, para pré-seleção no picker. */
+  currentId: number | null;
 }
 
 interface ConfirmState {
@@ -62,14 +63,17 @@ interface ConfirmState {
 }
 
 const EMPTY_COMP: Componente = {
-  id: "",
+  id: 0,
   nome: "",
   unidade: "m²",
+  instanceId: 0,
   qtd: 0,
   rt: 15,
   padrao: null,
-  upgrades: [],
-  taxaEspecifica: null,
+  options: [],
+  ghost: false,
+  ordem: 1,
+  kitQtds: {},
 };
 
 // Tela 4 — Visualizador editável (protótipo: TypologyCanvasScreen).
@@ -80,9 +84,9 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
   const { data: tipologias = [], isLoading: tipsLoading } = useTipologias();
   const { data: materiais = [] } = useMateriais();
   const { data: kits = [] } = useKits();
-  const { data: pendingSet = new Set<string>() } = usePendingItems();
 
-  const tip = tipologias.find((t) => t.id === tipologiaId) ?? tipologias[0] ?? null;
+  const tipParam = Number(tipologiaId);
+  const tip = tipologias.find((t) => t.id === tipParam) ?? tipologias[0] ?? null;
 
   const [expanded, setExpanded] = React.useState<ReadonlySet<string>>(new Set());
   const [detailed, setDetailed] = React.useState(false);
@@ -90,7 +94,7 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
   // Modais
   const [matPicker, setMatPicker] = React.useState<MatPickerState | null>(null);
   const [ambModal, setAmbModal] = React.useState<{ mode: "add" | "edit"; amb: Ambiente | null } | null>(null);
-  const [compModal, setCompModal] = React.useState<{ mode: "add" | "edit"; ambId: string; comp: Componente | null } | null>(null);
+  const [compModal, setCompModal] = React.useState<{ mode: "add" | "edit"; ambId: number; comp: Componente | null } | null>(null);
   const [tipModal, setTipModal] = React.useState<{ mode: "add" | "edit"; tip: Tipologia | null } | null>(null);
   const [confirm, setConfirm] = React.useState<ConfirmState | null>(null);
 
@@ -112,7 +116,7 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
   const replaceUpgrade = useReplaceUpgrade();
 
   // Post-its (localStorage, single-user)
-  const { notes, addNote, changeNote, deleteNote } = usePostIts(tip?.id ?? "");
+  const { notes, addNote, changeNote, deleteNote } = usePostIts(tip ? String(tip.id) : "");
   const view = useCanvasView((id, nx, ny) => changeNote(id, { x: nx, y: ny }));
 
   const layout = React.useMemo(
@@ -147,7 +151,7 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
   const act: CanvasActions = {
     editAmb: (amb) => setAmbModal({ mode: "edit", amb }),
     addAmb: () => setAmbModal({ mode: "add", amb: null }),
-    cloneAmb: (amb) => cloneAmb.mutate({ tipologiaId: tipId, ambienteId: amb.id }),
+    cloneAmb: (amb) => cloneAmb.mutate({ tipologiaId: tipId, ambienteId: amb.blueprintRoomId }),
     deleteAmb: (amb) =>
       setConfirm({
         title: "Excluir ambiente",
@@ -157,7 +161,7 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
             componente(s)? Esta ação não pode ser desfeita.
           </>
         ),
-        onYes: () => deleteAmb.mutate({ tipologiaId: tipId, ambienteId: amb.id }),
+        onYes: () => deleteAmb.mutate({ tipologiaId: tipId, ambienteId: amb.blueprintRoomId }),
       }),
 
     editComp: (ambId, comp) => setCompModal({ mode: "edit", ambId, comp }),
@@ -174,7 +178,8 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
           deleteComp.mutate({ tipologiaId: tipId, ambienteId: ambId, componenteId: comp.id }),
       }),
 
-    changeOption: (ambId, comp, optId, isPadrao) =>
+    changeOption: (ambId, comp, optId, isPadrao) => {
+      const opt = optId !== null ? comp.options.find((o) => o.id === optId) : undefined;
       setMatPicker({
         ambId,
         compId: comp.id,
@@ -182,8 +187,9 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
         isPadrao,
         title: isPadrao ? "Material padrão" : "Trocar opção de material",
         subtitle: `${comp.nome} — ${isPadrao ? "material entregue sem custo adicional" : "opção de upgrade"}`,
-        currentId: optId,
-      }),
+        currentId: opt?.baseId ?? null,
+      });
+    },
     addOption: (ambId, comp) =>
       setMatPicker({
         ambId,
@@ -196,12 +202,12 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
       }),
     deleteOption: (ambId, comp, optId, isPadrao) => {
       const path = { tipologiaId: tipId, ambienteId: ambId, componenteId: comp.id };
-      if (isPadrao) setPadrao.mutate({ ...path, padraoId: null });
-      else removeUpgrade.mutate({ ...path, upgradeId: optId });
+      if (isPadrao) setPadrao.mutate({ ...path, padraoBaseId: null });
+      else removeUpgrade.mutate({ ...path, optionId: optId });
     },
   };
 
-  const confirmMatPicker = (matId: string) => {
+  const confirmMatPicker = (matId: number) => {
     if (!matPicker) return;
     const path = {
       tipologiaId: tipId,
@@ -209,9 +215,9 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
       componenteId: matPicker.compId,
     };
     const close = { onSuccess: () => setMatPicker(null) };
-    if (matPicker.isPadrao) setPadrao.mutate({ ...path, padraoId: matId }, close);
-    else if (matPicker.which === null) addUpgrade.mutate({ ...path, upgradeId: matId }, close);
-    else replaceUpgrade.mutate({ ...path, oldId: matPicker.which, newId: matId }, close);
+    if (matPicker.isPadrao) setPadrao.mutate({ ...path, padraoBaseId: matId }, close);
+    else if (matPicker.which === null) addUpgrade.mutate({ ...path, baseId: matId }, close);
+    else replaceUpgrade.mutate({ ...path, optionId: matPicker.which, newBaseId: matId }, close);
   };
 
   const saveAmbiente = (value: AmbienteFormValue) => {
@@ -219,7 +225,7 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
       updateAmb.mutate(
         {
           tipologiaId: tipId,
-          ambienteId: ambModal.amb.id,
+          ambienteId: ambModal.amb.blueprintRoomId,
           patch: { nome: value.nome, icon: value.icon, imagem: value.imagem },
         },
         { onSuccess: () => setAmbModal(null) }
@@ -387,14 +393,13 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
               node={n}
               materiais={materiais}
               kits={kits}
-              pendingSet={pendingSet}
               onToggleKit={toggleKit}
               act={act}
               detailed={detailed}
             />
           ))}
           {layout.subNodes.map((n) => (
-            <SubItemNode key={n.key} node={n} materiais={materiais} pendingSet={pendingSet} />
+            <SubItemNode key={n.key} node={n} materiais={materiais} />
           ))}
 
           {layout.placeholders.map((p) => (
@@ -458,7 +463,7 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
         key={compModal ? `${compModal.mode}-${compModal.ambId}-${compModal.comp?.id ?? "new"}` : "none"}
         open={compModal !== null}
         comp={compModal?.comp ?? EMPTY_COMP}
-        ambNome={compModal ? (tip.ambientes.find((a) => a.id === compModal.ambId)?.nome ?? "") : ""}
+        ambNome={compModal ? (tip.ambientes.find((a) => a.blueprintRoomId === compModal.ambId)?.nome ?? "") : ""}
         defaultOrdem={1}
         onClose={() => setCompModal(null)}
         onSave={saveComp}

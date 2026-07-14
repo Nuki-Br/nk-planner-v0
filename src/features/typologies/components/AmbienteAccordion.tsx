@@ -18,7 +18,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 
 import { Button, Icon } from "@/components/ui";
-import { getEntity } from "@/lib/data/entities";
+import { getOptionEntity } from "@/lib/data/entities";
 import { cn, fmtNum } from "@/lib/utils";
 import type { Ambiente, Componente, Kit, Material } from "@/shared/types/domain";
 
@@ -53,7 +53,9 @@ function ComponenteRow({ comp, index, materiais, kits, onEdit, onConfig }: Compo
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: comp.id,
   });
-  const padraoEnt = comp.padrao !== null ? getEntity(materiais, kits, comp.padrao) : null;
+  const def = comp.options.find((o) => o.isDefault);
+  const padraoEnt = def ? getOptionEntity(materiais, kits, def) : null;
+  const upgradeCount = comp.options.filter((o) => !o.isDefault).length;
 
   return (
     <div
@@ -116,7 +118,7 @@ function ComponenteRow({ comp, index, materiais, kits, onEdit, onConfig }: Compo
           }}
         />
         <Button variant="ghost" size="sm" onPress={() => onConfig(comp)}>
-          {comp.upgrades.length > 0 ? `${comp.upgrades.length + 1} mat.` : "Configurar"} →
+          {upgradeCount > 0 ? `${upgradeCount + 1} mat.` : "Configurar"} →
         </Button>
       </div>
     </div>
@@ -136,7 +138,7 @@ interface AmbienteAccordionProps {
   onAddComp: (amb: Ambiente) => void;
   onEditComp: (amb: Ambiente, comp: Componente, ordem: number) => void;
   onConfigComp: (comp: Componente) => void;
-  onReorderComps: (amb: Ambiente, orderedIds: string[]) => void;
+  onReorderComps: (amb: Ambiente, orderedIds: number[]) => void;
 }
 
 /** Um ambiente do acordeão: header arrastável + componentes reordenáveis. */
@@ -156,7 +158,7 @@ export function AmbienteAccordion({
   onReorderComps,
 }: AmbienteAccordionProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: amb.id,
+    id: amb.blueprintRoomId,
   });
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
@@ -164,8 +166,8 @@ export function AmbienteAccordion({
     const { active, over } = event;
     if (!over || active.id === over.id) return;
     const ids = amb.componentes.map((c) => c.id);
-    const from = ids.indexOf(String(active.id));
-    const to = ids.indexOf(String(over.id));
+    const from = ids.indexOf(Number(active.id));
+    const to = ids.indexOf(Number(over.id));
     if (from < 0 || to < 0) return;
     onReorderComps(amb, arrayMove(ids, from, to));
   };

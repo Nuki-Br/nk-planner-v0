@@ -1,12 +1,21 @@
-// Store de servidor (Fase 10) — port 1:1 do store mock (src/lib/data/store.ts)
-// para Prisma/Postgres, com organizationId explícito em toda função. As rotas
-// /api/* são os únicos consumidores; as assinaturas e mensagens de erro
-// espelham o mock para a troca da camada de dados ser transparente.
+// Store de servidor (Fase 3 — realinhado ao schema relacional) — a única
+// camada que fala Prisma/Postgres. As rotas /api/* são os únicos consumidores;
+// cada função recebe organizationId explícito (vem da sessão; o cliente nunca
+// envia org) e ids de domínio em `number` (as rotas parseiam string→Int na borda).
 //
-// Nota (beta): o domínio é escopado por ORG (não por projeto), como no mock —
-// o "projeto ativo" da org é resolvido por getActiveProjectId (o projeto mais
-// antigo da org). Escopo por projeto entra quando houver multiprojeto.
-import { randomBytes, randomUUID } from "crypto";
+// Modelo: Enterprise → Blueprint ⇄ Room (via BlueprintRoom) → RoomComponent
+// (paleta compartilhada) com Options (Material → BaseMaterial). Quantidade/RT e
+// quantitativos de kit variam POR PLANTA em BlueprintRoomComponent / MaterialKitUsage.
+// Catálogo = BaseMaterial (Type single|kit) + MaterialKitItem, escopado por Organization.
+//
+// Nota (beta): o domínio é single-Enterprise por org (onboarding = 1 org = 1
+// empreendimento). `activeEnterprise*` resolve o empreendimento âncora (o mais
+// antigo). Escopo multi-empreendimento entra quando o produto precisar.
+//
+// Conversões de borda:
+//   custo reais↔cents: fromCents(null|0 → 0); toCentsOrNull(reais>0 ? round : null).
+//   "pendente" NÃO é mais uma tabela — deriva de CostMaterialInCents IS NULL (custo 0).
+import { randomUUID } from "crypto";
 
 import { Prisma } from "@prisma/client";
 
@@ -23,7 +32,9 @@ import type {
   FillLink,
   FillLinkCampos,
   Kit,
+  KitItem,
   Material,
+  MaterialOption,
   PortalFill,
   Project,
   ProjectTaxas,
@@ -35,11 +46,7 @@ import type {
   VersionChanges,
 } from "@/shared/types/domain";
 
-function genId(prefix: string): string {
-  // randomBytes (CSPRNG) em vez de Math.random — ids não vazam estado do PRNG
-  // (o que enfraqueceria a previsibilidade de tokens gerados no mesmo processo).
-  return `${prefix}-${Date.now().toString(36)}${randomBytes(6).toString("hex")}`;
-}
+// ─── Utilidades de borda ────────────────────────────────────────────────
 
 /** Data/hora atual no formato de exibição: "DD/MM/AAAA HH:mm". */
 function nowBR(): string {
@@ -53,145 +60,327 @@ function json<T extends object>(v: T | null | undefined): Prisma.InputJsonValue 
   return v == null ? undefined : (v as unknown as Prisma.InputJsonValue);
 }
 
-// ─── Mapeadores linha do banco → domínio ──────────────────────────────
-
-type ProjectRow = Prisma.ProjectGetPayload<{ include: { taxColumns: true } }>;
-type ComponenteRow = Prisma.ComponenteGetPayload<object>;
-type AmbienteRow = Prisma.AmbienteGetPayload<{ include: { componentes: true } }>;
-type TipologiaRow = Prisma.TipologiaGetPayload<{
-  include: { ambientes: { include: { componentes: true } } };
-}>;
-
-function toBudgetColumn(row: Prisma.BudgetColumnGetPayload<object>): BudgetColumn {
-  return { id: row.id, nome: row.nome, kind: row.kind, expr: row.expr, visivel: row.visivel };
+/** Centavos (nullable) → reais (0 quando NULL/pendente). */
+function fromCents(cents: number | null | undefined): number {
+  return cents == null ? 0 : cents / 100;
 }
 
-function toProject(row: ProjectRow): Project {
+/** Reais → centavos inteiros; 0/negativo vira NULL (= pendente/sem custo). */
+function toCentsOrNull(reais: number): number | null {
+  return reais > 0 ? Math.round(reais * 100) : null;
+}
+
+/** Nome de arquivo derivado de uma URL de imagem (o schema guarda só a URL). */
+function imageName(url: string): string {
+  const seg = (url.split("?")[0] ?? "").split("/").pop() ?? "";
+  return seg || "imagem";
+}
+
+function isFkRestrict(e: unknown): boolean {
+  return e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2003";
+}
+
+// ─── Empreendimento âncora (single-Enterprise por org no beta) ──────────
+
+async function activeEnterpriseIdOrNull(organizationId: string): Promise<number | null> {
+  const e = await prisma.enterprise.findFirst({
+    where: { OrganizationId: organizationId },
+    orderBy: { CreatedAt: "asc" },
+    select: { Id: true },
+  });
+  return e?.Id ?? null;
+}
+
+async function activeEnterpriseId(organizationId: string): Promise<number> {
+  const id = await activeEnterpriseIdOrNull(organizationId);
+  if (id == null) throw new Error("Nenhum empreendimento encontrado.");
+  return id;
+}
+
+/**
+ * Empreendimento âncora da org (MVP single-project): o mais antigo criado.
+ * null se a org ainda não tem empreendimento. Mantém o nome legado usado pelo
+ * portal e por submitPortalFills.
+ */
+export async function getActiveProjectId(organizationId: string): Promise<number | null> {
+  return activeEnterpriseIdOrNull(organizationId);
+}
+
+// ─── Categorias de catálogo (MaterialCategory por org, resolve por nome) ─
+
+async function resolveCategoryId(organizationId: string, categoria: Categoria): Promise<number> {
+  const existing = await prisma.materialCategory.findFirst({
+    where: { OrganizationId: organizationId, Name: categoria },
+    select: { Id: true },
+  });
+  if (existing) return existing.Id;
+  const created = await prisma.materialCategory.create({
+    data: { OrganizationId: organizationId, Name: categoria },
+    select: { Id: true },
+  });
+  return created.Id;
+}
+
+// ─── Mapeadores: linha do banco → domínio ──────────────────────────────
+
+const ENTERPRISE_INCLUDE = { BudgetColumns: true } satisfies Prisma.EnterpriseInclude;
+type EnterpriseRow = Prisma.EnterpriseGetPayload<{ include: typeof ENTERPRISE_INCLUDE }>;
+
+function toBudgetColumn(row: Prisma.BudgetColumnGetPayload<object>): BudgetColumn {
+  return { id: row.Id, nome: row.Name, kind: row.Kind, expr: row.Expr, visivel: row.Visible };
+}
+
+function toProject(row: EnterpriseRow): Project {
   return {
-    id: row.id,
-    nome: row.nome,
-    torre: row.torre,
-    incorporadora: row.incorporadora,
-    construtora: row.construtora,
-    status: row.status,
-    enviadoEm: row.enviadoEm,
-    prazo: row.prazo,
-    publicadoEm: row.publicadoEm,
-    totalItens: row.totalItens,
-    itensPreenchidos: row.itensPreenchidos,
-    inccBase: row.inccBase ?? undefined,
-    emailConstrutora: row.emailConstrutora ?? undefined,
-    taxas: (row.taxas as unknown as ProjectTaxas | null) ?? undefined,
+    id: row.Id,
+    nome: row.Name,
+    torre: row.TowerLabel ?? "",
+    incorporadora: row.Developer ?? "",
+    construtora: row.Builder ?? "",
+    status: row.Status,
+    enviadoEm: row.SubmittedAtLabel,
+    prazo: row.DeadlineLabel,
+    publicadoEm: row.PublishedAtLabel,
+    totalItens: row.TotalItems,
+    itensPreenchidos: row.FilledItems,
+    inccBase: row.InccBaseLabel ?? undefined,
+    emailConstrutora: row.BuilderEmail ?? undefined,
+    taxas: (row.Taxes as unknown as ProjectTaxas | null) ?? undefined,
     taxColumns:
-      row.taxColumns.length > 0
-        ? [...row.taxColumns].sort((a, b) => a.ordem - b.ordem).map(toBudgetColumn)
+      row.BudgetColumns.length > 0
+        ? [...row.BudgetColumns].sort((a, b) => a.Position - b.Position).map(toBudgetColumn)
         : undefined,
   };
 }
 
-function toMaterial(row: Prisma.MaterialGetPayload<object>): Material {
+type BaseMaterialRow = Prisma.BaseMaterialGetPayload<{ include: { Category: true } }>;
+const KIT_INCLUDE = {
+  Category: true,
+  KitItems: { include: { ChildMaterial: { include: { Category: true } } } },
+} satisfies Prisma.BaseMaterialInclude;
+type KitRow = Prisma.BaseMaterialGetPayload<{ include: typeof KIT_INCLUDE }>;
+
+function toMaterial(row: BaseMaterialRow): Material {
   return {
-    id: row.id,
-    codigo: row.codigo,
-    nome: row.nome,
-    fabricante: row.fabricante,
-    categoria: row.categoria as Categoria,
-    unidade: row.unidade as Unidade,
-    custoMat: row.custoMat,
-    custoMO: row.custoMO,
+    id: row.Id,
+    codigo: row.ReferenceCode,
+    nome: row.Name,
+    fabricante: row.Manufacturer ?? "",
+    categoria: (row.Category?.Name ?? "Piso") as Categoria,
+    unidade: (row.Unit ?? "und") as Unidade,
+    custoMat: fromCents(row.CostMaterialInCents),
+    custoMO: fromCents(row.CostLaborInCents),
   };
 }
 
-function toKit(row: Prisma.KitGetPayload<object>): Kit {
+function toKit(row: KitRow): Kit {
+  const itens: KitItem[] = [...row.KitItems]
+    .sort((a, b) => a.Position - b.Position)
+    .map((ki) => ({
+      id: ki.Id,
+      materialId: ki.ChildMaterialId,
+      nome: ki.ChildMaterial.Name,
+      fabricante: ki.ChildMaterial.Manufacturer ?? "",
+      unidade: (ki.ChildMaterial.Unit ?? "und") as Unidade,
+      custoMat: fromCents(ki.ChildMaterial.CostMaterialInCents),
+      custoMO: fromCents(ki.ChildMaterial.CostLaborInCents),
+    }));
   return {
-    id: row.id,
-    tipo: "kit",
-    codigo: row.codigo,
-    nome: row.nome,
-    categoria: row.categoria as Categoria,
-    itens: row.itens,
+    id: row.Id,
+    codigo: row.ReferenceCode,
+    nome: row.Name,
+    categoria: (row.Category?.Name ?? "Piso") as Categoria,
+    itens,
   };
 }
 
-function toComponente(row: ComponenteRow): Componente {
+// Árvore de uma planta (Blueprint) em duas camadas: paleta compartilhada
+// (Room→RoomComponent→Options→BaseMaterial) + overrides por planta
+// (BlueprintRoomComponent + MaterialKitUsage).
+const BLUEPRINT_INCLUDE = {
+  BlueprintRooms: {
+    include: {
+      Room: {
+        include: {
+          RoomComponents: {
+            include: { Options: { include: { BaseMaterial: true } } },
+          },
+        },
+      },
+      Components: { include: { KitUsages: true } },
+    },
+  },
+} satisfies Prisma.BlueprintInclude;
+type BlueprintRow = Prisma.BlueprintGetPayload<{ include: typeof BLUEPRINT_INCLUDE }>;
+type BlueprintRoomRow = BlueprintRow["BlueprintRooms"][number];
+type RoomComponentRow = BlueprintRoomRow["Room"]["RoomComponents"][number];
+type OptionRow = RoomComponentRow["Options"][number];
+type BrcRow = BlueprintRoomRow["Components"][number];
+
+function toMaterialOption(m: OptionRow, defaultMaterialId: number | null): MaterialOption {
   return {
-    id: row.id,
-    nome: row.nome,
-    unidade: row.unidade as Unidade,
-    qtd: row.qtd,
-    rt: row.rt,
-    padrao: row.padrao,
-    upgrades: row.upgrades,
-    taxaEspecifica: null,
-    ghost: row.ghost || undefined,
-    ordem: row.ordem,
-    kitQtds:
-      (row.kitQtds as unknown as Record<string, Record<string, number>> | null) ?? undefined,
+    id: m.Id,
+    baseId: m.BaseMaterialId,
+    isKit: m.BaseMaterial.Type === "kit",
+    isDefault: m.Id === defaultMaterialId,
+    ordem: m.Position,
   };
 }
 
-function toAmbiente(row: AmbienteRow): Ambiente {
+function toComponente(rc: RoomComponentRow, brc: BrcRow | undefined): Componente {
+  const options = [...rc.Options]
+    .sort((a, b) => a.Position - b.Position)
+    .map((m) => toMaterialOption(m, rc.DefaultMaterialId));
+  const kitQtds: Record<number, number> = {};
+  if (brc) for (const ku of brc.KitUsages) kitQtds[ku.KitItemId] = ku.UsageQuantity;
   return {
-    id: row.id,
-    nome: row.nome,
-    icon: row.icon ?? undefined,
-    imagem: (row.imagem as unknown as AmbienteImagem | null) ?? null,
-    local: (row.local as unknown as RoomShape | null) ?? null,
-    componentes: [...row.componentes].sort((a, b) => a.ordem - b.ordem).map(toComponente),
+    id: rc.Id,
+    nome: rc.Name,
+    unidade: rc.Unit as Unidade,
+    instanceId: brc?.Id ?? 0,
+    qtd: brc?.UsageQuantity ?? 0,
+    rt: brc?.TechnicalReservePct ?? 0,
+    padrao: rc.DefaultMaterialId,
+    options,
+    ghost: rc.IsGhost,
+    ordem: rc.Position,
+    kitQtds,
   };
 }
 
-function toTipologia(row: TipologiaRow): Tipologia {
+function toAmbiente(br: BlueprintRoomRow): Ambiente {
+  const brcByRc = new Map(br.Components.map((c) => [c.RoomComponentId, c]));
+  const componentes = [...br.Room.RoomComponents]
+    .sort((a, b) => a.Position - b.Position)
+    .map((rc) => toComponente(rc, brcByRc.get(rc.Id)));
+  const imagem: AmbienteImagem | null = br.Room.BaseImageUrl
+    ? { name: imageName(br.Room.BaseImageUrl), url: br.Room.BaseImageUrl }
+    : null;
   return {
-    id: row.id,
-    nome: row.nome,
-    metragem: row.metragem,
-    descricao: row.descricao,
-    unidades: row.unidades,
-    status: row.status,
-    ambientes: [...row.ambientes].sort((a, b) => a.ordem - b.ordem).map(toAmbiente),
+    id: br.Room.Id,
+    blueprintRoomId: br.Id,
+    nome: br.Room.Name,
+    icon: br.Room.Icon ?? undefined,
+    imagem,
+    local: (br.Polygon as unknown as RoomShape | null) ?? null,
+    componentes,
   };
 }
 
-const TIP_INCLUDE = {
-  ambientes: { include: { componentes: true } },
-} satisfies Prisma.TipologiaInclude;
+function toTipologia(bp: BlueprintRow): Tipologia {
+  return {
+    id: bp.Id,
+    nome: bp.Name,
+    metragem: bp.AreaSqM ?? 0,
+    descricao: bp.Description,
+    unidades: bp.UnitCount,
+    status: bp.Status,
+    ambientes: [...bp.BlueprintRooms].sort((a, b) => a.Position - b.Position).map(toAmbiente),
+  };
+}
 
-async function findTipologia(organizationId: string, id: string): Promise<TipologiaRow> {
-  const tip = await prisma.tipologia.findFirst({
-    where: { id, organizationId },
-    include: TIP_INCLUDE,
+// ─── Finders escopados por org (traversal até Enterprise.OrganizationId) ─
+
+async function findBlueprintRow(organizationId: string, id: number): Promise<BlueprintRow> {
+  const bp = await prisma.blueprint.findFirst({
+    where: { Id: id, Enterprise: { OrganizationId: organizationId } },
+    include: BLUEPRINT_INCLUDE,
   });
-  if (!tip) throw new Error("Tipologia não encontrada.");
-  return tip;
+  if (!bp) throw new Error("Tipologia não encontrada.");
+  return bp;
 }
 
-async function findAmbiente(
+async function assertBlueprint(organizationId: string, id: number): Promise<number> {
+  const bp = await prisma.blueprint.findFirst({
+    where: { Id: id, Enterprise: { OrganizationId: organizationId } },
+    select: { Id: true, EnterpriseId: true },
+  });
+  if (!bp) throw new Error("Tipologia não encontrada.");
+  return bp.EnterpriseId;
+}
+
+type BlueprintRoomCtx = { id: number; roomId: number; enterpriseId: number };
+
+async function findBlueprintRoomCtx(
   organizationId: string,
-  tipologiaId: string,
-  ambienteId: string
-): Promise<AmbienteRow> {
-  const amb = await prisma.ambiente.findFirst({
-    where: { id: ambienteId, tipologiaId, organizationId },
-    include: { componentes: true },
+  blueprintId: number,
+  blueprintRoomId: number
+): Promise<BlueprintRoomCtx> {
+  const br = await prisma.blueprintRoom.findFirst({
+    where: {
+      Id: blueprintRoomId,
+      BlueprintId: blueprintId,
+      Blueprint: { Enterprise: { OrganizationId: organizationId } },
+    },
+    select: { Id: true, RoomId: true, Room: { select: { EnterpriseId: true } } },
   });
-  if (!amb) throw new Error("Ambiente não encontrado.");
-  return amb;
+  if (!br) throw new Error("Ambiente não encontrado.");
+  return { id: br.Id, roomId: br.RoomId, enterpriseId: br.Room.EnterpriseId };
 }
 
-async function findComponente(
+type RoomComponentCtx = { id: number; roomId: number; enterpriseId: number; defaultMaterialId: number | null };
+
+async function findRoomComponentCtx(
   organizationId: string,
-  ambienteId: string,
-  componenteId: string
-): Promise<ComponenteRow> {
-  const comp = await prisma.componente.findFirst({
-    where: { id: componenteId, ambienteId, organizationId },
+  roomComponentId: number
+): Promise<RoomComponentCtx> {
+  const rc = await prisma.roomComponent.findFirst({
+    where: { Id: roomComponentId, Room: { Enterprise: { OrganizationId: organizationId } } },
+    select: {
+      Id: true,
+      RoomId: true,
+      DefaultMaterialId: true,
+      Room: { select: { EnterpriseId: true } },
+    },
   });
-  if (!comp) throw new Error("Componente não encontrado.");
-  return comp;
+  if (!rc) throw new Error("Componente não encontrado.");
+  return {
+    id: rc.Id,
+    roomId: rc.RoomId,
+    enterpriseId: rc.Room.EnterpriseId,
+    defaultMaterialId: rc.DefaultMaterialId,
+  };
 }
 
-// ─── Projects ─────────────────────────────────────────────────────────
+/** BlueprintRoomComponent da instância (planta + componente), criando se faltar. */
+async function ensureBrc(
+  ctx: BlueprintRoomCtx,
+  roomComponentId: number,
+  qtd = 0,
+  rt = 0
+): Promise<number> {
+  const brc = await prisma.blueprintRoomComponent.upsert({
+    where: { BlueprintRoomId_RoomComponentId: { BlueprintRoomId: ctx.id, RoomComponentId: roomComponentId } },
+    update: {},
+    create: { BlueprintRoomId: ctx.id, RoomComponentId: roomComponentId, UsageQuantity: qtd, TechnicalReservePct: rt },
+    select: { Id: true },
+  });
+  return brc.Id;
+}
+
+/** Retorna o Componente (mapeado) de um RoomComponent nesta planta. */
+async function reloadComponente(
+  organizationId: string,
+  blueprintRoomId: number,
+  roomComponentId: number
+): Promise<Componente> {
+  const rc = await prisma.roomComponent.findFirst({
+    where: { Id: roomComponentId, Room: { Enterprise: { OrganizationId: organizationId } } },
+    include: { Options: { include: { BaseMaterial: true } } },
+  });
+  if (!rc) throw new Error("Componente não encontrado.");
+  const brc = await prisma.blueprintRoomComponent.findUnique({
+    where: { BlueprintRoomId_RoomComponentId: { BlueprintRoomId: blueprintRoomId, RoomComponentId: roomComponentId } },
+    include: { KitUsages: true },
+  });
+  return toComponente(rc, brc ?? undefined);
+}
+
+async function nextPosition(current: number | null | undefined): Promise<number> {
+  return (current ?? -1) + 1;
+}
+
+// ─── Projects (Enterprise) ──────────────────────────────────────────────
 
 export type ProjectPatch = Partial<
   Pick<
@@ -210,109 +399,148 @@ export type ProjectPatch = Partial<
   >
 >;
 
+function projectPatchToData(patch: ProjectPatch): Prisma.EnterpriseUpdateInput {
+  const data: Prisma.EnterpriseUpdateInput = {};
+  if (patch.nome !== undefined) data.Name = patch.nome;
+  if (patch.torre !== undefined) data.TowerLabel = patch.torre;
+  if (patch.construtora !== undefined) data.Builder = patch.construtora;
+  if (patch.status !== undefined) data.Status = patch.status;
+  if (patch.enviadoEm !== undefined) data.SubmittedAtLabel = patch.enviadoEm;
+  if (patch.prazo !== undefined) data.DeadlineLabel = patch.prazo;
+  if (patch.inccBase !== undefined) data.InccBaseLabel = patch.inccBase;
+  if (patch.emailConstrutora !== undefined) data.BuilderEmail = patch.emailConstrutora;
+  if (patch.totalItens !== undefined) data.TotalItems = patch.totalItens;
+  if (patch.itensPreenchidos !== undefined) data.FilledItems = patch.itensPreenchidos;
+  if (patch.taxas !== undefined) data.Taxes = json(patch.taxas) ?? Prisma.JsonNull;
+  return data;
+}
+
 export async function listProjects(organizationId: string): Promise<Project[]> {
-  const rows = await prisma.project.findMany({
-    where: { organizationId },
-    include: { taxColumns: true },
-    orderBy: { createdAt: "asc" },
+  const rows = await prisma.enterprise.findMany({
+    where: { OrganizationId: organizationId },
+    include: ENTERPRISE_INCLUDE,
+    orderBy: { CreatedAt: "asc" },
   });
   return rows.map(toProject);
 }
 
-export async function getProject(organizationId: string, id: string): Promise<Project | null> {
-  const row = await prisma.project.findFirst({
-    where: { id, organizationId },
-    include: { taxColumns: true },
+export async function getProject(organizationId: string, id: number): Promise<Project | null> {
+  const row = await prisma.enterprise.findFirst({
+    where: { Id: id, OrganizationId: organizationId },
+    include: ENTERPRISE_INCLUDE,
   });
   return row ? toProject(row) : null;
 }
 
 export async function updateProject(
   organizationId: string,
-  id: string,
+  id: number,
   patch: ProjectPatch
 ): Promise<Project> {
-  const exists = await prisma.project.findFirst({ where: { id, organizationId } });
+  const exists = await prisma.enterprise.findFirst({ where: { Id: id, OrganizationId: organizationId } });
   if (!exists) throw new Error("Empreendimento não encontrado.");
-  const { taxas, ...rest } = patch;
-  const row = await prisma.project.update({
-    where: { id },
-    data: { ...rest, ...(taxas !== undefined ? { taxas: json(taxas) } : {}) },
-    include: { taxColumns: true },
+  const row = await prisma.enterprise.update({
+    where: { Id: id },
+    data: projectPatchToData(patch),
+    include: ENTERPRISE_INCLUDE,
   });
   return toProject(row);
 }
 
-export async function publishProject(organizationId: string, id: string): Promise<Project> {
-  const exists = await prisma.project.findFirst({ where: { id, organizationId } });
+export async function publishProject(organizationId: string, id: number): Promise<Project> {
+  const exists = await prisma.enterprise.findFirst({ where: { Id: id, OrganizationId: organizationId } });
   if (!exists) throw new Error("Empreendimento não encontrado.");
-  const row = await prisma.project.update({
-    where: { id },
-    data: { status: "publicado", publicadoEm: nowBR() },
-    include: { taxColumns: true },
+  const row = await prisma.enterprise.update({
+    where: { Id: id },
+    data: { Status: "publicado", PublishedAtLabel: nowBR() },
+    include: ENTERPRISE_INCLUDE,
   });
   return toProject(row);
 }
 
-/**
- * Projeto âncora da org (MVP single-project): o mais antigo criado. Substitui o
- * antigo ACTIVE_PROJECT_ID fixo — cada org resolve o seu. null se a org ainda
- * não tem projeto.
- */
-export async function getActiveProjectId(organizationId: string): Promise<string | null> {
-  const p = await prisma.project.findFirst({
-    where: { organizationId },
-    orderBy: { createdAt: "asc" },
-    select: { id: true },
-  });
-  return p?.id ?? null;
-}
+// ─── Budget columns (Enterprise) ────────────────────────────────────────
 
 export async function getBudgetColumns(
   organizationId: string,
-  projectId: string
+  projectId: number
 ): Promise<BudgetColumn[]> {
+  await assertEnterprise(organizationId, projectId);
   const rows = await prisma.budgetColumn.findMany({
-    where: { projectId, organizationId },
-    orderBy: { ordem: "asc" },
+    where: { EnterpriseId: projectId },
+    orderBy: { Position: "asc" },
   });
   return rows.length > 0 ? rows.map(toBudgetColumn) : TAX_COLUMNS_DEFAULT.map((c) => ({ ...c }));
 }
 
 export async function updateBudgetColumns(
   organizationId: string,
-  projectId: string,
+  projectId: number,
   cols: BudgetColumn[]
 ): Promise<BudgetColumn[]> {
-  const p = await prisma.project.findFirst({ where: { id: projectId, organizationId } });
-  if (!p) throw new Error("Empreendimento não encontrado.");
+  await assertEnterprise(organizationId, projectId);
   await prisma.$transaction([
-    prisma.budgetColumn.deleteMany({ where: { projectId, organizationId } }),
+    prisma.budgetColumn.deleteMany({ where: { EnterpriseId: projectId } }),
     prisma.budgetColumn.createMany({
-      data: cols.map((c, i) => ({ ...c, projectId, ordem: i, organizationId })),
+      data: cols.map((c, i) => ({
+        EnterpriseId: projectId,
+        Name: c.nome,
+        Kind: c.kind,
+        Expr: c.expr,
+        Visible: c.visivel,
+        Position: i,
+      })),
     }),
   ]);
   return getBudgetColumns(organizationId, projectId);
 }
 
-// ─── Materiais ────────────────────────────────────────────────────────
+async function assertEnterprise(organizationId: string, id: number): Promise<void> {
+  const e = await prisma.enterprise.findFirst({
+    where: { Id: id, OrganizationId: organizationId },
+    select: { Id: true },
+  });
+  if (!e) throw new Error("Empreendimento não encontrado.");
+}
+
+// ─── Materiais (BaseMaterial Type="single") ─────────────────────────────
 
 export type MaterialInput = Omit<Material, "id">;
 
 export async function listMateriais(organizationId: string): Promise<Material[]> {
-  const rows = await prisma.material.findMany({
-    where: { organizationId },
-    orderBy: { id: "asc" },
+  const rows = await prisma.baseMaterial.findMany({
+    where: { OrganizationId: organizationId, Type: "single" },
+    include: { Category: true },
+    orderBy: { Id: "asc" },
   });
   return rows.map(toMaterial);
+}
+
+async function baseMaterialCreateData(
+  organizationId: string,
+  input: MaterialInput,
+  categoryId: number
+): Promise<Prisma.BaseMaterialCreateManyInput> {
+  return {
+    OrganizationId: organizationId,
+    CategoryId: categoryId,
+    Type: "single",
+    ReferenceCode: input.codigo,
+    Name: input.nome,
+    Manufacturer: input.fabricante,
+    Unit: input.unidade,
+    CostMaterialInCents: toCentsOrNull(input.custoMat),
+    CostLaborInCents: toCentsOrNull(input.custoMO),
+  };
 }
 
 export async function createMaterial(
   organizationId: string,
   input: MaterialInput
 ): Promise<Material> {
-  const row = await prisma.material.create({
-    data: { id: genId("mat"), ...input, organizationId },
+  const categoryId = await resolveCategoryId(organizationId, input.categoria);
+  const row = await prisma.baseMaterial.create({
+    data: await baseMaterialCreateData(organizationId, input, categoryId),
+    include: { Category: true },
   });
   return toMaterial(row);
 }
@@ -321,629 +549,934 @@ export async function createMateriais(
   organizationId: string,
   inputs: MaterialInput[]
 ): Promise<Material[]> {
-  const data = inputs.map((input) => ({ id: genId("mat"), ...input, organizationId }));
-  await prisma.material.createMany({ data });
-  const rows = await prisma.material.findMany({
-    where: { id: { in: data.map((d) => d.id) } },
-  });
-  const byId = new Map(rows.map((r) => [r.id, r]));
-  return data.map((d) => toMaterial(byId.get(d.id)!));
+  // Resolve as categorias distintas de uma vez (evita N find-or-create).
+  const catByName = new Map<Categoria, number>();
+  for (const cat of new Set(inputs.map((i) => i.categoria))) {
+    catByName.set(cat, await resolveCategoryId(organizationId, cat));
+  }
+  const data = await Promise.all(
+    inputs.map((input) => baseMaterialCreateData(organizationId, input, catByName.get(input.categoria)!))
+  );
+  const rows = await prisma.baseMaterial.createManyAndReturn({ data, include: { Category: true } });
+  return rows.map(toMaterial);
 }
 
 export async function updateMaterial(
   organizationId: string,
-  id: string,
+  id: number,
   patch: Partial<MaterialInput>
 ): Promise<Material> {
-  const exists = await prisma.material.findFirst({ where: { id, organizationId } });
+  const exists = await prisma.baseMaterial.findFirst({
+    where: { Id: id, OrganizationId: organizationId },
+    select: { Id: true },
+  });
   if (!exists) throw new Error("Material não encontrado.");
-  const row = await prisma.material.update({ where: { id }, data: patch });
+  const data: Prisma.BaseMaterialUpdateInput = {};
+  if (patch.codigo !== undefined) data.ReferenceCode = patch.codigo;
+  if (patch.nome !== undefined) data.Name = patch.nome;
+  if (patch.fabricante !== undefined) data.Manufacturer = patch.fabricante;
+  if (patch.unidade !== undefined) data.Unit = patch.unidade;
+  if (patch.custoMat !== undefined) data.CostMaterialInCents = toCentsOrNull(patch.custoMat);
+  if (patch.custoMO !== undefined) data.CostLaborInCents = toCentsOrNull(patch.custoMO);
+  if (patch.categoria !== undefined) {
+    data.Category = { connect: { Id: await resolveCategoryId(organizationId, patch.categoria) } };
+  }
+  const row = await prisma.baseMaterial.update({
+    where: { Id: id },
+    data,
+    include: { Category: true },
+  });
   return toMaterial(row);
 }
 
-export async function deleteMaterial(organizationId: string, id: string): Promise<void> {
-  const res = await prisma.material.deleteMany({ where: { id, organizationId } });
-  if (res.count === 0) throw new Error("Material não encontrado.");
+export async function deleteMaterial(organizationId: string, id: number): Promise<void> {
+  const exists = await prisma.baseMaterial.findFirst({
+    where: { Id: id, OrganizationId: organizationId },
+    select: { Id: true },
+  });
+  if (!exists) throw new Error("Material não encontrado.");
+  try {
+    await prisma.baseMaterial.delete({ where: { Id: id } });
+  } catch (e) {
+    if (isFkRestrict(e)) throw new Error("Material em uso; remova as opções/kits que o utilizam.");
+    throw e;
+  }
 }
 
-// ─── Kits ─────────────────────────────────────────────────────────────
+// ─── Kits (BaseMaterial Type="kit" + MaterialKitItem) ───────────────────
 
-export type KitInput = Omit<Kit, "id" | "tipo">;
+export type KitInput = Omit<Kit, "id">;
 
 export async function listKits(organizationId: string): Promise<Kit[]> {
-  const rows = await prisma.kit.findMany({ where: { organizationId }, orderBy: { id: "asc" } });
+  const rows = await prisma.baseMaterial.findMany({
+    where: { OrganizationId: organizationId, Type: "kit" },
+    include: KIT_INCLUDE,
+    orderBy: { Id: "asc" },
+  });
   return rows.map(toKit);
 }
 
-export async function createKit(organizationId: string, input: KitInput): Promise<Kit> {
-  const row = await prisma.kit.create({ data: { id: genId("kit"), ...input, organizationId } });
+async function loadKit(id: number): Promise<Kit> {
+  const row = await prisma.baseMaterial.findUnique({ where: { Id: id }, include: KIT_INCLUDE });
+  if (!row) throw new Error("Kit não encontrado.");
   return toKit(row);
+}
+
+export async function createKit(organizationId: string, input: KitInput): Promise<Kit> {
+  const categoryId = await resolveCategoryId(organizationId, input.categoria);
+  const row = await prisma.baseMaterial.create({
+    data: {
+      OrganizationId: organizationId,
+      CategoryId: categoryId,
+      Type: "kit",
+      ReferenceCode: input.codigo,
+      Name: input.nome,
+      KitItems: {
+        create: input.itens.map((it, i) => ({
+          ChildMaterialId: it.materialId,
+          Position: i,
+        })),
+      },
+    },
+    select: { Id: true },
+  });
+  return loadKit(row.Id);
 }
 
 export async function updateKit(
   organizationId: string,
-  id: string,
+  id: number,
   patch: Partial<KitInput>
 ): Promise<Kit> {
-  const exists = await prisma.kit.findFirst({ where: { id, organizationId } });
+  const exists = await prisma.baseMaterial.findFirst({
+    where: { Id: id, OrganizationId: organizationId, Type: "kit" },
+    select: { Id: true },
+  });
   if (!exists) throw new Error("Kit não encontrado.");
-  const row = await prisma.kit.update({ where: { id }, data: patch });
-  return toKit(row);
+  const data: Prisma.BaseMaterialUpdateInput = {};
+  if (patch.codigo !== undefined) data.ReferenceCode = patch.codigo;
+  if (patch.nome !== undefined) data.Name = patch.nome;
+  if (patch.categoria !== undefined) {
+    data.Category = { connect: { Id: await resolveCategoryId(organizationId, patch.categoria) } };
+  }
+  await prisma.baseMaterial.update({ where: { Id: id }, data });
+  if (patch.itens !== undefined) {
+    // Recompõe os sub-itens (substitui a composição). Cascade limpa os KitItems
+    // antigos e seus MaterialKitUsage por planta.
+    await prisma.$transaction([
+      prisma.materialKitItem.deleteMany({ where: { ParentMaterialId: id } }),
+      prisma.materialKitItem.createMany({
+        data: patch.itens.map((it, i) => ({
+          ParentMaterialId: id,
+          ChildMaterialId: it.materialId,
+          Position: i,
+        })),
+      }),
+    ]);
+  }
+  return loadKit(id);
 }
 
-export async function deleteKit(organizationId: string, id: string): Promise<void> {
-  const res = await prisma.kit.deleteMany({ where: { id, organizationId } });
-  if (res.count === 0) throw new Error("Kit não encontrado.");
+export async function deleteKit(organizationId: string, id: number): Promise<void> {
+  const exists = await prisma.baseMaterial.findFirst({
+    where: { Id: id, OrganizationId: organizationId, Type: "kit" },
+    select: { Id: true },
+  });
+  if (!exists) throw new Error("Kit não encontrado.");
+  try {
+    await prisma.baseMaterial.delete({ where: { Id: id } });
+  } catch (e) {
+    if (isFkRestrict(e)) throw new Error("Kit em uso; remova as opções que o utilizam.");
+    throw e;
+  }
 }
 
-// ─── Tipologias ───────────────────────────────────────────────────────
+// ─── Tipologias (Blueprint) ─────────────────────────────────────────────
 
 export type TipologiaInput = Pick<Tipologia, "nome" | "metragem" | "descricao" | "unidades">;
 
 export async function listTipologias(organizationId: string): Promise<Tipologia[]> {
-  const rows = await prisma.tipologia.findMany({
-    where: { organizationId },
-    include: TIP_INCLUDE,
-    orderBy: { ordem: "asc" },
+  const enterpriseId = await activeEnterpriseIdOrNull(organizationId);
+  if (enterpriseId == null) return [];
+  const rows = await prisma.blueprint.findMany({
+    where: { EnterpriseId: enterpriseId },
+    include: BLUEPRINT_INCLUDE,
+    orderBy: { Position: "asc" },
   });
   return rows.map(toTipologia);
 }
 
-export async function getTipologia(
-  organizationId: string,
-  id: string
-): Promise<Tipologia | null> {
-  const row = await prisma.tipologia.findFirst({
-    where: { id, organizationId },
-    include: TIP_INCLUDE,
+export async function getTipologia(organizationId: string, id: number): Promise<Tipologia | null> {
+  const row = await prisma.blueprint.findFirst({
+    where: { Id: id, Enterprise: { OrganizationId: organizationId } },
+    include: BLUEPRINT_INCLUDE,
   });
   return row ? toTipologia(row) : null;
-}
-
-async function nextOrdem(
-  agg: { _max: { ordem: number | null } }
-): Promise<number> {
-  return (agg._max.ordem ?? -1) + 1;
 }
 
 export async function createTipologia(
   organizationId: string,
   input: TipologiaInput
 ): Promise<Tipologia> {
-  const agg = await prisma.tipologia.aggregate({
-    where: { organizationId },
-    _max: { ordem: true },
+  const enterpriseId = await activeEnterpriseId(organizationId);
+  const agg = await prisma.blueprint.aggregate({
+    where: { EnterpriseId: enterpriseId },
+    _max: { Position: true },
   });
-  const row = await prisma.tipologia.create({
+  const row = await prisma.blueprint.create({
     data: {
-      id: genId("t"),
-      ...input,
-      status: "incompleta",
-      ordem: await nextOrdem(agg),
-      organizationId,
+      EnterpriseId: enterpriseId,
+      Name: input.nome,
+      Description: input.descricao,
+      AreaSqM: input.metragem,
+      UnitCount: input.unidades,
+      Status: "incompleta",
+      Position: await nextPosition(agg._max.Position),
     },
-    include: TIP_INCLUDE,
+    include: BLUEPRINT_INCLUDE,
   });
   return toTipologia(row);
 }
 
 export async function updateTipologia(
   organizationId: string,
-  id: string,
+  id: number,
   patch: Partial<TipologiaInput & { status: TipologiaStatus }>
 ): Promise<Tipologia> {
-  await findTipologia(organizationId, id);
-  const row = await prisma.tipologia.update({
-    where: { id },
-    data: patch,
-    include: TIP_INCLUDE,
+  await assertBlueprint(organizationId, id);
+  const data: Prisma.BlueprintUpdateInput = {};
+  if (patch.nome !== undefined) data.Name = patch.nome;
+  if (patch.descricao !== undefined) data.Description = patch.descricao;
+  if (patch.metragem !== undefined) data.AreaSqM = patch.metragem;
+  if (patch.unidades !== undefined) data.UnitCount = patch.unidades;
+  if (patch.status !== undefined) data.Status = patch.status;
+  const row = await prisma.blueprint.update({
+    where: { Id: id },
+    data,
+    include: BLUEPRINT_INCLUDE,
   });
   return toTipologia(row);
 }
 
-export async function deleteTipologia(organizationId: string, id: string): Promise<void> {
-  const res = await prisma.tipologia.deleteMany({ where: { id, organizationId } });
-  if (res.count === 0) throw new Error("Tipologia não encontrada.");
+export async function deleteTipologia(organizationId: string, id: number): Promise<void> {
+  const enterpriseId = await assertBlueprint(organizationId, id);
+  // Apaga a planta (cascade → BlueprintRoom/BRC/KitUsage). Depois remove Rooms
+  // órfãos (que não aparecem em nenhuma outra planta) — cascade limpa seus
+  // RoomComponents/Options.
+  await prisma.blueprint.delete({ where: { Id: id } });
+  await prisma.room.deleteMany({ where: { EnterpriseId: enterpriseId, BlueprintRooms: { none: {} } } });
 }
 
-/** Clona a árvore inteira (ambientes/componentes) com ids novos. */
-export async function duplicateTipologia(
-  organizationId: string,
-  id: string
-): Promise<Tipologia> {
-  const src = await findTipologia(organizationId, id);
-  const agg = await prisma.tipologia.aggregate({
-    where: { organizationId },
-    _max: { ordem: true },
+/** Clona a planta inteira como cópia INDEPENDENTE (Rooms/componentes/opções novos). */
+export async function duplicateTipologia(organizationId: string, id: number): Promise<Tipologia> {
+  const src = await findBlueprintRow(organizationId, id);
+  const agg = await prisma.blueprint.aggregate({
+    where: { EnterpriseId: src.EnterpriseId },
+    _max: { Position: true },
   });
-  const row = await prisma.tipologia.create({
+  const copy = await prisma.blueprint.create({
     data: {
-      id: genId("t"),
-      nome: `${src.nome} (cópia)`,
-      metragem: src.metragem,
-      descricao: src.descricao,
-      unidades: src.unidades,
-      status: src.status,
-      ordem: await nextOrdem(agg),
-      organizationId,
-      ambientes: {
-        create: src.ambientes.map((amb) => ({
-          id: genId("amb"),
-          nome: amb.nome,
-          icon: amb.icon,
-          imagem: amb.imagem ?? undefined,
-          local: amb.local ?? undefined,
-          ordem: amb.ordem,
-          organizationId,
-          componentes: {
-            create: amb.componentes.map((c) => ({
-              id: genId("c"),
-              nome: c.nome,
-              unidade: c.unidade,
-              qtd: c.qtd,
-              rt: c.rt,
-              padrao: c.padrao,
-              upgrades: c.upgrades,
-              taxaEspecifica: c.taxaEspecifica ?? undefined,
-              ghost: c.ghost,
-              ordem: c.ordem,
-              kitQtds: c.kitQtds ?? undefined,
-              organizationId,
-            })),
-          },
-        })),
-      },
+      EnterpriseId: src.EnterpriseId,
+      Name: `${src.Name} (cópia)`,
+      Description: src.Description,
+      AreaSqM: src.AreaSqM,
+      UnitCount: src.UnitCount,
+      Status: src.Status,
+      Position: await nextPosition(agg._max.Position),
     },
-    include: TIP_INCLUDE,
+    select: { Id: true },
   });
-  return toTipologia(row);
+  for (const br of [...src.BlueprintRooms].sort((a, b) => a.Position - b.Position)) {
+    await cloneBlueprintRoomInto(copy.Id, src.EnterpriseId, br, br.Position);
+  }
+  return toTipologia(await findBlueprintRow(organizationId, copy.Id));
 }
 
-// ─── Ambientes ────────────────────────────────────────────────────────
+/**
+ * Clona um BlueprintRoom (Room + componentes + opções + BRC/kitUsage) para uma
+ * planta destino como cópia independente. Resolve a FK circular em 2 passos
+ * (componente sem default → opções → seta DefaultMaterialId).
+ */
+async function cloneBlueprintRoomInto(
+  targetBlueprintId: number,
+  enterpriseId: number,
+  br: BlueprintRoomRow,
+  position: number
+): Promise<void> {
+  const room = await prisma.room.create({
+    data: {
+      EnterpriseId: enterpriseId,
+      Name: br.Room.Name,
+      Icon: br.Room.Icon,
+      BaseImageUrl: br.Room.BaseImageUrl,
+    },
+    select: { Id: true },
+  });
+  const newBr = await prisma.blueprintRoom.create({
+    data: {
+      BlueprintId: targetBlueprintId,
+      RoomId: room.Id,
+      Position: position,
+      Polygon: br.Polygon ?? Prisma.JsonNull,
+      DrawnImageUrl: br.DrawnImageUrl,
+    },
+    select: { Id: true },
+  });
+  const brcByRc = new Map(br.Components.map((c) => [c.RoomComponentId, c]));
+  for (const rc of [...br.Room.RoomComponents].sort((a, b) => a.Position - b.Position)) {
+    const newRc = await prisma.roomComponent.create({
+      data: {
+        RoomId: room.Id,
+        Name: rc.Name,
+        Unit: rc.Unit,
+        IsGhost: rc.IsGhost,
+        Position: rc.Position,
+      },
+      select: { Id: true },
+    });
+    let newDefaultId: number | null = null;
+    const optIdMap = new Map<number, number>(); // KitItem lookup usa BaseMaterial; aqui mapeamos option→option
+    for (const opt of [...rc.Options].sort((a, b) => a.Position - b.Position)) {
+      const created = await prisma.material.create({
+        data: {
+          RoomComponentId: newRc.Id,
+          RoomId: room.Id,
+          EnterpriseId: enterpriseId,
+          BaseMaterialId: opt.BaseMaterialId,
+          Position: opt.Position,
+          IsDefault: opt.IsDefault,
+          PriceInCents: opt.PriceInCents,
+          Name: opt.Name,
+        },
+        select: { Id: true },
+      });
+      optIdMap.set(opt.Id, created.Id);
+      if (rc.DefaultMaterialId === opt.Id) newDefaultId = created.Id;
+    }
+    if (newDefaultId != null) {
+      await prisma.roomComponent.update({ where: { Id: newRc.Id }, data: { DefaultMaterialId: newDefaultId } });
+    }
+    const srcBrc = brcByRc.get(rc.Id);
+    if (srcBrc) {
+      const newBrc = await prisma.blueprintRoomComponent.create({
+        data: {
+          BlueprintRoomId: newBr.Id,
+          RoomComponentId: newRc.Id,
+          UsageQuantity: srcBrc.UsageQuantity,
+          TechnicalReservePct: srcBrc.TechnicalReservePct,
+        },
+        select: { Id: true },
+      });
+      if (srcBrc.KitUsages.length > 0) {
+        await prisma.materialKitUsage.createMany({
+          data: srcBrc.KitUsages.map((ku) => ({
+            BlueprintRoomComponentId: newBrc.Id,
+            KitItemId: ku.KitItemId,
+            UsageQuantity: ku.UsageQuantity,
+          })),
+        });
+      }
+    }
+  }
+}
+
+// ─── Ambientes (Room + BlueprintRoom) ───────────────────────────────────
 
 export type AmbienteInput = Pick<Ambiente, "nome"> &
   Partial<Pick<Ambiente, "icon" | "imagem" | "local">>;
 
 export async function createAmbiente(
   organizationId: string,
-  tipologiaId: string,
+  tipologiaId: number,
   input: AmbienteInput
 ): Promise<Ambiente> {
-  await findTipologia(organizationId, tipologiaId);
-  const agg = await prisma.ambiente.aggregate({
-    where: { tipologiaId, organizationId },
-    _max: { ordem: true },
+  const enterpriseId = await assertBlueprint(organizationId, tipologiaId);
+  const agg = await prisma.blueprintRoom.aggregate({
+    where: { BlueprintId: tipologiaId },
+    _max: { Position: true },
   });
-  const row = await prisma.ambiente.create({
+  const room = await prisma.room.create({
     data: {
-      id: genId("amb"),
-      tipologiaId,
-      nome: input.nome,
-      icon: input.icon ?? null,
-      imagem: json(input.imagem),
-      local: json(input.local),
-      ordem: await nextOrdem(agg),
-      organizationId,
+      EnterpriseId: enterpriseId,
+      Name: input.nome,
+      Icon: input.icon ?? null,
+      BaseImageUrl: input.imagem?.url ?? null,
     },
-    include: { componentes: true },
+    select: { Id: true },
   });
-  return toAmbiente(row);
+  const br = await prisma.blueprintRoom.create({
+    data: {
+      BlueprintId: tipologiaId,
+      RoomId: room.Id,
+      Position: await nextPosition(agg._max.Position),
+      Polygon: json(input.local),
+    },
+    include: {
+      Room: { include: { RoomComponents: { include: { Options: { include: { BaseMaterial: true } } } } } },
+      Components: { include: { KitUsages: true } },
+    },
+  });
+  return toAmbiente(br);
 }
 
 export async function updateAmbiente(
   organizationId: string,
-  tipologiaId: string,
-  ambienteId: string,
+  tipologiaId: number,
+  blueprintRoomId: number,
   patch: Partial<AmbienteInput>
 ): Promise<Ambiente> {
-  await findAmbiente(organizationId, tipologiaId, ambienteId);
-  const { imagem, local, ...rest } = patch;
-  const row = await prisma.ambiente.update({
-    where: { id: ambienteId },
-    data: {
-      ...rest,
-      ...(imagem !== undefined ? { imagem: json(imagem) ?? Prisma.JsonNull } : {}),
-      ...(local !== undefined ? { local: json(local) ?? Prisma.JsonNull } : {}),
+  const ctx = await findBlueprintRoomCtx(organizationId, tipologiaId, blueprintRoomId);
+  // nome/icon/imagem são do Room (compartilhado); local é por planta (BlueprintRoom).
+  const roomData: Prisma.RoomUpdateInput = {};
+  if (patch.nome !== undefined) roomData.Name = patch.nome;
+  if (patch.icon !== undefined) roomData.Icon = patch.icon ?? null;
+  if (patch.imagem !== undefined) roomData.BaseImageUrl = patch.imagem?.url ?? null;
+  if (Object.keys(roomData).length > 0) {
+    await prisma.room.update({ where: { Id: ctx.roomId }, data: roomData });
+  }
+  if (patch.local !== undefined) {
+    await prisma.blueprintRoom.update({
+      where: { Id: blueprintRoomId },
+      data: { Polygon: json(patch.local) ?? Prisma.JsonNull },
+    });
+  }
+  const br = await prisma.blueprintRoom.findUniqueOrThrow({
+    where: { Id: blueprintRoomId },
+    include: {
+      Room: { include: { RoomComponents: { include: { Options: { include: { BaseMaterial: true } } } } } },
+      Components: { include: { KitUsages: true } },
     },
-    include: { componentes: true },
   });
-  return toAmbiente(row);
+  return toAmbiente(br);
 }
 
 export async function deleteAmbiente(
   organizationId: string,
-  tipologiaId: string,
-  ambienteId: string
+  tipologiaId: number,
+  blueprintRoomId: number
 ): Promise<void> {
-  await findAmbiente(organizationId, tipologiaId, ambienteId);
-  await prisma.$transaction([
-    // Desvincula do grupo compartilhado, se houver (como no mock).
-    prisma.ambienteShared.deleteMany({ where: { ambienteId, organizationId } }),
-    prisma.ambiente.delete({ where: { id: ambienteId } }),
-  ]);
+  const ctx = await findBlueprintRoomCtx(organizationId, tipologiaId, blueprintRoomId);
+  await prisma.blueprintRoom.delete({ where: { Id: blueprintRoomId } });
+  // Se o Room não aparece mais em nenhuma planta, remove-o (cascade limpa a paleta).
+  const remaining = await prisma.blueprintRoom.count({ where: { RoomId: ctx.roomId } });
+  if (remaining === 0) await prisma.room.delete({ where: { Id: ctx.roomId } });
 }
 
+/** Duplica o ambiente NESTA planta como cópia independente (Room novo). */
 export async function cloneAmbiente(
   organizationId: string,
-  tipologiaId: string,
-  ambienteId: string
+  tipologiaId: number,
+  blueprintRoomId: number
 ): Promise<Ambiente> {
-  const src = await findAmbiente(organizationId, tipologiaId, ambienteId);
-  const agg = await prisma.ambiente.aggregate({
-    where: { tipologiaId, organizationId },
-    _max: { ordem: true },
-  });
-  const row = await prisma.ambiente.create({
-    data: {
-      id: genId("amb"),
-      tipologiaId,
-      nome: `${src.nome} (cópia)`,
-      icon: src.icon,
-      imagem: src.imagem ?? undefined,
-      local: src.local ?? undefined,
-      ordem: await nextOrdem(agg),
-      organizationId,
-      componentes: {
-        create: src.componentes.map((c) => ({
-          id: genId("c"),
-          nome: c.nome,
-          unidade: c.unidade,
-          qtd: c.qtd,
-          rt: c.rt,
-          padrao: c.padrao,
-          upgrades: c.upgrades,
-          taxaEspecifica: c.taxaEspecifica ?? undefined,
-          ghost: c.ghost,
-          ordem: c.ordem,
-          kitQtds: c.kitQtds ?? undefined,
-          organizationId,
-        })),
-      },
+  await findBlueprintRoomCtx(organizationId, tipologiaId, blueprintRoomId);
+  const src = await prisma.blueprintRoom.findUniqueOrThrow({
+    where: { Id: blueprintRoomId },
+    include: {
+      Room: { include: { RoomComponents: { include: { Options: { include: { BaseMaterial: true } } } } } },
+      Components: { include: { KitUsages: true } },
     },
-    include: { componentes: true },
   });
-  return toAmbiente(row);
+  const enterpriseId = src.Room.EnterpriseId;
+  const agg = await prisma.blueprintRoom.aggregate({
+    where: { BlueprintId: tipologiaId },
+    _max: { Position: true },
+  });
+  // Renomeia o Room clonado ("(cópia)") preservando o resto da árvore.
+  const clonedName = `${src.Room.Name} (cópia)`;
+  const srcWithName: BlueprintRoomRow = { ...src, Room: { ...src.Room, Name: clonedName } };
+  await cloneBlueprintRoomInto(tipologiaId, enterpriseId, srcWithName, await nextPosition(agg._max.Position));
+  const created = await prisma.blueprintRoom.findFirst({
+    where: { BlueprintId: tipologiaId, Room: { Name: clonedName } },
+    orderBy: { Id: "desc" },
+    include: {
+      Room: { include: { RoomComponents: { include: { Options: { include: { BaseMaterial: true } } } } } },
+      Components: { include: { KitUsages: true } },
+    },
+  });
+  if (!created) throw new Error("Falha ao clonar ambiente.");
+  return toAmbiente(created);
 }
 
 export async function reorderAmbientes(
   organizationId: string,
-  tipologiaId: string,
-  orderedIds: string[]
+  tipologiaId: number,
+  orderedIds: number[]
 ): Promise<void> {
-  const tip = await findTipologia(organizationId, tipologiaId);
-  const atuais = new Set(tip.ambientes.map((a) => a.id));
+  await assertBlueprint(organizationId, tipologiaId);
+  const rooms = await prisma.blueprintRoom.findMany({
+    where: { BlueprintId: tipologiaId },
+    select: { Id: true },
+  });
+  const atuais = new Set(rooms.map((r) => r.Id));
   if (orderedIds.length !== atuais.size || orderedIds.some((id) => !atuais.has(id))) {
     throw new Error("Ordem de ambientes inválida.");
   }
   await prisma.$transaction(
-    orderedIds.map((id, i) =>
-      prisma.ambiente.update({ where: { id }, data: { ordem: i } })
-    )
+    orderedIds.map((id, i) => prisma.blueprintRoom.update({ where: { Id: id }, data: { Position: i } }))
   );
 }
 
-// ─── Componentes ──────────────────────────────────────────────────────
+// ─── Componentes (RoomComponent + BlueprintRoomComponent) ───────────────
 
-export type ComponenteInput = Pick<Componente, "nome" | "unidade" | "qtd" | "rt"> &
-  Partial<Pick<Componente, "ghost" | "ordem" | "padrao">>;
+export interface ComponenteInput {
+  nome: string;
+  unidade: Unidade;
+  qtd: number;
+  rt: number;
+  ghost?: boolean;
+  ordem?: number;
+  /** BaseMaterial a semear como opção default (crédito). */
+  padraoBaseId?: number | null;
+}
 
 export async function createComponente(
   organizationId: string,
-  tipologiaId: string,
-  ambienteId: string,
+  tipologiaId: number,
+  blueprintRoomId: number,
   input: ComponenteInput
 ): Promise<Componente> {
-  await findAmbiente(organizationId, tipologiaId, ambienteId);
-  const agg = await prisma.componente.aggregate({
-    where: { ambienteId, organizationId },
-    _max: { ordem: true },
+  const ctx = await findBlueprintRoomCtx(organizationId, tipologiaId, blueprintRoomId);
+  const agg = await prisma.roomComponent.aggregate({
+    where: { RoomId: ctx.roomId },
+    _max: { Position: true },
   });
-  const { padrao, ordem, ...rest } = input;
-  const row = await prisma.componente.create({
+  const rc = await prisma.roomComponent.create({
     data: {
-      id: genId("c"),
-      ambienteId,
-      ...rest,
-      padrao: padrao ?? null,
-      upgrades: [],
-      ordem: ordem ?? (await nextOrdem(agg)),
-      organizationId,
+      RoomId: ctx.roomId,
+      Name: input.nome,
+      Unit: input.unidade,
+      IsGhost: input.ghost ?? false,
+      Position: input.ordem ?? (await nextPosition(agg._max.Position)),
     },
+    select: { Id: true },
   });
-  return toComponente(row);
+  // Opção default opcional (paleta compartilhada).
+  if (input.padraoBaseId != null) {
+    const opt = await prisma.material.create({
+      data: {
+        RoomComponentId: rc.Id,
+        RoomId: ctx.roomId,
+        EnterpriseId: ctx.enterpriseId,
+        BaseMaterialId: input.padraoBaseId,
+        Position: 0,
+        IsDefault: true,
+      },
+      select: { Id: true },
+    });
+    await prisma.roomComponent.update({ where: { Id: rc.Id }, data: { DefaultMaterialId: opt.Id } });
+  }
+  // Instância por planta para cada aparição do Room (a paleta propaga; a qtd varia).
+  const brs = await prisma.blueprintRoom.findMany({
+    where: { RoomId: ctx.roomId },
+    select: { Id: true },
+  });
+  await prisma.blueprintRoomComponent.createMany({
+    data: brs.map((br) => ({
+      BlueprintRoomId: br.Id,
+      RoomComponentId: rc.Id,
+      UsageQuantity: input.qtd,
+      TechnicalReservePct: input.rt,
+    })),
+  });
+  return reloadComponente(organizationId, blueprintRoomId, rc.Id);
 }
 
 export async function updateComponente(
   organizationId: string,
-  tipologiaId: string,
-  ambienteId: string,
-  componenteId: string,
-  patch: Partial<ComponenteInput>
+  tipologiaId: number,
+  blueprintRoomId: number,
+  componenteId: number,
+  patch: Partial<Pick<ComponenteInput, "nome" | "unidade" | "qtd" | "rt" | "ghost" | "ordem">>
 ): Promise<Componente> {
-  await findAmbiente(organizationId, tipologiaId, ambienteId);
-  await findComponente(organizationId, ambienteId, componenteId);
-  const row = await prisma.componente.update({
-    where: { id: componenteId },
-    data: patch,
+  const ctx = await findBlueprintRoomCtx(organizationId, tipologiaId, blueprintRoomId);
+  await assertComponentInRoom(componenteId, ctx.roomId);
+  // Campos da paleta (RoomComponent, compartilhados) vs. por planta (BRC).
+  const rcData: Prisma.RoomComponentUpdateInput = {};
+  if (patch.nome !== undefined) rcData.Name = patch.nome;
+  if (patch.unidade !== undefined) rcData.Unit = patch.unidade;
+  if (patch.ghost !== undefined) rcData.IsGhost = patch.ghost;
+  if (patch.ordem !== undefined) rcData.Position = patch.ordem;
+  if (Object.keys(rcData).length > 0) {
+    await prisma.roomComponent.update({ where: { Id: componenteId }, data: rcData });
+  }
+  if (patch.qtd !== undefined || patch.rt !== undefined) {
+    await ensureBrc(ctx, componenteId);
+    await prisma.blueprintRoomComponent.update({
+      where: { BlueprintRoomId_RoomComponentId: { BlueprintRoomId: ctx.id, RoomComponentId: componenteId } },
+      data: {
+        ...(patch.qtd !== undefined ? { UsageQuantity: patch.qtd } : {}),
+        ...(patch.rt !== undefined ? { TechnicalReservePct: patch.rt } : {}),
+      },
+    });
+  }
+  return reloadComponente(organizationId, blueprintRoomId, componenteId);
+}
+
+async function assertComponentInRoom(roomComponentId: number, roomId: number): Promise<void> {
+  const rc = await prisma.roomComponent.findFirst({
+    where: { Id: roomComponentId, RoomId: roomId },
+    select: { Id: true },
   });
-  return toComponente(row);
+  if (!rc) throw new Error("Componente não encontrado.");
 }
 
 export async function deleteComponente(
   organizationId: string,
-  tipologiaId: string,
-  ambienteId: string,
-  componenteId: string
+  tipologiaId: number,
+  blueprintRoomId: number,
+  componenteId: number
 ): Promise<void> {
-  await findAmbiente(organizationId, tipologiaId, ambienteId);
-  const res = await prisma.componente.deleteMany({
-    where: { id: componenteId, ambienteId, organizationId },
-  });
+  const ctx = await findBlueprintRoomCtx(organizationId, tipologiaId, blueprintRoomId);
+  const res = await prisma.roomComponent.deleteMany({ where: { Id: componenteId, RoomId: ctx.roomId } });
   if (res.count === 0) throw new Error("Componente não encontrado.");
 }
 
 export async function reorderComponentes(
   organizationId: string,
-  tipologiaId: string,
-  ambienteId: string,
-  orderedIds: string[]
+  tipologiaId: number,
+  blueprintRoomId: number,
+  orderedIds: number[]
 ): Promise<void> {
-  const amb = await findAmbiente(organizationId, tipologiaId, ambienteId);
-  const atuais = new Set(amb.componentes.map((c) => c.id));
+  const ctx = await findBlueprintRoomCtx(organizationId, tipologiaId, blueprintRoomId);
+  const comps = await prisma.roomComponent.findMany({
+    where: { RoomId: ctx.roomId },
+    select: { Id: true },
+  });
+  const atuais = new Set(comps.map((c) => c.Id));
   if (orderedIds.length !== atuais.size || orderedIds.some((id) => !atuais.has(id))) {
     throw new Error("Ordem de componentes inválida.");
   }
   await prisma.$transaction(
-    orderedIds.map((id, i) =>
-      prisma.componente.update({ where: { id }, data: { ordem: i } })
-    )
+    orderedIds.map((id, i) => prisma.roomComponent.update({ where: { Id: id }, data: { Position: i } }))
   );
 }
 
+// ─── Operações de opção (setPadrao / add / replace / remove / kitQtds) ──
+
+/** Opção (Material) de um BaseMaterial num componente — cria se faltar. */
+async function ensureOption(ctx: RoomComponentCtx, baseMaterialId: number): Promise<number> {
+  const opt = await prisma.material.upsert({
+    where: { RoomComponentId_BaseMaterialId: { RoomComponentId: ctx.id, BaseMaterialId: baseMaterialId } },
+    update: {},
+    create: {
+      RoomComponentId: ctx.id,
+      RoomId: ctx.roomId,
+      EnterpriseId: ctx.enterpriseId,
+      BaseMaterialId: baseMaterialId,
+      Position: await nextOptionPosition(ctx.id),
+    },
+    select: { Id: true },
+  });
+  return opt.Id;
+}
+
+async function nextOptionPosition(roomComponentId: number): Promise<number> {
+  const agg = await prisma.material.aggregate({
+    where: { RoomComponentId: roomComponentId },
+    _max: { Position: true },
+  });
+  return (agg._max.Position ?? -1) + 1;
+}
+
+/** Define o material default (crédito). padraoBaseId = BaseMaterial escolhido; null limpa. */
 export async function setPadrao(
   organizationId: string,
-  tipologiaId: string,
-  ambienteId: string,
-  componenteId: string,
-  padraoId: string | null
+  tipologiaId: number,
+  blueprintRoomId: number,
+  componenteId: number,
+  padraoBaseId: number | null
 ): Promise<Componente> {
-  await findAmbiente(organizationId, tipologiaId, ambienteId);
-  await findComponente(organizationId, ambienteId, componenteId);
-  const row = await prisma.componente.update({
-    where: { id: componenteId },
-    data: { padrao: padraoId },
-  });
-  return toComponente(row);
+  await findBlueprintRoomCtx(organizationId, tipologiaId, blueprintRoomId);
+  const ctx = await findRoomComponentCtx(organizationId, componenteId);
+  if (padraoBaseId == null) {
+    await prisma.roomComponent.update({ where: { Id: ctx.id }, data: { DefaultMaterialId: null } });
+    await prisma.material.updateMany({ where: { RoomComponentId: ctx.id }, data: { IsDefault: false } });
+    return reloadComponente(organizationId, blueprintRoomId, componenteId);
+  }
+  const optId = await ensureOption(ctx, padraoBaseId);
+  await prisma.$transaction([
+    prisma.material.updateMany({ where: { RoomComponentId: ctx.id }, data: { IsDefault: false } }),
+    prisma.material.update({ where: { Id: optId }, data: { IsDefault: true } }),
+    prisma.roomComponent.update({ where: { Id: ctx.id }, data: { DefaultMaterialId: optId } }),
+  ]);
+  return reloadComponente(organizationId, blueprintRoomId, componenteId);
 }
 
+/** Adiciona uma opção (upgrade) referenciando um BaseMaterial do catálogo. */
 export async function addUpgrade(
   organizationId: string,
-  tipologiaId: string,
-  ambienteId: string,
-  componenteId: string,
-  upgradeId: string
+  tipologiaId: number,
+  blueprintRoomId: number,
+  componenteId: number,
+  upgradeBaseId: number
 ): Promise<Componente> {
-  await findAmbiente(organizationId, tipologiaId, ambienteId);
-  const comp = await findComponente(organizationId, ambienteId, componenteId);
-  const upgrades = comp.upgrades.includes(upgradeId)
-    ? comp.upgrades
-    : [...comp.upgrades, upgradeId];
-  const row = await prisma.componente.update({
-    where: { id: componenteId },
-    data: { upgrades },
-  });
-  return toComponente(row);
+  await findBlueprintRoomCtx(organizationId, tipologiaId, blueprintRoomId);
+  const ctx = await findRoomComponentCtx(organizationId, componenteId);
+  await ensureOption(ctx, upgradeBaseId);
+  return reloadComponente(organizationId, blueprintRoomId, componenteId);
 }
 
-/** Troca o material de uma opção preservando a posição no array (ups[i] = novo). */
+/** Troca o BaseMaterial de uma opção existente (oldOptionId → newBaseId), preservando a posição. */
 export async function replaceUpgrade(
   organizationId: string,
-  tipologiaId: string,
-  ambienteId: string,
-  componenteId: string,
-  oldId: string,
-  newId: string
+  tipologiaId: number,
+  blueprintRoomId: number,
+  componenteId: number,
+  oldOptionId: number,
+  newBaseId: number
 ): Promise<Componente> {
-  await findAmbiente(organizationId, tipologiaId, ambienteId);
-  const comp = await findComponente(organizationId, ambienteId, componenteId);
-  const upgrades = [...comp.upgrades];
-  const i = upgrades.indexOf(oldId);
-  if (i >= 0) upgrades[i] = newId;
-  else if (!upgrades.includes(newId)) upgrades.push(newId);
-  const kitQtds = (comp.kitQtds as unknown as Record<string, Record<string, number>> | null) ?? null;
-  if (kitQtds && oldId !== newId) delete kitQtds[oldId];
-  const row = await prisma.componente.update({
-    where: { id: componenteId },
-    data: { upgrades, kitQtds: kitQtds ? json(kitQtds) : Prisma.JsonNull },
+  await findBlueprintRoomCtx(organizationId, tipologiaId, blueprintRoomId);
+  const ctx = await findRoomComponentCtx(organizationId, componenteId);
+  const old = await prisma.material.findFirst({
+    where: { Id: oldOptionId, RoomComponentId: ctx.id },
+    select: { Id: true, Position: true },
   });
-  return toComponente(row);
+  if (!old) throw new Error("Opção não encontrada.");
+  const dup = await prisma.material.findUnique({
+    where: { RoomComponentId_BaseMaterialId: { RoomComponentId: ctx.id, BaseMaterialId: newBaseId } },
+    select: { Id: true },
+  });
+  if (dup && dup.Id !== oldOptionId) {
+    // Novo BaseMaterial já é opção: remove a antiga (o default segue via FK SetNull).
+    await prisma.material.delete({ where: { Id: oldOptionId } });
+  } else {
+    await prisma.material.update({ where: { Id: oldOptionId }, data: { BaseMaterialId: newBaseId } });
+  }
+  return reloadComponente(organizationId, blueprintRoomId, componenteId);
 }
 
+/** Remove uma opção (por id de linha Material). Se era default, a FK SetNull limpa. */
 export async function removeUpgrade(
   organizationId: string,
-  tipologiaId: string,
-  ambienteId: string,
-  componenteId: string,
-  upgradeId: string
+  tipologiaId: number,
+  blueprintRoomId: number,
+  componenteId: number,
+  optionId: number
 ): Promise<Componente> {
-  await findAmbiente(organizationId, tipologiaId, ambienteId);
-  const comp = await findComponente(organizationId, ambienteId, componenteId);
-  const upgrades = comp.upgrades.filter((u) => u !== upgradeId);
-  const kitQtds = (comp.kitQtds as unknown as Record<string, Record<string, number>> | null) ?? null;
-  if (kitQtds) delete kitQtds[upgradeId];
-  const row = await prisma.componente.update({
-    where: { id: componenteId },
-    data: { upgrades, kitQtds: kitQtds ? json(kitQtds) : Prisma.JsonNull },
-  });
-  return toComponente(row);
+  await findBlueprintRoomCtx(organizationId, tipologiaId, blueprintRoomId);
+  const ctx = await findRoomComponentCtx(organizationId, componenteId);
+  const res = await prisma.material.deleteMany({ where: { Id: optionId, RoomComponentId: ctx.id } });
+  if (res.count === 0) throw new Error("Opção não encontrada.");
+  return reloadComponente(organizationId, blueprintRoomId, componenteId);
 }
 
-/** Grava os quantitativos dos sub-itens de um kit para o componente. */
+/** Grava os quantitativos de sub-itens de kit desta planta (keyed por KitItem id). */
 export async function setKitQtds(
   organizationId: string,
-  tipologiaId: string,
-  ambienteId: string,
-  componenteId: string,
-  kitId: string,
-  qtds: Record<string, number>
+  tipologiaId: number,
+  blueprintRoomId: number,
+  componenteId: number,
+  qtds: Record<number, number>
 ): Promise<Componente> {
-  await findAmbiente(organizationId, tipologiaId, ambienteId);
-  const comp = await findComponente(organizationId, ambienteId, componenteId);
-  const kitQtds = {
-    ...((comp.kitQtds as unknown as Record<string, Record<string, number>> | null) ?? {}),
-    [kitId]: qtds,
-  };
-  const row = await prisma.componente.update({
-    where: { id: componenteId },
-    data: { kitQtds: json(kitQtds) },
-  });
-  return toComponente(row);
+  const ctx = await findBlueprintRoomCtx(organizationId, tipologiaId, blueprintRoomId);
+  await assertComponentInRoom(componenteId, ctx.roomId);
+  const brcId = await ensureBrc(ctx, componenteId);
+  const entries = Object.entries(qtds);
+  if (entries.length > 0) {
+    await prisma.$transaction(
+      entries.map(([kitItemId, q]) =>
+        prisma.materialKitUsage.upsert({
+          where: {
+            BlueprintRoomComponentId_KitItemId: {
+              BlueprintRoomComponentId: brcId,
+              KitItemId: Number(kitItemId),
+            },
+          },
+          update: { UsageQuantity: q },
+          create: { BlueprintRoomComponentId: brcId, KitItemId: Number(kitItemId), UsageQuantity: q },
+        })
+      )
+    );
+  }
+  return reloadComponente(organizationId, blueprintRoomId, componenteId);
 }
 
-// ─── Compartilhamento de ambientes entre tipologias ──────────────────
+// ─── Compartilhamento de ambientes (derivado de BlueprintRoom) ──────────
 
 export interface SharedInfo {
+  /** shareId (String(roomId)) → tipologias participantes (String(blueprintId)). */
   sharedReg: Record<string, { tips: string[] }>;
+  /** String(roomId) → shareId (String(roomId)) para rooms em ≥2 plantas. */
   ambShared: Record<string, string>;
 }
 
 export async function getSharedInfo(organizationId: string): Promise<SharedInfo> {
-  const rows = await prisma.ambienteShared.findMany({ where: { organizationId } });
+  const enterpriseId = await activeEnterpriseIdOrNull(organizationId);
   const sharedReg: Record<string, { tips: string[] }> = {};
   const ambShared: Record<string, string> = {};
-  for (const r of rows) {
-    ambShared[r.ambienteId] = r.shareId;
-    const reg = sharedReg[r.shareId] ?? { tips: [] };
-    if (!reg.tips.includes(r.tipologiaId)) reg.tips.push(r.tipologiaId);
-    sharedReg[r.shareId] = reg;
+  if (enterpriseId == null) return { sharedReg, ambShared };
+  const rooms = await prisma.room.findMany({
+    where: { EnterpriseId: enterpriseId },
+    select: { Id: true, BlueprintRooms: { select: { BlueprintId: true } } },
+  });
+  for (const room of rooms) {
+    if (room.BlueprintRooms.length < 2) continue; // "compartilhado" = aparece em ≥2 plantas
+    const shareId = String(room.Id);
+    sharedReg[shareId] = { tips: room.BlueprintRooms.map((br) => String(br.BlueprintId)) };
+    ambShared[shareId] = shareId;
   }
   return { sharedReg, ambShared };
 }
 
 /**
- * Vincula um ambiente de outra tipologia à tipologia alvo: clona o ambiente
- * (ids novos) e registra ambos no grupo compartilhado do ambiente fonte.
+ * Compartilha um ambiente de outra planta na planta alvo: insere um BlueprintRoom
+ * apontando para o MESMO Room (sem clonar) e cria os BRC copiando qtd/RT/kitUsage
+ * da aparição de origem. A paleta passa a propagar entre as plantas por construção.
  */
 export async function linkAmbiente(
   organizationId: string,
-  targetTipologiaId: string,
-  srcTipologiaId: string,
-  srcAmbienteId: string
+  targetTipologiaId: number,
+  srcBlueprintRoomId: number
 ): Promise<Ambiente> {
-  await findTipologia(organizationId, targetTipologiaId);
-  const srcAmb = await findAmbiente(organizationId, srcTipologiaId, srcAmbienteId);
-  const existing = await prisma.ambienteShared.findFirst({
-    where: { ambienteId: srcAmbienteId, organizationId },
-  });
-  const sid = existing?.shareId ?? `sh-${srcAmbienteId}`;
-
-  const agg = await prisma.ambiente.aggregate({
-    where: { tipologiaId: targetTipologiaId, organizationId },
-    _max: { ordem: true },
-  });
-  const copy = await prisma.ambiente.create({
-    data: {
-      id: genId("amb"),
-      tipologiaId: targetTipologiaId,
-      nome: srcAmb.nome,
-      icon: srcAmb.icon,
-      imagem: srcAmb.imagem ?? undefined,
-      local: srcAmb.local ?? undefined,
-      ordem: await nextOrdem(agg),
-      organizationId,
-      componentes: {
-        create: srcAmb.componentes.map((c) => ({
-          id: genId("c"),
-          nome: c.nome,
-          unidade: c.unidade,
-          qtd: c.qtd,
-          rt: c.rt,
-          padrao: c.padrao,
-          upgrades: c.upgrades,
-          taxaEspecifica: c.taxaEspecifica ?? undefined,
-          ghost: c.ghost,
-          ordem: c.ordem,
-          kitQtds: c.kitQtds ?? undefined,
-          organizationId,
-        })),
-      },
+  await assertBlueprint(organizationId, targetTipologiaId);
+  const src = await prisma.blueprintRoom.findFirst({
+    where: { Id: srcBlueprintRoomId, Blueprint: { Enterprise: { OrganizationId: organizationId } } },
+    include: {
+      Room: { select: { Id: true, RoomComponents: { select: { Id: true } } } },
+      Components: { include: { KitUsages: true } },
     },
-    include: { componentes: true },
   });
+  if (!src) throw new Error("Ambiente de origem não encontrado.");
+  const existing = await prisma.blueprintRoom.findUnique({
+    where: { BlueprintId_RoomId: { BlueprintId: targetTipologiaId, RoomId: src.Room.Id } },
+    select: { Id: true },
+  });
+  if (existing) throw new Error("Ambiente já compartilhado nesta tipologia.");
 
-  await prisma.$transaction([
-    prisma.ambienteShared.upsert({
-      where: { ambienteId: copy.id },
-      update: { shareId: sid, tipologiaId: targetTipologiaId },
-      create: {
-        ambienteId: copy.id,
-        shareId: sid,
-        tipologiaId: targetTipologiaId,
-        organizationId,
+  const agg = await prisma.blueprintRoom.aggregate({
+    where: { BlueprintId: targetTipologiaId },
+    _max: { Position: true },
+  });
+  const newBr = await prisma.blueprintRoom.create({
+    data: {
+      BlueprintId: targetTipologiaId,
+      RoomId: src.Room.Id,
+      Position: await nextPosition(agg._max.Position),
+      Polygon: src.Polygon ?? Prisma.JsonNull,
+    },
+    select: { Id: true },
+  });
+  // Um BRC por componente do Room, copiando qtd/RT (e kitUsage) da origem.
+  const srcBrcByRc = new Map(src.Components.map((c) => [c.RoomComponentId, c]));
+  for (const rc of src.Room.RoomComponents) {
+    const srcBrc = srcBrcByRc.get(rc.Id);
+    const newBrc = await prisma.blueprintRoomComponent.create({
+      data: {
+        BlueprintRoomId: newBr.Id,
+        RoomComponentId: rc.Id,
+        UsageQuantity: srcBrc?.UsageQuantity ?? 0,
+        TechnicalReservePct: srcBrc?.TechnicalReservePct ?? 0,
       },
-    }),
-    prisma.ambienteShared.upsert({
-      where: { ambienteId: srcAmbienteId },
-      update: { shareId: sid, tipologiaId: srcTipologiaId },
-      create: {
-        ambienteId: srcAmbienteId,
-        shareId: sid,
-        tipologiaId: srcTipologiaId,
-        organizationId,
-      },
-    }),
-  ]);
-
-  return toAmbiente(copy);
+      select: { Id: true },
+    });
+    if (srcBrc && srcBrc.KitUsages.length > 0) {
+      await prisma.materialKitUsage.createMany({
+        data: srcBrc.KitUsages.map((ku) => ({
+          BlueprintRoomComponentId: newBrc.Id,
+          KitItemId: ku.KitItemId,
+          UsageQuantity: ku.UsageQuantity,
+        })),
+      });
+    }
+  }
+  const created = await prisma.blueprintRoom.findUniqueOrThrow({
+    where: { Id: newBr.Id },
+    include: {
+      Room: { include: { RoomComponents: { include: { Options: { include: { BaseMaterial: true } } } } } },
+      Components: { include: { KitUsages: true } },
+    },
+  });
+  return toAmbiente(created);
 }
 
-// ─── Unit groups / Torres ─────────────────────────────────────────────
+// ─── Unit groups / Torres (Enterprise) ──────────────────────────────────
 
 export type UnitGroupInput = Omit<UnitGroup, "id">;
 
-export async function listUnitGroups(organizationId: string): Promise<UnitGroup[]> {
-  const rows = await prisma.unitGroup.findMany({
-    where: { organizationId },
-    orderBy: { id: "asc" },
+async function resolveTowerId(enterpriseId: number, name: string): Promise<number | null> {
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+  const existing = await prisma.tower.findFirst({
+    where: { EnterpriseId: enterpriseId, Name: trimmed },
+    select: { Id: true },
   });
-  return rows.map((r) => ({ id: r.id, nome: r.nome, torre: r.torre, unidades: r.unidades }));
+  if (existing) return existing.Id;
+  const agg = await prisma.tower.aggregate({ where: { EnterpriseId: enterpriseId }, _max: { Position: true } });
+  const created = await prisma.tower.create({
+    data: { EnterpriseId: enterpriseId, Name: trimmed, Position: await nextPosition(agg._max.Position) },
+    select: { Id: true },
+  });
+  return created.Id;
+}
+
+type UnitGroupRow = Prisma.UnitGroupGetPayload<{ include: { Tower: true } }>;
+function toUnitGroup(row: UnitGroupRow): UnitGroup {
+  return { id: row.Id, nome: row.Name, torre: row.Tower?.Name ?? "", unidades: row.UnitNumbers };
+}
+
+export async function listUnitGroups(organizationId: string): Promise<UnitGroup[]> {
+  const enterpriseId = await activeEnterpriseIdOrNull(organizationId);
+  if (enterpriseId == null) return [];
+  const rows = await prisma.unitGroup.findMany({
+    where: { EnterpriseId: enterpriseId },
+    include: { Tower: true },
+    orderBy: { Id: "asc" },
+  });
+  return rows.map(toUnitGroup);
 }
 
 export async function createUnitGroup(
   organizationId: string,
   input: UnitGroupInput
 ): Promise<UnitGroup> {
+  const enterpriseId = await activeEnterpriseId(organizationId);
+  const towerId = await resolveTowerId(enterpriseId, input.torre);
   const row = await prisma.unitGroup.create({
-    data: { id: genId("ug"), ...input, organizationId },
+    data: { EnterpriseId: enterpriseId, Name: input.nome, TowerId: towerId, UnitNumbers: input.unidades },
+    include: { Tower: true },
   });
-  return { id: row.id, nome: row.nome, torre: row.torre, unidades: row.unidades };
+  return toUnitGroup(row);
 }
 
 export async function updateUnitGroup(
   organizationId: string,
-  id: string,
+  id: number,
   patch: Partial<UnitGroupInput>
 ): Promise<UnitGroup> {
-  const exists = await prisma.unitGroup.findFirst({ where: { id, organizationId } });
+  const exists = await prisma.unitGroup.findFirst({
+    where: { Id: id, Enterprise: { OrganizationId: organizationId } },
+    select: { Id: true, EnterpriseId: true },
+  });
   if (!exists) throw new Error("Grupo de unidades não encontrado.");
-  const row = await prisma.unitGroup.update({ where: { id }, data: patch });
-  return { id: row.id, nome: row.nome, torre: row.torre, unidades: row.unidades };
+  const data: Prisma.UnitGroupUpdateInput = {};
+  if (patch.nome !== undefined) data.Name = patch.nome;
+  if (patch.unidades !== undefined) data.UnitNumbers = patch.unidades;
+  if (patch.torre !== undefined) {
+    const towerId = await resolveTowerId(exists.EnterpriseId, patch.torre);
+    data.Tower = towerId == null ? { disconnect: true } : { connect: { Id: towerId } };
+  }
+  const row = await prisma.unitGroup.update({ where: { Id: id }, data, include: { Tower: true } });
+  return toUnitGroup(row);
 }
 
-export async function deleteUnitGroup(organizationId: string, id: string): Promise<void> {
-  const res = await prisma.unitGroup.deleteMany({ where: { id, organizationId } });
+export async function deleteUnitGroup(organizationId: string, id: number): Promise<void> {
+  const res = await prisma.unitGroup.deleteMany({
+    where: { Id: id, Enterprise: { OrganizationId: organizationId } },
+  });
   if (res.count === 0) throw new Error("Grupo de unidades não encontrado.");
 }
 
 export async function listTorres(organizationId: string): Promise<string[]> {
+  const enterpriseId = await activeEnterpriseIdOrNull(organizationId);
+  if (enterpriseId == null) return [];
   const rows = await prisma.tower.findMany({
-    where: { organizationId },
-    orderBy: { ordem: "asc" },
+    where: { EnterpriseId: enterpriseId },
+    orderBy: { Position: "asc" },
   });
-  return rows.map((r) => r.nome);
+  return rows.map((r) => r.Name);
 }
 
-// ─── Versions ─────────────────────────────────────────────────────────
+// ─── Versions (BudgetVersion) ───────────────────────────────────────────
 
 export interface VersionInput {
   summary: string;
@@ -953,20 +1486,22 @@ export interface VersionInput {
 
 function toVersion(row: Prisma.BudgetVersionGetPayload<object>): BudgetVersion {
   return {
-    id: row.id,
-    label: row.label,
-    createdAt: row.criadoEm,
-    createdBy: row.createdBy,
-    isCurrent: row.isCurrent,
-    summary: row.summary,
-    changes: row.changes as unknown as VersionChanges,
+    id: row.Id,
+    label: row.Label,
+    createdAt: row.CreatedAtLabel,
+    createdBy: row.CreatedBy,
+    isCurrent: row.IsCurrent,
+    summary: row.Summary,
+    changes: row.Changes as unknown as VersionChanges,
   };
 }
 
 export async function listVersions(organizationId: string): Promise<BudgetVersion[]> {
+  const enterpriseId = await activeEnterpriseIdOrNull(organizationId);
+  if (enterpriseId == null) return [];
   const rows = await prisma.budgetVersion.findMany({
-    where: { organizationId },
-    orderBy: { ordem: "asc" },
+    where: { EnterpriseId: enterpriseId },
+    orderBy: { Position: "asc" },
   });
   return rows.map(toVersion);
 }
@@ -975,78 +1510,82 @@ export async function createVersion(
   organizationId: string,
   input: VersionInput
 ): Promise<BudgetVersion> {
-  const count = await prisma.budgetVersion.count({ where: { organizationId } });
+  const enterpriseId = await activeEnterpriseId(organizationId);
+  const count = await prisma.budgetVersion.count({ where: { EnterpriseId: enterpriseId } });
   const agg = await prisma.budgetVersion.aggregate({
-    where: { organizationId },
-    _min: { ordem: true },
+    where: { EnterpriseId: enterpriseId },
+    _min: { Position: true },
   });
   const [, row] = await prisma.$transaction([
-    prisma.budgetVersion.updateMany({
-      where: { organizationId },
-      data: { isCurrent: false },
-    }),
+    prisma.budgetVersion.updateMany({ where: { EnterpriseId: enterpriseId }, data: { IsCurrent: false } }),
     prisma.budgetVersion.create({
       data: {
-        id: genId("v"),
-        label: `v${count + 1}`,
-        criadoEm: nowBR().replace(" ", " às "),
-        createdBy: input.createdBy,
-        isCurrent: true,
-        summary: input.summary,
-        changes: json(input.changes) ?? {},
-        ordem: (agg._min.ordem ?? 1) - 1, // nova versão vem primeiro na lista
-        organizationId,
+        EnterpriseId: enterpriseId,
+        Label: `v${count + 1}`,
+        CreatedAtLabel: nowBR().replace(" ", " às "),
+        CreatedBy: input.createdBy,
+        IsCurrent: true,
+        Summary: input.summary,
+        Changes: json(input.changes) ?? {},
+        Position: (agg._min.Position ?? 1) - 1, // nova versão vem primeiro na lista
       },
     }),
   ]);
   return toVersion(row);
 }
 
-/** Marca a versão como atual (snapshot/restore real de estado — §12). */
 export async function restoreVersion(
   organizationId: string,
-  id: string
+  id: number
 ): Promise<BudgetVersion> {
-  const exists = await prisma.budgetVersion.findFirst({ where: { id, organizationId } });
+  const exists = await prisma.budgetVersion.findFirst({
+    where: { Id: id, Enterprise: { OrganizationId: organizationId } },
+    select: { Id: true, EnterpriseId: true },
+  });
   if (!exists) throw new Error("Versão não encontrada.");
   const [, row] = await prisma.$transaction([
-    prisma.budgetVersion.updateMany({
-      where: { organizationId },
-      data: { isCurrent: false },
-    }),
-    prisma.budgetVersion.update({ where: { id }, data: { isCurrent: true } }),
+    prisma.budgetVersion.updateMany({ where: { EnterpriseId: exists.EnterpriseId }, data: { IsCurrent: false } }),
+    prisma.budgetVersion.update({ where: { Id: id }, data: { IsCurrent: true } }),
   ]);
   return toVersion(row);
 }
 
-// ─── Comments (rowKey = `${compId}-${optId}`) ─────────────────────────
+// ─── Comments (rowKey = String(optionId) → Comment.MaterialId) ──────────
 
 export interface CommentInput {
   autor: Comment["autor"];
   texto: string;
 }
 
-export async function getComments(organizationId: string, rowKey: string): Promise<Comment[]> {
-  const rows = await prisma.comment.findMany({
-    where: { rowKey, organizationId },
-    orderBy: { createdAt: "asc" },
-  });
-  return rows.map((r) => ({ autor: r.autor, texto: r.texto, data: r.data }));
+function parseRowKey(rowKey: string): number {
+  const id = Number(rowKey);
+  if (!Number.isFinite(id)) throw new Error("Comentário inválido.");
+  return id;
 }
 
-/** Todas as threads (contadores de comentário por linha nas tabelas). */
+export async function getComments(organizationId: string, rowKey: string): Promise<Comment[]> {
+  const materialId = parseRowKey(rowKey);
+  const rows = await prisma.comment.findMany({
+    where: { MaterialId: materialId, Enterprise: { OrganizationId: organizationId } },
+    orderBy: { CreatedAt: "asc" },
+  });
+  return rows.map((r) => ({ autor: r.Author, texto: r.Text, data: r.DateLabel }));
+}
+
+/** Todas as threads (contadores por linha) — keyed por String(MaterialId). */
 export async function listCommentThreads(
   organizationId: string
 ): Promise<Record<string, Comment[]>> {
-  const rows = await prisma.comment.findMany({
-    where: { organizationId },
-    orderBy: { createdAt: "asc" },
-  });
+  const enterpriseId = await activeEnterpriseIdOrNull(organizationId);
   const threads: Record<string, Comment[]> = {};
+  if (enterpriseId == null) return threads;
+  const rows = await prisma.comment.findMany({
+    where: { EnterpriseId: enterpriseId },
+    orderBy: { CreatedAt: "asc" },
+  });
   for (const r of rows) {
-    const thread = threads[r.rowKey] ?? [];
-    thread.push({ autor: r.autor, texto: r.texto, data: r.data });
-    threads[r.rowKey] = thread;
+    const key = String(r.MaterialId);
+    (threads[key] ??= []).push({ autor: r.Author, texto: r.Text, data: r.DateLabel });
   }
   return threads;
 }
@@ -1056,29 +1595,22 @@ export async function appendComment(
   rowKey: string,
   input: CommentInput
 ): Promise<Comment> {
+  const materialId = parseRowKey(rowKey);
+  const mat = await prisma.material.findFirst({
+    where: { Id: materialId, Enterprise: { OrganizationId: organizationId } },
+    select: { EnterpriseId: true },
+  });
+  if (!mat) throw new Error("Opção não encontrada.");
   const row = await prisma.comment.create({
-    data: { rowKey, autor: input.autor, texto: input.texto, data: nowBR(), organizationId },
+    data: {
+      MaterialId: materialId,
+      EnterpriseId: mat.EnterpriseId,
+      Author: input.autor,
+      Text: input.texto,
+      DateLabel: nowBR(),
+    },
   });
-  return { autor: row.autor, texto: row.texto, data: row.data };
-}
-
-// ─── Pending items ────────────────────────────────────────────────────
-
-export async function listPendingItems(organizationId: string): Promise<string[]> {
-  const rows = await prisma.pendingItem.findMany({ where: { organizationId } });
-  return rows.map((r) => r.key);
-}
-
-export async function addPendingItem(organizationId: string, key: string): Promise<void> {
-  await prisma.pendingItem.upsert({
-    where: { key },
-    update: {},
-    create: { key, organizationId },
-  });
-}
-
-export async function removePendingItem(organizationId: string, key: string): Promise<void> {
-  await prisma.pendingItem.deleteMany({ where: { key, organizationId } });
+  return { autor: row.Author, texto: row.Text, data: row.DateLabel };
 }
 
 // ─── Links de preenchimento + portal do terceiro ──────────────────────
@@ -1087,13 +1619,13 @@ export type FillLinkInput = Pick<FillLink, "tipologiaIds" | "campos" | "prazo" |
 
 function toFillLink(row: Prisma.FillLinkGetPayload<object>): FillLink {
   return {
-    id: row.id,
-    token: row.token,
-    tipologiaIds: row.tipologiaIds,
-    campos: row.campos as unknown as FillLinkCampos,
-    prazo: row.prazo,
-    senha: row.senha,
-    criadoEm: row.criadoEm,
+    id: row.Id,
+    token: row.Token,
+    tipologiaIds: row.BlueprintIds,
+    campos: row.Fields as unknown as FillLinkCampos,
+    prazo: row.DeadlineLabel,
+    senha: row.Password,
+    criadoEm: row.CreatedAtLabel,
   };
 }
 
@@ -1101,18 +1633,18 @@ export async function createFillLink(
   organizationId: string,
   input: FillLinkInput
 ): Promise<FillLink> {
+  const enterpriseId = await activeEnterpriseId(organizationId);
   const row = await prisma.fillLink.create({
     data: {
-      id: genId("fl"),
+      EnterpriseId: enterpriseId,
       // Token = único controle de acesso das rotas PÚBLICAS do portal: CSPRNG
       // (UUID v4, 122 bits), nunca Math.random.
-      token: randomUUID(),
-      tipologiaIds: input.tipologiaIds,
-      campos: json(input.campos) ?? {},
-      prazo: input.prazo,
-      senha: input.senha,
-      criadoEm: nowBR(),
-      organizationId,
+      Token: randomUUID(),
+      BlueprintIds: input.tipologiaIds,
+      Fields: json(input.campos) ?? {},
+      DeadlineLabel: input.prazo,
+      Password: input.senha,
+      CreatedAtLabel: nowBR(),
     },
   });
   return toFillLink(row);
@@ -1122,38 +1654,69 @@ export async function createFillLink(
 export async function getFillLinkByToken(
   token: string
 ): Promise<{ link: FillLink; organizationId: string } | null> {
-  const row = await prisma.fillLink.findUnique({ where: { token } });
-  return row ? { link: toFillLink(row), organizationId: row.organizationId } : null;
+  const row = await prisma.fillLink.findUnique({
+    where: { Token: token },
+    include: { Enterprise: { select: { OrganizationId: true } } },
+  });
+  return row ? { link: toFillLink(row), organizationId: row.Enterprise.OrganizationId } : null;
 }
 
 export async function getPortalFills(
   organizationId: string
 ): Promise<Record<string, PortalFill>> {
-  const rows = await prisma.portalFill.findMany({ where: { organizationId } });
+  const enterpriseId = await activeEnterpriseIdOrNull(organizationId);
   const fills: Record<string, PortalFill> = {};
-  for (const r of rows) fills[r.materialId] = { mat: r.mat, mo: r.mo, comment: r.comment };
+  if (enterpriseId == null) return fills;
+  const rows = await prisma.portalFill.findMany({ where: { EnterpriseId: enterpriseId } });
+  for (const r of rows) fills[String(r.BaseMaterialId)] = { mat: r.Mat, mo: r.Mo, comment: r.Comment };
   return fills;
 }
 
 /**
- * Ids de material referenciados (padrão + upgrades) pelas tipologias do link —
- * o escopo do que o portal do terceiro pode LER e PREENCHER. Kits ficam de fora
- * (o portal só preenche custo de material direto).
+ * BaseMaterials preenchíveis pelas plantas do link — o escopo do que o portal do
+ * terceiro pode LER e PREENCHER. Inclui o material das opções (single) e, para
+ * opções kit, cada sub-item (o custo vive no sub-material do catálogo).
  */
 export async function getPortalMaterialIds(
   organizationId: string,
-  tipologiaIds: string[]
-): Promise<Set<string>> {
-  const tips = await prisma.tipologia.findMany({
-    where: { id: { in: tipologiaIds }, organizationId },
-    include: { ambientes: { include: { componentes: true } } },
+  tipologiaIds: number[]
+): Promise<Set<number>> {
+  const blueprints = await prisma.blueprint.findMany({
+    where: { Id: { in: tipologiaIds }, Enterprise: { OrganizationId: organizationId } },
+    select: {
+      BlueprintRooms: {
+        select: {
+          Room: {
+            select: {
+              RoomComponents: {
+                select: {
+                  Options: {
+                    select: {
+                      BaseMaterialId: true,
+                      BaseMaterial: {
+                        select: { Type: true, KitItems: { select: { ChildMaterialId: true } } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
   });
-  const ids = new Set<string>();
-  for (const t of tips) {
-    for (const amb of t.ambientes) {
-      for (const c of amb.componentes) {
-        if (c.padrao) ids.add(c.padrao);
-        for (const u of c.upgrades) ids.add(u);
+  const ids = new Set<number>();
+  for (const bp of blueprints) {
+    for (const br of bp.BlueprintRooms) {
+      for (const rc of br.Room.RoomComponents) {
+        for (const opt of rc.Options) {
+          if (opt.BaseMaterial.Type === "kit") {
+            for (const ki of opt.BaseMaterial.KitItems) ids.add(ki.ChildMaterialId);
+          } else {
+            ids.add(opt.BaseMaterialId);
+          }
+        }
       }
     }
   }
@@ -1161,75 +1724,51 @@ export async function getPortalMaterialIds(
 }
 
 /**
- * "Enviar preenchimento" do portal: grava os fills, aplica os custos com
- * material preenchido ao catálogo, limpa as pendências relacionadas e move o
- * projeto ativo para "em_revisao". Retorna quantos materiais foram aplicados.
+ * "Enviar preenchimento" do portal: grava os fills, aplica os custos ao catálogo
+ * (BaseMaterial) e move o empreendimento ativo para "em_revisao". A pendência
+ * some por construção (custo deixa de ser NULL). Retorna quantos foram aplicados.
  */
 export async function submitPortalFills(
   organizationId: string,
   fills: Record<string, PortalFill>,
-  allowedMaterialIds: Set<string>
+  allowedBaseMaterialIds: Set<number>
 ): Promise<number> {
+  const enterpriseId = await activeEnterpriseId(organizationId);
 
-  // Escopo do link: descarta fills de materiais fora das tipologias liberadas —
-  // o terceiro não pode sobrescrever custos de materiais que o link não abriu.
-  const scoped = Object.fromEntries(
-    Object.entries(fills).filter(([materialId]) => allowedMaterialIds.has(materialId))
-  );
+  // Escopo do link: descarta fills fora das plantas liberadas.
+  const scoped = Object.entries(fills).filter(([baseId]) => allowedBaseMaterialIds.has(Number(baseId)));
 
   await prisma.$transaction([
-    prisma.portalFill.deleteMany({ where: { organizationId } }),
+    prisma.portalFill.deleteMany({ where: { EnterpriseId: enterpriseId } }),
     prisma.portalFill.createMany({
-      data: Object.entries(scoped).map(([materialId, f]) => ({
-        materialId,
-        mat: f.mat,
-        mo: f.mo,
-        comment: f.comment,
-        organizationId,
+      data: scoped.map(([baseId, f]) => ({
+        EnterpriseId: enterpriseId,
+        BaseMaterialId: Number(baseId),
+        Mat: f.mat,
+        Mo: f.mo,
+        Comment: f.comment,
       })),
     }),
   ]);
 
-  // Aplica todos os custos preenchidos em paralelo e limpa as pendências
-  // relacionadas com UM deleteMany (evita o N+1 de update+delete sequenciais).
-  const pendentes = await prisma.pendingItem.findMany({ where: { organizationId } });
-  const paraAplicar = Object.entries(scoped).filter(([, f]) => parseFloat(f.mat) > 0);
+  // Aplica os custos preenchidos (> 0) ao catálogo, em paralelo.
+  const paraAplicar = scoped.filter(([, f]) => parseFloat(f.mat) > 0);
   const resultados = await Promise.all(
-    paraAplicar.map(async ([materialId, fill]) => {
-      const res = await prisma.material.updateMany({
-        where: { id: materialId, organizationId },
+    paraAplicar.map(async ([baseId, fill]) => {
+      const res = await prisma.baseMaterial.updateMany({
+        where: { Id: Number(baseId), OrganizationId: organizationId },
         data: {
-          custoMat: parseFloat(fill.mat),
-          custoMO: parseFloat(fill.mo) > 0 ? parseFloat(fill.mo) : 0,
+          CostMaterialInCents: toCentsOrNull(parseFloat(fill.mat)),
+          CostLaborInCents: toCentsOrNull(parseFloat(fill.mo) > 0 ? parseFloat(fill.mo) : 0),
         },
       });
-      return { materialId, ok: res.count > 0 };
+      return res.count > 0;
     })
   );
-
-  let applied = 0;
-  const keysParaRemover: string[] = [];
-  for (const { materialId, ok } of resultados) {
-    if (!ok) continue;
-    applied += 1;
-    for (const pi of pendentes) {
-      if (pi.key.endsWith(`-${materialId}`)) keysParaRemover.push(pi.key);
-    }
-  }
-  if (keysParaRemover.length > 0) {
-    await prisma.pendingItem.deleteMany({
-      where: { key: { in: keysParaRemover }, organizationId },
-    });
-  }
+  const applied = resultados.filter(Boolean).length;
 
   if (applied > 0) {
-    const activeId = await getActiveProjectId(organizationId);
-    if (activeId) {
-      await prisma.project.updateMany({
-        where: { id: activeId, organizationId },
-        data: { status: "em_revisao" },
-      });
-    }
+    await prisma.enterprise.update({ where: { Id: enterpriseId }, data: { Status: "em_revisao" } });
   }
   return applied;
 }

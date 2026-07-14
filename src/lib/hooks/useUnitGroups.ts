@@ -37,10 +37,10 @@ export function useCreateUnitGroup() {
 
 export function useUpdateUnitGroup() {
   return useUnitGroupMutation(
-    ({ id, patch }: { id: string; patch: Partial<UnitGroupInput> }) => updateUnitGroup(id, patch)
+    ({ id, patch }: { id: number; patch: Partial<UnitGroupInput> }) => updateUnitGroup(id, patch)
   );
 }
 
 export function useDeleteUnitGroup() {
-  return useUnitGroupMutation((id: string) => deleteUnitGroup(id));
+  return useUnitGroupMutation((id: number) => deleteUnitGroup(id));
 }

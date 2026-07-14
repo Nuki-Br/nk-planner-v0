@@ -32,7 +32,7 @@ export function UnitGroupsDrawer({ open, onClose, empreendimento }: UnitGroupsDr
   const updateGroup = useUpdateUnitGroup();
   const deleteGroup = useDeleteUnitGroup();
 
-  const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [selectedId, setSelectedId] = React.useState<number | null>(null);
 
   React.useEffect(() => {
     if (!open) return;
@@ -55,7 +55,7 @@ export function UnitGroupsDrawer({ open, onClose, empreendimento }: UnitGroupsDr
 
   const selected = groups.find((g) => g.id === selectedId) ?? null;
 
-  const handleRemove = (id: string) => {
+  const handleRemove = (id: number) => {
     const idx = groups.findIndex((g) => g.id === id);
     const next = groups.filter((g) => g.id !== id);
     deleteGroup.mutate(id);

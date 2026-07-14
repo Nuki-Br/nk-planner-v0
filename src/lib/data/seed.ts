@@ -1,17 +1,26 @@
-// Seed do store mock — port tipado e fiel de docs/prototype-src/data.js.
-// Strings, datas e valores verbatim do protótipo (não "melhorar" redação).
-// Preços em BRL, áreas em m², comprimentos em ml, unidades em und.
+// Seed do store mock (realinhado) — demo em SHAPE DE DOMÍNIO novo (ids number,
+// opções como linhas, kitQtds por KitItem, custo em reais/0=pendente). Construído
+// programaticamente com um alocador de id ÚNICO e global para manter os ids
+// relacionais consistentes: no modelo compartilhado, a "Sala/Living" é UM Room
+// (mesmos ids de componente/opção) que aparece em 3 plantas via BlueprintRoom —
+// só qtd/RT/kitQtds variam por planta. Consumido por prisma/seed.ts (popular o
+// banco) e pelos testes. Valores verbatim do protótipo; premium sem custo (=0)
+// = pendente (aguardando cotação da construtora).
 import { TAX_COLUMNS_DEFAULT } from "@/shared/constants/budget";
 import type {
+  Ambiente,
   BudgetVersion,
+  Categoria,
   Comment,
-  FillLink,
+  Componente,
   Kit,
+  KitItem,
   Material,
+  MaterialOption,
   PortalFill,
   Project,
   Tipologia,
-  UnitGroup,
+  Unidade,
 } from "@/shared/types/domain";
 
 export interface SeedData {
@@ -19,259 +28,292 @@ export interface SeedData {
   kits: Kit[];
   tipologias: Tipologia[];
   torres: string[];
-  unitGroups: UnitGroup[];
-  /** Chaves `${compId}-${optId}` / `${compId}-${kitId}-${matId}` (Set no protótipo; array p/ sobreviver a JSON na Fase 10). */
-  pendingItems: string[];
-  /** Grupos de ambientes compartilhados entre tipologias: shareId → tipologias participantes. */
-  sharedReg: Record<string, { tips: string[] }>;
-  /** ambienteId → shareId do grupo compartilhado a que pertence. */
-  ambShared: Record<string, string>;
+  unitGroups: { id: number; nome: string; torre: string; unidades: string[] }[];
   versions: BudgetVersion[];
-  /** projects[0] (p001) já vem enriquecido com os extras do THE_PROJECT do protótipo. */
+  /** projects[0] é o empreendimento âncora (recebe tipologias/versões/colunas). */
   projects: Project[];
-  /** rowKey (`${compId}-${optId}`) → thread. */
+  /** rowKey (String(optionId)) → thread. */
   comments: Record<string, Comment[]>;
-  /** Links de preenchimento gerados (Fase 8; token real no servidor: Fase 10). */
-  fillLinks: FillLink[];
-  /** matId → custos/comentário preenchidos pelo terceiro no portal. */
+  /** String(baseMaterialId) → custos/comentário do terceiro. */
   portalFills: Record<string, PortalFill>;
 }
 
 /** Retorna uma estrutura NOVA a cada chamada (sem referências compartilhadas). */
 export function createSeed(): SeedData {
+  let seq = 0;
+  const nid = () => ++seq;
+
+  // ── Catálogo: materiais (key → Material) ──
+  const M: Record<string, Material> = {};
+  const matKeyById: Record<number, string> = {};
+  function mat(
+    key: string,
+    codigo: string,
+    nome: string,
+    fabricante: string,
+    categoria: Categoria,
+    unidade: Unidade,
+    custoMat: number,
+    custoMO: number
+  ): Material {
+    const m: Material = { id: nid(), codigo, nome, fabricante, categoria, unidade, custoMat, custoMO };
+    M[key] = m;
+    matKeyById[m.id] = key;
+    return m;
+  }
+
   const materiais: Material[] = [
     // Pisos
-    { id: "piso-001", codigo: "PO-6060-CR", nome: "Porcelanato Acetinado 60×60 Creme", fabricante: "Eliane", categoria: "Piso", unidade: "m²", custoMat: 62.5, custoMO: 22.0 },
-    { id: "piso-002", codigo: "PP-6060-BI", nome: "Porcelanato Polido 60×60 Bianco", fabricante: "Portinari", categoria: "Piso", unidade: "m²", custoMat: 98.0, custoMO: 22.0 },
-    { id: "piso-003", codigo: "PP-9090-SW", nome: "Porcelanato Polido 90×90 Super White", fabricante: "Portinari", categoria: "Piso", unidade: "m²", custoMat: 156.0, custoMO: 28.0 },
-    { id: "piso-004", codigo: "MC-NAT-CA", nome: "Mármore Carrara Polido A", fabricante: "Borghetti", categoria: "Piso", unidade: "m²", custoMat: 320.0, custoMO: 52.0 },
+    mat("piso-001", "PO-6060-CR", "Porcelanato Acetinado 60×60 Creme", "Eliane", "Piso", "m²", 62.5, 22.0),
+    mat("piso-002", "PP-6060-BI", "Porcelanato Polido 60×60 Bianco", "Portinari", "Piso", "m²", 98.0, 22.0),
+    mat("piso-003", "PP-9090-SW", "Porcelanato Polido 90×90 Super White", "Portinari", "Piso", "m²", 0, 28.0), // pendente
+    mat("piso-004", "MC-NAT-CA", "Mármore Carrara Polido A", "Borghetti", "Piso", "m²", 0, 52.0), // pendente
     // Revestimentos
-    { id: "rev-001", codigo: "RR-3060-WH", nome: "Revestimento Retificado 30×60 Bold Branco", fabricante: "Eliane", categoria: "Revestimento", unidade: "m²", custoMat: 48.0, custoMO: 28.0 },
-    { id: "rev-002", codigo: "RM-3060-MP", nome: "Revestimento Mármore Polido 30×60", fabricante: "Atlas Concorde", categoria: "Revestimento", unidade: "m²", custoMat: 92.0, custoMO: 28.0 },
-    { id: "rev-003", codigo: "RM-2060-GD", nome: "Revestimento Metalizado 20×60 Gold", fabricante: "Portinari", categoria: "Revestimento", unidade: "m²", custoMat: 145.0, custoMO: 35.0 },
+    mat("rev-001", "RR-3060-WH", "Revestimento Retificado 30×60 Bold Branco", "Eliane", "Revestimento", "m²", 48.0, 28.0),
+    mat("rev-002", "RM-3060-MP", "Revestimento Mármore Polido 30×60", "Atlas Concorde", "Revestimento", "m²", 92.0, 28.0),
+    mat("rev-003", "RM-2060-GD", "Revestimento Metalizado 20×60 Gold", "Portinari", "Revestimento", "m²", 0, 35.0), // pendente
     // Pedras
-    { id: "ped-001", codigo: "GB-SIE-POL", nome: "Granito Branco Siena Polido", fabricante: "Minaspedras", categoria: "Pedra", unidade: "ml", custoMat: 380.0, custoMO: 0 },
-    { id: "ped-002", codigo: "QC-CRI-POL", nome: "Quartzito Branco Cristal Polido", fabricante: "Importado", categoria: "Pedra", unidade: "ml", custoMat: 680.0, custoMO: 0 },
-    { id: "ped-003", codigo: "MS-STAT-POL", nome: "Mármore Statuario Extra Polido", fabricante: "Importado", categoria: "Pedra", unidade: "ml", custoMat: 1200.0, custoMO: 0 },
+    mat("ped-001", "GB-SIE-POL", "Granito Branco Siena Polido", "Minaspedras", "Pedra", "ml", 380.0, 0),
+    mat("ped-002", "QC-CRI-POL", "Quartzito Branco Cristal Polido", "Importado", "Pedra", "ml", 680.0, 0),
+    mat("ped-003", "MS-STAT-POL", "Mármore Statuario Extra Polido", "Importado", "Pedra", "ml", 0, 0), // pendente
     // Metais
-    { id: "met-001", codigo: "DCK-PF-001", nome: "Conjunto Metais Linha Preto Fosco", fabricante: "Deca", categoria: "Metal", unidade: "und", custoMat: 850.0, custoMO: 0 },
-    { id: "met-002", codigo: "DCK-CR-002", nome: "Conjunto Metais Cromado Premium", fabricante: "Deca", categoria: "Metal", unidade: "und", custoMat: 1240.0, custoMO: 0 },
-    { id: "met-003", codigo: "LRZ-DE-003", nome: "Conjunto Metais Dourado Escovado", fabricante: "Lorenzetti", categoria: "Metal", unidade: "und", custoMat: 2180.0, custoMO: 0 },
+    mat("met-001", "DCK-PF-001", "Conjunto Metais Linha Preto Fosco", "Deca", "Metal", "und", 850.0, 0),
+    mat("met-002", "DCK-CR-002", "Conjunto Metais Cromado Premium", "Deca", "Metal", "und", 1240.0, 0),
+    mat("met-003", "LRZ-DE-003", "Conjunto Metais Dourado Escovado", "Lorenzetti", "Metal", "und", 2180.0, 0),
     // Rodapé
-    { id: "rod-001", codigo: "RDP-7-BR", nome: "Rodapé MDF Laminado 7cm Branco", fabricante: "Eucatex", categoria: "Rodapé", unidade: "ml", custoMat: 18.0, custoMO: 12.0 },
-    { id: "rod-002", codigo: "RDP-15-BR", nome: "Rodapé MDF Premium 15cm Branco", fabricante: "Madeirit", categoria: "Rodapé", unidade: "ml", custoMat: 32.0, custoMO: 12.0 },
+    mat("rod-001", "RDP-7-BR", "Rodapé MDF Laminado 7cm Branco", "Eucatex", "Rodapé", "ml", 18.0, 12.0),
+    mat("rod-002", "RDP-15-BR", "Rodapé MDF Premium 15cm Branco", "Madeirit", "Rodapé", "ml", 32.0, 12.0),
     // Cubas
-    { id: "cub-001", codigo: "RCA-SB-55", nome: "Cuba Semiencastrar 55cm Branco", fabricante: "Roca", categoria: "Cuba/Louça", unidade: "und", custoMat: 420.0, custoMO: 0 },
-    { id: "cub-002", codigo: "DCA-SQ-55", nome: "Cuba Embutir Square Branco", fabricante: "Deca", categoria: "Cuba/Louça", unidade: "und", custoMat: 680.0, custoMO: 0 },
-    { id: "cub-003", codigo: "RCA-LX-60", nome: "Cuba de Apoio Luxo Oval Branco", fabricante: "Roca", categoria: "Cuba/Louça", unidade: "und", custoMat: 1150.0, custoMO: 0 },
+    mat("cub-001", "RCA-SB-55", "Cuba Semiencastrar 55cm Branco", "Roca", "Cuba/Louça", "und", 420.0, 0),
+    mat("cub-002", "DCA-SQ-55", "Cuba Embutir Square Branco", "Deca", "Cuba/Louça", "und", 680.0, 0),
+    mat("cub-003", "RCA-LX-60", "Cuba de Apoio Luxo Oval Branco", "Roca", "Cuba/Louça", "und", 1150.0, 0),
     // Metais avulsos (compõem kits)
-    { id: "met-b-001", codigo: "DCK-DH-BR", nome: "Ducha Higiênica Bronze Escovado", fabricante: "Deca", categoria: "Metal", unidade: "und", custoMat: 170.0, custoMO: 0 },
-    { id: "met-b-002", codigo: "DCK-MC-BR", nome: "Monocomando p/ Chuveiro Bronze", fabricante: "Deca", categoria: "Metal", unidade: "und", custoMat: 520.0, custoMO: 0 },
-    { id: "met-b-003", codigo: "DCK-CH-BR", nome: "Chuveiro de Teto Bronze 20cm", fabricante: "Deca", categoria: "Metal", unidade: "und", custoMat: 280.0, custoMO: 0 },
-    { id: "met-b-004", codigo: "DCK-TB-BR", nome: "Torneira de Bancada Bronze", fabricante: "Deca", categoria: "Metal", unidade: "und", custoMat: 100.0, custoMO: 0 },
+    mat("met-b-001", "DCK-DH-BR", "Ducha Higiênica Bronze Escovado", "Deca", "Metal", "und", 170.0, 0),
+    mat("met-b-002", "DCK-MC-BR", "Monocomando p/ Chuveiro Bronze", "Deca", "Metal", "und", 520.0, 0),
+    mat("met-b-003", "DCK-CH-BR", "Chuveiro de Teto Bronze 20cm", "Deca", "Metal", "und", 280.0, 0),
+    mat("met-b-004", "DCK-TB-BR", "Torneira de Bancada Bronze", "Deca", "Metal", "und", 100.0, 0),
     // Pisos avulsos (compõem kits)
-    { id: "piso-bcn", codigo: "PB-9090-AC", nome: "Porcelanato Barcelona Acetinado 90×90", fabricante: "Portinari", categoria: "Piso", unidade: "m²", custoMat: 180.0, custoMO: 28.0 },
-    { id: "sol-bcn", codigo: "SL-GR-BCN", nome: "Soleira Granito Barcelona Polida", fabricante: "Minaspedras", categoria: "Piso", unidade: "und", custoMat: 95.0, custoMO: 20.0 },
-    { id: "rt-bcn", codigo: "RT-9090-AC", nome: "Reserva Técnica Porcelanato Barcelona", fabricante: "Portinari", categoria: "Piso", unidade: "m²", custoMat: 180.0, custoMO: 0 },
+    mat("piso-bcn", "PB-9090-AC", "Porcelanato Barcelona Acetinado 90×90", "Portinari", "Piso", "m²", 180.0, 28.0),
+    mat("sol-bcn", "SL-GR-BCN", "Soleira Granito Barcelona Polida", "Minaspedras", "Piso", "und", 95.0, 20.0),
+    mat("rt-bcn", "RT-9090-AC", "Reserva Técnica Porcelanato Barcelona", "Portinari", "Piso", "m²", 0, 0), // pendente
   ];
+
+  // ── Catálogo: kits (key → Kit) ──
+  const K: Record<string, Kit> = {};
+  function kit(key: string, codigo: string, nome: string, categoria: Categoria, itemKeys: string[]): Kit {
+    const itens: KitItem[] = itemKeys.map((k) => {
+      const src = M[k]!;
+      return {
+        id: nid(),
+        materialId: src.id,
+        nome: src.nome,
+        fabricante: src.fabricante,
+        unidade: src.unidade,
+        custoMat: src.custoMat,
+        custoMO: src.custoMO,
+      };
+    });
+    const k2: Kit = { id: nid(), codigo, nome, categoria, itens };
+    K[key] = k2;
+    return k2;
+  }
 
   const kits: Kit[] = [
-    { id: "kit-metais-bronze", tipo: "kit", codigo: "KIT-MB", nome: "Metais Bronze", categoria: "Metal", itens: ["met-b-001", "met-b-002", "met-b-003", "met-b-004"] },
-    { id: "kit-piso-barcelona", tipo: "kit", codigo: "KIT-PB", nome: "Piso Barcelona + Soleira + RT", categoria: "Piso", itens: ["piso-bcn", "sol-bcn", "rt-bcn"] },
+    kit("kit-metais-bronze", "KIT-MB", "Metais Bronze", "Metal", ["met-b-001", "met-b-002", "met-b-003", "met-b-004"]),
+    kit("kit-piso-barcelona", "KIT-PB", "Piso Barcelona + Soleira + RT", "Piso", ["piso-bcn", "sol-bcn", "rt-bcn"]),
   ];
 
-  const tipologias: Tipologia[] = [
-    {
-      id: "t1",
-      nome: "Planta A — 86m²",
-      metragem: 86,
-      descricao: "2 dormitórios, sala integrada, cozinha americana, 1 banheiro",
-      unidades: 24,
-      status: "completa",
-      ambientes: [
-        {
-          id: "a1-1",
-          nome: "Sala/Living",
-          componentes: [
-            { id: "c1-1-1", nome: "Piso", unidade: "m²", qtd: 18.4, rt: 15, padrao: "piso-001", upgrades: ["piso-002", "piso-003", "kit-piso-barcelona"], taxaEspecifica: null, kitQtds: { "kit-piso-barcelona": { "piso-bcn": 18.4, "sol-bcn": 2, "rt-bcn": 1.84 } } },
-            { id: "c1-1-2", nome: "Rodapé", unidade: "ml", qtd: 16.8, rt: 5, padrao: "rod-001", upgrades: ["rod-002"], taxaEspecifica: null },
-          ],
-        },
-        {
-          id: "a1-2",
-          nome: "Cozinha",
-          componentes: [
-            { id: "c1-2-1", nome: "Piso", unidade: "m²", qtd: 7.2, rt: 15, padrao: "piso-001", upgrades: ["piso-002"], taxaEspecifica: null },
-            { id: "c1-2-2", nome: "Revestimento parede", unidade: "m²", qtd: 5.6, rt: 10, padrao: "rev-001", upgrades: ["rev-002"], taxaEspecifica: null },
-            { id: "c1-2-3", nome: "Pedra bancada", unidade: "ml", qtd: 2.8, rt: 0, padrao: "ped-001", upgrades: ["ped-002"], taxaEspecifica: null },
-          ],
-        },
-        {
-          id: "a1-3",
-          nome: "Dormitório 1",
-          componentes: [
-            { id: "c1-3-1", nome: "Piso", unidade: "m²", qtd: 10.8, rt: 15, padrao: "piso-001", upgrades: ["piso-002"], taxaEspecifica: null },
-          ],
-        },
-        {
-          id: "a1-4",
-          nome: "Dormitório 2",
-          componentes: [
-            { id: "c1-4-1", nome: "Piso", unidade: "m²", qtd: 9.6, rt: 15, padrao: "piso-001", upgrades: ["piso-002"], taxaEspecifica: null },
-          ],
-        },
-        {
-          id: "a1-5",
-          nome: "Banheiro Social",
-          componentes: [
-            { id: "c1-5-1", nome: "Piso", unidade: "m²", qtd: 3.2, rt: 10, padrao: "piso-001", upgrades: ["piso-002"], taxaEspecifica: null },
-            { id: "c1-5-2", nome: "Revestimento parede", unidade: "m²", qtd: 11.8, rt: 10, padrao: "rev-001", upgrades: ["rev-002", "rev-003"], taxaEspecifica: null },
-            { id: "c1-5-3", nome: "Cuba/Louça", unidade: "und", qtd: 1, rt: 0, padrao: "cub-001", upgrades: ["cub-002"], taxaEspecifica: null },
-            { id: "c1-5-4", nome: "Metais", unidade: "und", qtd: 1, rt: 0, padrao: "met-001", upgrades: ["met-002", "kit-metais-bronze"], taxaEspecifica: null, kitQtds: { "kit-metais-bronze": { "met-b-001": 2, "met-b-002": 1, "met-b-003": 1, "met-b-004": 1 } } },
-          ],
-        },
-      ],
-    },
-    {
-      id: "t2",
-      nome: "Planta B — 115m²",
-      metragem: 115,
-      descricao: "3 dormitórios (1 suíte master), sala ampla, varanda gourmet, 2 banheiros",
-      unidades: 36,
-      status: "completa",
-      ambientes: [
-        {
-          id: "a2-1",
-          nome: "Sala/Living",
-          componentes: [
-            { id: "c2-1-1", nome: "Piso", unidade: "m²", qtd: 28.4, rt: 15, padrao: "piso-001", upgrades: ["piso-002", "piso-003", "piso-004"], taxaEspecifica: null },
-            { id: "c2-1-2", nome: "Rodapé", unidade: "ml", qtd: 22.8, rt: 5, padrao: "rod-001", upgrades: ["rod-002"], taxaEspecifica: null },
-          ],
-        },
-        {
-          id: "a2-2",
-          nome: "Cozinha",
-          componentes: [
-            { id: "c2-2-1", nome: "Piso", unidade: "m²", qtd: 9.6, rt: 15, padrao: "piso-001", upgrades: ["piso-002"], taxaEspecifica: null },
-            { id: "c2-2-2", nome: "Revestimento parede", unidade: "m²", qtd: 7.2, rt: 10, padrao: "rev-001", upgrades: ["rev-002", "rev-003"], taxaEspecifica: null },
-            { id: "c2-2-3", nome: "Pedra bancada", unidade: "ml", qtd: 3.8, rt: 0, padrao: "ped-001", upgrades: ["ped-002", "ped-003"], taxaEspecifica: null },
-          ],
-        },
-        {
-          id: "a2-3",
-          nome: "Suíte Master",
-          componentes: [
-            { id: "c2-3-1", nome: "Piso", unidade: "m²", qtd: 15.4, rt: 15, padrao: "piso-001", upgrades: ["piso-002", "piso-003"], taxaEspecifica: null },
-          ],
-        },
-        {
-          id: "a2-4",
-          nome: "Dormitório 2",
-          componentes: [
-            { id: "c2-4-1", nome: "Piso", unidade: "m²", qtd: 11.2, rt: 15, padrao: "piso-001", upgrades: ["piso-002"], taxaEspecifica: null },
-          ],
-        },
-        {
-          id: "a2-5",
-          nome: "Dormitório 3",
-          componentes: [
-            { id: "c2-5-1", nome: "Piso", unidade: "m²", qtd: 10.8, rt: 15, padrao: "piso-001", upgrades: ["piso-002"], taxaEspecifica: null },
-          ],
-        },
-        {
-          id: "a2-6",
-          nome: "Banheiro Suíte",
-          componentes: [
-            { id: "c2-6-1", nome: "Piso", unidade: "m²", qtd: 4.2, rt: 10, padrao: "piso-001", upgrades: ["piso-002", "piso-003"], taxaEspecifica: null },
-            { id: "c2-6-2", nome: "Revestimento parede", unidade: "m²", qtd: 16.8, rt: 10, padrao: "rev-001", upgrades: ["rev-002", "rev-003"], taxaEspecifica: null },
-            { id: "c2-6-3", nome: "Cuba/Louça", unidade: "und", qtd: 1, rt: 0, padrao: "cub-001", upgrades: ["cub-002", "cub-003"], taxaEspecifica: null },
-            { id: "c2-6-4", nome: "Metais", unidade: "und", qtd: 1, rt: 0, padrao: "met-001", upgrades: ["met-002", "met-003"], taxaEspecifica: null },
-            { id: "c2-6-5", nome: "Pedra bancada", unidade: "ml", qtd: 1.2, rt: 0, padrao: "ped-001", upgrades: ["ped-002"], taxaEspecifica: null },
-          ],
-        },
-        {
-          id: "a2-7",
-          nome: "Banheiro Social",
-          componentes: [
-            { id: "c2-7-1", nome: "Piso", unidade: "m²", qtd: 3.6, rt: 10, padrao: "piso-001", upgrades: ["piso-002"], taxaEspecifica: null },
-            { id: "c2-7-2", nome: "Revestimento parede", unidade: "m²", qtd: 14.4, rt: 10, padrao: "rev-001", upgrades: ["rev-002"], taxaEspecifica: null },
-            { id: "c2-7-3", nome: "Cuba/Louça", unidade: "und", qtd: 1, rt: 0, padrao: "cub-001", upgrades: ["cub-002"], taxaEspecifica: null },
-            { id: "c2-7-4", nome: "Metais", unidade: "und", qtd: 1, rt: 0, padrao: "met-001", upgrades: ["met-002"], taxaEspecifica: null },
-          ],
-        },
-      ],
-    },
-    {
-      id: "t3",
-      nome: "Planta C — 142m²",
-      metragem: 142,
-      descricao: "4 dormitórios (2 suítes), home office, varanda gourmet ampla",
-      unidades: 12,
-      status: "incompleta",
-      ambientes: [
-        {
-          id: "a3-1",
-          nome: "Sala/Living",
-          componentes: [
-            { id: "c3-1-1", nome: "Piso", unidade: "m²", qtd: 36.8, rt: 15, padrao: "piso-001", upgrades: ["piso-002", "piso-003", "piso-004", "kit-piso-barcelona"], taxaEspecifica: null, kitQtds: { "kit-piso-barcelona": { "piso-bcn": 36.8, "sol-bcn": 3, "rt-bcn": 3.68 } } },
-            { id: "c3-1-2", nome: "Rodapé", unidade: "ml", qtd: 28.4, rt: 5, padrao: "rod-001", upgrades: ["rod-002"], taxaEspecifica: null },
-          ],
-        },
-        {
-          id: "a3-2",
-          nome: "Cozinha",
-          componentes: [
-            { id: "c3-2-1", nome: "Piso", unidade: "m²", qtd: 11.2, rt: 15, padrao: "piso-001", upgrades: ["piso-002"], taxaEspecifica: null },
-            { id: "c3-2-2", nome: "Revestimento parede", unidade: "m²", qtd: 8.8, rt: 10, padrao: "rev-001", upgrades: ["rev-002", "rev-003"], taxaEspecifica: null },
-            { id: "c3-2-3", nome: "Pedra bancada", unidade: "ml", qtd: 4.6, rt: 0, padrao: "ped-001", upgrades: ["ped-002", "ped-003"], taxaEspecifica: null },
-          ],
-        },
-        {
-          id: "a3-3",
-          nome: "Suíte Master",
-          componentes: [
-            { id: "c3-3-1", nome: "Piso", unidade: "m²", qtd: 18.6, rt: 15, padrao: "piso-001", upgrades: ["piso-002", "piso-003"], taxaEspecifica: null },
-            { id: "c3-3-2", nome: "Nicho", unidade: "und", qtd: 1, rt: 0, padrao: null, upgrades: [], taxaEspecifica: null },
-          ],
-        },
-        {
-          id: "a3-4",
-          nome: "Suíte 2",
-          componentes: [
-            { id: "c3-4-1", nome: "Piso", unidade: "m²", qtd: 14.4, rt: 15, padrao: "piso-001", upgrades: ["piso-002"], taxaEspecifica: null },
-          ],
-        },
-      ],
-    },
-  ];
+  function ref(key: string): { baseId: number; isKit: boolean } {
+    if (key in K) return { baseId: K[key]!.id, isKit: true };
+    return { baseId: M[key]!.id, isKit: false };
+  }
+
+  // ── Componente compartilhado (paleta): ids de RoomComponent/opções fixos ──
+  interface CompTpl {
+    id: number;
+    nome: string;
+    unidade: Unidade;
+    padrao: number | null;
+    options: MaterialOption[];
+    ghost: boolean;
+    ordem: number;
+  }
+  function comp(
+    nome: string,
+    unidade: Unidade,
+    padraoKey: string | null,
+    upgradeKeys: string[],
+    ordem: number
+  ): CompTpl {
+    const rcId = nid();
+    const optionKeys = padraoKey ? [padraoKey, ...upgradeKeys] : upgradeKeys;
+    const options: MaterialOption[] = optionKeys.map((k, i) => {
+      const r = ref(k);
+      return { id: nid(), baseId: r.baseId, isKit: r.isKit, isDefault: k === padraoKey, ordem: i };
+    });
+    const padrao = options.find((o) => o.isDefault)?.id ?? null;
+    return { id: rcId, nome, unidade, padrao, options, ghost: false, ordem };
+  }
+
+  interface RoomTpl {
+    id: number;
+    nome: string;
+    components: CompTpl[];
+  }
+  function room(nome: string, components: CompTpl[]): RoomTpl {
+    return { id: nid(), nome, components };
+  }
+
+  /** Quantitativos de kit desta planta (keyed por KitItem id), alinhado à ordem do kit. */
+  function kitQty(kitKey: string, qtys: number[]): Record<number, number> {
+    const out: Record<number, number> = {};
+    K[kitKey]!.itens.forEach((it, i) => {
+      const q = qtys[i];
+      if (q !== undefined) out[it.id] = q;
+    });
+    return out;
+  }
+
+  interface PerComp {
+    qtd: number;
+    rt: number;
+    kitQtds?: Record<number, number>;
+  }
+  /** Instancia um Room numa planta (novo BlueprintRoom + BRC por componente). */
+  function inst(tpl: RoomTpl, perComp: PerComp[]): Ambiente {
+    const componentes: Componente[] = tpl.components.map((ct, i) => ({
+      id: ct.id,
+      nome: ct.nome,
+      unidade: ct.unidade,
+      instanceId: nid(),
+      qtd: perComp[i]!.qtd,
+      rt: perComp[i]!.rt,
+      padrao: ct.padrao,
+      options: ct.options,
+      ghost: ct.ghost,
+      ordem: ct.ordem,
+      kitQtds: perComp[i]!.kitQtds ?? {},
+    }));
+    return { id: tpl.id, blueprintRoomId: nid(), nome: tpl.nome, componentes };
+  }
+
+  // ── Sala/Living COMPARTILHADA (1 Room, 3 plantas) ──
+  const salaPiso = comp("Piso", "m²", "piso-001", ["piso-002", "piso-003", "piso-004", "kit-piso-barcelona"], 0);
+  const salaRodape = comp("Rodapé", "ml", "rod-001", ["rod-002"], 1);
+  const sala = room("Sala/Living", [salaPiso, salaRodape]);
+
+  const salaT1 = inst(sala, [
+    { qtd: 18.4, rt: 15, kitQtds: kitQty("kit-piso-barcelona", [18.4, 2, 1.84]) },
+    { qtd: 16.8, rt: 5 },
+  ]);
+  const salaT2 = inst(sala, [
+    { qtd: 28.4, rt: 15 },
+    { qtd: 22.8, rt: 5 },
+  ]);
+  const salaT3 = inst(sala, [
+    { qtd: 36.8, rt: 15, kitQtds: kitQty("kit-piso-barcelona", [36.8, 3, 3.68]) },
+    { qtd: 28.4, rt: 5 },
+  ]);
+
+  // ── Tipologia 1 — Planta A (86m²) ──
+  const t1 = tipologia(nid(), "Planta A — 86m²", 86, "2 dormitórios, sala integrada, cozinha americana, 1 banheiro", 24, "completa", [
+    salaT1,
+    inst(room("Cozinha", [
+      comp("Piso", "m²", "piso-001", ["piso-002"], 0),
+      comp("Revestimento parede", "m²", "rev-001", ["rev-002"], 1),
+      comp("Pedra bancada", "ml", "ped-001", ["ped-002"], 2),
+    ]), [{ qtd: 7.2, rt: 15 }, { qtd: 5.6, rt: 10 }, { qtd: 2.8, rt: 0 }]),
+    inst(room("Dormitório 1", [comp("Piso", "m²", "piso-001", ["piso-002"], 0)]), [{ qtd: 10.8, rt: 15 }]),
+    inst(room("Dormitório 2", [comp("Piso", "m²", "piso-001", ["piso-002"], 0)]), [{ qtd: 9.6, rt: 15 }]),
+    inst(room("Banheiro Social", [
+      comp("Piso", "m²", "piso-001", ["piso-002"], 0),
+      comp("Revestimento parede", "m²", "rev-001", ["rev-002", "rev-003"], 1),
+      comp("Cuba/Louça", "und", "cub-001", ["cub-002"], 2),
+      comp("Metais", "und", "met-001", ["met-002", "kit-metais-bronze"], 3),
+    ]), [
+      { qtd: 3.2, rt: 10 },
+      { qtd: 11.8, rt: 10 },
+      { qtd: 1, rt: 0 },
+      { qtd: 1, rt: 0, kitQtds: kitQty("kit-metais-bronze", [2, 1, 1, 1]) },
+    ]),
+  ]);
+
+  // ── Tipologia 2 — Planta B (115m²) ──
+  const t2 = tipologia(nid(), "Planta B — 115m²", 115, "3 dormitórios (1 suíte master), sala ampla, varanda gourmet, 2 banheiros", 36, "completa", [
+    salaT2,
+    inst(room("Cozinha", [
+      comp("Piso", "m²", "piso-001", ["piso-002"], 0),
+      comp("Revestimento parede", "m²", "rev-001", ["rev-002", "rev-003"], 1),
+      comp("Pedra bancada", "ml", "ped-001", ["ped-002", "ped-003"], 2),
+    ]), [{ qtd: 9.6, rt: 15 }, { qtd: 7.2, rt: 10 }, { qtd: 3.8, rt: 0 }]),
+    inst(room("Suíte Master", [comp("Piso", "m²", "piso-001", ["piso-002", "piso-003"], 0)]), [{ qtd: 15.4, rt: 15 }]),
+    inst(room("Dormitório 2", [comp("Piso", "m²", "piso-001", ["piso-002"], 0)]), [{ qtd: 11.2, rt: 15 }]),
+    inst(room("Dormitório 3", [comp("Piso", "m²", "piso-001", ["piso-002"], 0)]), [{ qtd: 10.8, rt: 15 }]),
+    inst(room("Banheiro Suíte", [
+      comp("Piso", "m²", "piso-001", ["piso-002", "piso-003"], 0),
+      comp("Revestimento parede", "m²", "rev-001", ["rev-002", "rev-003"], 1),
+      comp("Cuba/Louça", "und", "cub-001", ["cub-002", "cub-003"], 2),
+      comp("Metais", "und", "met-001", ["met-002", "met-003"], 3),
+      comp("Pedra bancada", "ml", "ped-001", ["ped-002"], 4),
+    ]), [{ qtd: 4.2, rt: 10 }, { qtd: 16.8, rt: 10 }, { qtd: 1, rt: 0 }, { qtd: 1, rt: 0 }, { qtd: 1.2, rt: 0 }]),
+    inst(room("Banheiro Social", [
+      comp("Piso", "m²", "piso-001", ["piso-002"], 0),
+      comp("Revestimento parede", "m²", "rev-001", ["rev-002"], 1),
+      comp("Cuba/Louça", "und", "cub-001", ["cub-002"], 2),
+      comp("Metais", "und", "met-001", ["met-002"], 3),
+    ]), [{ qtd: 3.6, rt: 10 }, { qtd: 14.4, rt: 10 }, { qtd: 1, rt: 0 }, { qtd: 1, rt: 0 }]),
+  ]);
+
+  // ── Tipologia 3 — Planta C (142m²) ──
+  const nicho = comp("Nicho", "und", null, [], 1);
+  const t3 = tipologia(nid(), "Planta C — 142m²", 142, "4 dormitórios (2 suítes), home office, varanda gourmet ampla", 12, "incompleta", [
+    salaT3,
+    inst(room("Cozinha", [
+      comp("Piso", "m²", "piso-001", ["piso-002"], 0),
+      comp("Revestimento parede", "m²", "rev-001", ["rev-002", "rev-003"], 1),
+      comp("Pedra bancada", "ml", "ped-001", ["ped-002", "ped-003"], 2),
+    ]), [{ qtd: 11.2, rt: 15 }, { qtd: 8.8, rt: 10 }, { qtd: 4.6, rt: 0 }]),
+    inst(room("Suíte Master", [comp("Piso", "m²", "piso-001", ["piso-002", "piso-003"], 0), nicho]), [{ qtd: 18.6, rt: 15 }, { qtd: 1, rt: 0 }]),
+    inst(room("Suíte 2", [comp("Piso", "m²", "piso-001", ["piso-002"], 0)]), [{ qtd: 14.4, rt: 15 }]),
+  ]);
+
+  const tipologias: Tipologia[] = [t1, t2, t3];
+
+  // ── Comentários (rowKey = String(optionId)) ──
+  function optIdOf(t: Tipologia, ambIdx: number, compIdx: number, baseKey: string): number {
+    const opt = t.ambientes[ambIdx]!.componentes[compIdx]!.options.find((o) => o.baseId === ref(baseKey).baseId);
+    return opt?.id ?? 0;
+  }
+  const comments: Record<string, Comment[]> = {
+    [String(optIdOf(t2, 0, 0, "piso-002"))]: [
+      { autor: "construtora", texto: "Cotação atualizada com base no pedido mínimo de 1000m². Preço válido por 30 dias.", data: "15/05/2026 14:32" },
+      { autor: "incorporadora", texto: "OK, mas preciso confirmar o prazo de entrega. Pode garantir para Agosto?", data: "16/05/2026 09:18" },
+      { autor: "construtora", texto: "Sim, entrega garantida para 15/08/2026. Confirmo por escrito.", data: "16/05/2026 11:45" },
+    ],
+    [String(optIdOf(t2, 5, 3, "met-003"))]: [
+      { autor: "construtora", texto: "Material importado — preço sujeito à variação cambial. Adicionei buffer de 8%.", data: "14/05/2026 16:20" },
+      { autor: "incorporadora", texto: "Entendido. Vamos manter esse valor mas preciso monitorar.", data: "15/05/2026 08:55" },
+    ],
+  };
 
   const torres = ["Torre A", "Torre B", "Torre C"];
 
-  const unitGroups: UnitGroup[] = [
-    { id: "ug-a-01", nome: "Coluna final 01 — Vista Parque", torre: "Torre A", unidades: ["101", "111", "121", "131", "141", "151", "161"] },
-    { id: "ug-a-02", nome: "Coluna final 02 — Vista Interna", torre: "Torre A", unidades: ["102", "112", "122", "132", "142", "152", "162"] },
-    { id: "ug-b-01", nome: "Coluna final 03 — Vista Parque", torre: "Torre B", unidades: ["103", "113", "123", "133", "143", "153"] },
-    { id: "ug-b-02", nome: "Coberturas Duplex", torre: "Torre B", unidades: ["1701", "1702"] },
-    { id: "ug-c-01", nome: "Garden — Térreo", torre: "Torre C", unidades: ["11", "12", "13", "14"] },
-  ];
-
-  const pendingItems = [
-    "c3-1-1-piso-004", // Sala/Living — Mármore Carrara
-    "c3-2-2-rev-003", // Cozinha — Revestimento Gold
-    "c3-2-3-ped-003", // Cozinha — Mármore Statuario
-    "c3-3-1-piso-003", // Suíte Master — 90×90 Super White
-    "c3-1-1-kit-piso-barcelona-rt-bcn", // Sub-item do kit (Reserva Técnica) sem custo base preenchido
+  const unitGroups = [
+    { id: nid(), nome: "Coluna final 01 — Vista Parque", torre: "Torre A", unidades: ["101", "111", "121", "131", "141", "151", "161"] },
+    { id: nid(), nome: "Coluna final 02 — Vista Interna", torre: "Torre A", unidades: ["102", "112", "122", "132", "142", "152", "162"] },
+    { id: nid(), nome: "Coluna final 03 — Vista Parque", torre: "Torre B", unidades: ["103", "113", "123", "133", "143", "153"] },
+    { id: nid(), nome: "Coberturas Duplex", torre: "Torre B", unidades: ["1701", "1702"] },
+    { id: nid(), nome: "Garden — Térreo", torre: "Torre C", unidades: ["11", "12", "13", "14"] },
   ];
 
   const versions: BudgetVersion[] = [
     {
-      id: "v3",
+      id: nid(),
       label: "v3",
       createdAt: "04/06/2026 às 14:27",
       createdBy: "Ana Carvalho",
       isCurrent: true,
-      summary:
-        "Ajuste de margem incorporadora de 20% para 25%. Adicionadas 3 opções de piso para a Planta A.",
+      summary: "Ajuste de margem incorporadora de 20% para 25%. Adicionadas 3 opções de piso para a Planta A.",
       changes: {
         materiais: [
           { tipo: "adicionado", desc: "Porcelanato Nero Marquina 60×60 — Planta A, Sala, Piso" },
@@ -287,13 +329,12 @@ export function createSeed(): SeedData {
       },
     },
     {
-      id: "v2",
+      id: nid(),
       label: "v2",
       createdAt: "21/05/2026 às 09:14",
       createdBy: "Ana Carvalho",
       isCurrent: false,
-      summary:
-        "Revisão de custos após retorno da Construtora Vertex. 8 itens com custo atualizado.",
+      summary: "Revisão de custos após retorno da Construtora Vertex. 8 itens com custo atualizado.",
       changes: {
         materiais: [],
         custos: [
@@ -301,13 +342,11 @@ export function createSeed(): SeedData {
           { tipo: "alterado", desc: "Misturador de Cozinha — R$ 420,00 → R$ 480,00 (+14,3%)" },
         ],
         taxas: [],
-        tipologias: [
-          { tipo: "adicionado", desc: "Planta C — Studios adicionada com 2 ambientes e 6 componentes" },
-        ],
+        tipologias: [{ tipo: "adicionado", desc: "Planta C — Studios adicionada com 2 ambientes e 6 componentes" }],
       },
     },
     {
-      id: "v1",
+      id: nid(),
       label: "v1",
       createdAt: "07/05/2026 às 11:02",
       createdBy: "Marcos Leitão",
@@ -325,11 +364,9 @@ export function createSeed(): SeedData {
     },
   ];
 
-  // NOTA: o mock original grava "itensPrenchidos" (typo) — corrigido para
-  // itensPreenchidos aqui e no tipo Project (§6 do plano).
   const projects: Project[] = [
     {
-      id: "p001",
+      id: nid(),
       nome: "Parque Ibirapuera Residências",
       torre: "Torre Única",
       incorporadora: "Grupo Axis",
@@ -339,54 +376,29 @@ export function createSeed(): SeedData {
       prazo: "25/05/2026",
       totalItens: 64,
       itensPreenchidos: 50,
-      // Extras do THE_PROJECT (projeto ativo) do protótipo:
       inccBase: "04/2026",
       emailConstrutora: "orcamento@vertex.com.br",
       taxas: { construtora: 8, incc: 5, incorporadora: 22 },
       taxColumns: TAX_COLUMNS_DEFAULT.map((c) => ({ ...c })),
     },
-    { id: "p002", nome: "Jardins do Tietê", torre: "Torres A e B", incorporadora: "Grupo Axis", construtora: "Construtora Meridiano", status: "publicado", enviadoEm: "12/03/2026", prazo: "28/03/2026", totalItens: 88, itensPreenchidos: 88 },
-    { id: "p003", nome: "Residencial Serra Dourada", torre: "Torre 1", incorporadora: "Grupo Axis", construtora: "Vertex Engenharia", status: "em_preenchimento", enviadoEm: "28/05/2026", prazo: "10/06/2026", totalItens: 52, itensPreenchidos: 31 },
-    { id: "p004", nome: "Vila Olímpia Towers", torre: "Torres A, B, C", incorporadora: "Grupo Axis", construtora: "Construtora Meridiano", status: "rascunho", enviadoEm: null, prazo: null, totalItens: 0, itensPreenchidos: 0 },
-    { id: "p005", nome: "Alameda Santos Prime", torre: "Torre Única", incorporadora: "Grupo Axis", construtora: "Construtora RB", status: "rascunho", enviadoEm: null, prazo: null, totalItens: 0, itensPreenchidos: 0 },
+    { id: nid(), nome: "Jardins do Tietê", torre: "Torres A e B", incorporadora: "Grupo Axis", construtora: "Construtora Meridiano", status: "publicado", enviadoEm: "12/03/2026", prazo: "28/03/2026", totalItens: 88, itensPreenchidos: 88 },
+    { id: nid(), nome: "Residencial Serra Dourada", torre: "Torre 1", incorporadora: "Grupo Axis", construtora: "Vertex Engenharia", status: "em_preenchimento", enviadoEm: "28/05/2026", prazo: "10/06/2026", totalItens: 52, itensPreenchidos: 31 },
+    { id: nid(), nome: "Vila Olímpia Towers", torre: "Torres A, B, C", incorporadora: "Grupo Axis", construtora: "Construtora Meridiano", status: "rascunho", enviadoEm: null, prazo: null, totalItens: 0, itensPreenchidos: 0 },
+    { id: nid(), nome: "Alameda Santos Prime", torre: "Torre Única", incorporadora: "Grupo Axis", construtora: "Construtora RB", status: "rascunho", enviadoEm: null, prazo: null, totalItens: 0, itensPreenchidos: 0 },
   ];
 
-  const comments: Record<string, Comment[]> = {
-    "c2-1-1-piso-002": [
-      { autor: "construtora", texto: "Cotação atualizada com base no pedido mínimo de 1000m². Preço válido por 30 dias.", data: "15/05/2026 14:32" },
-      { autor: "incorporadora", texto: "OK, mas preciso confirmar o prazo de entrega. Pode garantir para Agosto?", data: "16/05/2026 09:18" },
-      { autor: "construtora", texto: "Sim, entrega garantida para 15/08/2026. Confirmo por escrito.", data: "16/05/2026 11:45" },
-    ],
-    "c2-6-4-met-003": [
-      { autor: "construtora", texto: "Material importado — preço sujeito à variação cambial. Adicionei buffer de 8%.", data: "14/05/2026 16:20" },
-      { autor: "incorporadora", texto: "Entendido. Vamos manter esse valor mas preciso monitorar.", data: "15/05/2026 08:55" },
-    ],
-  };
+  return { materiais, kits, tipologias, torres, unitGroups, versions, projects, comments, portalFills: {} };
+}
 
-  // Demonstração do protótipo: "Sala/Living" já compartilhada entre as três
-  // tipologias (paleta roxa na tela de tipologias).
-  const sharedReg: Record<string, { tips: string[] }> = {
-    "sh-sala": { tips: ["t1", "t2", "t3"] },
-  };
-  const ambShared: Record<string, string> = {
-    "a1-1": "sh-sala",
-    "a2-1": "sh-sala",
-    "a3-1": "sh-sala",
-  };
-
-  return {
-    materiais,
-    kits,
-    tipologias,
-    torres,
-    unitGroups,
-    pendingItems,
-    sharedReg,
-    ambShared,
-    versions,
-    projects,
-    comments,
-    fillLinks: [],
-    portalFills: {},
-  };
+/** Helper local para montar uma Tipologia com id/dados básicos. */
+function tipologia(
+  id: number,
+  nome: string,
+  metragem: number,
+  descricao: string,
+  unidades: number,
+  status: Tipologia["status"],
+  ambientes: Ambiente[]
+): Tipologia {
+  return { id, nome, metragem, descricao, unidades, status, ambientes };
 }

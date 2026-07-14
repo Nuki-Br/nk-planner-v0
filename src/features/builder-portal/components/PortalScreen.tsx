@@ -12,13 +12,14 @@ import type { Material, PortalFill, Tipologia } from "@/shared/types/domain";
 
 type Fills = Record<string, PortalFill>;
 
-/** Materiais (sem kits) referenciados pela tipologia: padrão + upgrades. */
+/** Materiais (sem kits) referenciados pela tipologia: opções não-kit. */
 function tipMateriais(tip: Tipologia, materiais: readonly Material[]): Material[] {
-  const ids = new Set<string>();
+  const ids = new Set<number>();
   for (const amb of tip.ambientes) {
     for (const comp of amb.componentes) {
-      if (comp.padrao) ids.add(comp.padrao);
-      for (const u of comp.upgrades) ids.add(u);
+      for (const opt of comp.options) {
+        if (!opt.isKit) ids.add(opt.baseId);
+      }
     }
   }
   return Array.from(ids)
@@ -49,7 +50,7 @@ export function PortalScreen({ token }: { token: string }) {
   const [senhaError, setSenhaError] = React.useState(false);
   const { data, isLoading, error } = usePortalData(token, senha);
 
-  const [activeTipId, setActiveTipId] = React.useState<string | null>(null);
+  const [activeTipId, setActiveTipId] = React.useState<number | null>(null);
   const [costs, setCosts] = React.useState<Fills | null>(null);
   const [submitted, setSubmitted] = React.useState(false);
   const [openComment, setOpenComment] = React.useState<string | null>(null);
@@ -70,7 +71,8 @@ export function PortalScreen({ token }: { token: string }) {
     const init: Fills = {};
     for (const tip of data.tipologias) {
       for (const m of tipMateriais(tip, data.materiais)) {
-        init[m.id] = data.fills[m.id] ?? {
+        const key = String(m.id);
+        init[key] = data.fills[key] ?? {
           mat: m.custoMat > 0 ? String(m.custoMat) : "",
           mo: m.custoMO > 0 ? String(m.custoMO) : "",
           comment: "",
@@ -181,8 +183,8 @@ function PortalContent({
   data: PortalData;
   costs: Fills | null;
   setCosts: React.Dispatch<React.SetStateAction<Fills | null>>;
-  activeTipId: string | null;
-  setActiveTipId: (id: string) => void;
+  activeTipId: number | null;
+  setActiveTipId: (id: number) => void;
   openComment: string | null;
   setOpenComment: (id: string | null) => void;
   submitted: boolean;
@@ -193,7 +195,7 @@ function PortalContent({
 }) {
   const { campos, tipologias: scopeTips, materiais } = data;
   const scopeMats = React.useMemo(() => {
-    const byId = new Map<string, Material>();
+    const byId = new Map<number, Material>();
     for (const tip of scopeTips) {
       for (const m of tipMateriais(tip, materiais)) byId.set(m.id, m);
     }
@@ -215,9 +217,9 @@ function PortalContent({
       return { ...prev, [matId]: { ...cur, [fld]: val } };
     });
 
-  const allFilled = scopeMats.filter((m) => isFilled(costs[m.id])).length;
+  const allFilled = scopeMats.filter((m) => isFilled(costs[String(m.id)])).length;
   const tipMats = tipMateriais(tip, materiais);
-  const filled = tipMats.filter((m) => isFilled(costs[m.id])).length;
+  const filled = tipMats.filter((m) => isFilled(costs[String(m.id)])).length;
   const canSubmit = allFilled >= scopeMats.length * 0.5;
 
   // ── Estado de sucesso ──
@@ -340,7 +342,8 @@ function PortalContent({
                   </thead>
                   <tbody>
                     {ambMats.map((mat, mi) => {
-                      const c = costs[mat.id] ?? { mat: "", mo: "", comment: "" };
+                      const matKey = String(mat.id);
+                      const c = costs[matKey] ?? { mat: "", mo: "", comment: "" };
                       const rowFilled = isFilled(c);
                       return (
                         <tr
@@ -369,7 +372,7 @@ function PortalContent({
                                 <input
                                   type="number"
                                   value={c.mat}
-                                  onChange={(e) => setCostField(mat.id, "mat", e.target.value)}
+                                  onChange={(e) => setCostField(matKey, "mat", e.target.value)}
                                   placeholder="0,00"
                                   className={cn(
                                     "h-9 w-full rounded-lg border py-0 pl-7 pr-2 text-[13px] outline-none focus:border-primary-7",
@@ -390,7 +393,7 @@ function PortalContent({
                                 <input
                                   type="number"
                                   value={c.mo}
-                                  onChange={(e) => setCostField(mat.id, "mo", e.target.value)}
+                                  onChange={(e) => setCostField(matKey, "mo", e.target.value)}
                                   placeholder="0,00"
                                   className="h-9 w-full rounded-lg border border-neutral-gray-5 py-0 pl-7 pr-2 text-[13px] outline-none focus:border-primary-7"
                                 />
@@ -399,12 +402,12 @@ function PortalContent({
                           )}
                           {campos.comment && (
                             <td className="w-[180px] px-4 py-2">
-                              {openComment === mat.id ? (
+                              {openComment === matKey ? (
                                 <input
                                   autoFocus
                                   value={c.comment}
                                   onChange={(e) =>
-                                    setCostField(mat.id, "comment", e.target.value)
+                                    setCostField(matKey, "comment", e.target.value)
                                   }
                                   placeholder="Adicionar comentário..."
                                   onBlur={() => setOpenComment(null)}
@@ -413,7 +416,7 @@ function PortalContent({
                               ) : (
                                 <button
                                   type="button"
-                                  onClick={() => setOpenComment(mat.id)}
+                                  onClick={() => setOpenComment(matKey)}
                                   className={cn(
                                     "flex items-center gap-1 text-xs",
                                     c.comment

@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 
-import { withOrg } from "@/lib/api/handler";
+import { toInt, withOrg } from "@/lib/api/handler";
 import { getBudgetColumns, updateBudgetColumns } from "@/lib/server/store";
 import type { BudgetColumn } from "@/shared/types/domain";
 
@@ -9,10 +9,10 @@ interface Params {
 }
 
 export async function GET(_req: NextRequest, { params }: Params) {
-  return withOrg((org) => getBudgetColumns(org, params.id));
+  return withOrg((org) => getBudgetColumns(org, toInt(params.id)));
 }
 
 export async function PUT(req: NextRequest, { params }: Params) {
   const cols = (await req.json()) as BudgetColumn[];
-  return withOrg((org) => updateBudgetColumns(org, params.id, cols));
+  return withOrg((org) => updateBudgetColumns(org, toInt(params.id), cols));
 }

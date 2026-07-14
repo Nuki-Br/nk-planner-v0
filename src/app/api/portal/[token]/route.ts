@@ -5,6 +5,7 @@ import {
   getActiveProjectId,
   getFillLinkByToken,
   getPortalFills,
+  getPortalMaterialIds,
   getProject,
   listMateriais,
   listTipologias,
@@ -39,23 +40,15 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
         fills: {},
       };
     }
-    const [tipologias, materiais, fills] = await Promise.all([
+    const [tipologias, materiais, fills, scopedIds] = await Promise.all([
       listTipologias(organizationId),
       listMateriais(organizationId),
       getPortalFills(organizationId),
+      getPortalMaterialIds(organizationId, link.tipologiaIds),
     ]);
-    // Escopo do link: só as tipologias liberadas e os materiais que elas
-    // referenciam (padrão + upgrades) — não expõe o catálogo inteiro da org.
+    // Escopo do link: só as tipologias liberadas e os BaseMaterials preenchíveis
+    // que elas referenciam (opções + sub-itens de kit) — não expõe o catálogo inteiro.
     const scopedTipologias = tipologias.filter((t) => link.tipologiaIds.includes(t.id));
-    const scopedIds = new Set<string>();
-    for (const t of scopedTipologias) {
-      for (const amb of t.ambientes) {
-        for (const c of amb.componentes) {
-          if (c.padrao) scopedIds.add(c.padrao);
-          for (const u of c.upgrades) scopedIds.add(u);
-        }
-      }
-    }
     return {
       protegido: false,
       projectNome: project?.nome ?? "",
@@ -63,7 +56,7 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
       campos: link.campos,
       tipologias: scopedTipologias,
       materiais: materiais.filter((m) => scopedIds.has(m.id)),
-      fills: Object.fromEntries(Object.entries(fills).filter(([id]) => scopedIds.has(id))),
+      fills: Object.fromEntries(Object.entries(fills).filter(([id]) => scopedIds.has(Number(id)))),
     };
   });
 }

@@ -23,6 +23,13 @@ function statusFor(message: string): number {
   return 400;
 }
 
+/** Parseia um id de path (string) para Int; id inválido → 404 via run(). */
+export function toInt(raw: string): number {
+  const n = Number(raw);
+  if (!Number.isInteger(n)) throw new Error("Recurso não encontrado.");
+  return n;
+}
+
 async function run<T>(fn: () => Promise<T>): Promise<NextResponse> {
   try {
     return ok(await fn());

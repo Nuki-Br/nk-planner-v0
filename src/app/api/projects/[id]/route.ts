@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 
-import { withOrg } from "@/lib/api/handler";
+import { toInt, withOrg } from "@/lib/api/handler";
 import { getProject, updateProject, type ProjectPatch } from "@/lib/server/store";
 
 interface Params {
@@ -8,10 +8,10 @@ interface Params {
 }
 
 export async function GET(_req: NextRequest, { params }: Params) {
-  return withOrg((org) => getProject(org, params.id));
+  return withOrg((org) => getProject(org, toInt(params.id)));
 }
 
 export async function PATCH(req: NextRequest, { params }: Params) {
   const patch = (await req.json()) as ProjectPatch;
-  return withOrg((org) => updateProject(org, params.id, patch));
+  return withOrg((org) => updateProject(org, toInt(params.id), patch));
 }

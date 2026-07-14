@@ -3,7 +3,7 @@
 import React from "react";
 
 import { Icon } from "@/components/ui";
-import { getEntity, getMaterial } from "@/lib/data/entities";
+import { getMaterial, getOptionEntity } from "@/lib/data/entities";
 import { CV, NODE_TRANSITION, type AmbNode as AmbNodeT, type CompNode as CompNodeT, type OptNode as OptNodeT, type SubNode as SubNodeT } from "@/lib/canvas/buildLayout";
 import { cn, fmtBRL, fmtNum } from "@/lib/utils";
 import { AmbIcon } from "@/features/typologies/components/AmbIcon";
@@ -19,12 +19,13 @@ export interface CanvasActions {
   cloneAmb: (amb: Ambiente) => void;
   deleteAmb: (amb: Ambiente) => void;
   addAmb: () => void;
-  editComp: (ambId: string, comp: Componente) => void;
-  addComp: (ambId: string) => void;
-  deleteComp: (ambId: string, comp: Componente) => void;
-  changeOption: (ambId: string, comp: Componente, optId: string | null, isPadrao: boolean) => void;
-  addOption: (ambId: string, comp: Componente) => void;
-  deleteOption: (ambId: string, comp: Componente, optId: string, isPadrao: boolean) => void;
+  editComp: (ambId: number, comp: Componente) => void;
+  addComp: (ambId: number) => void;
+  deleteComp: (ambId: number, comp: Componente) => void;
+  /** optId = id da linha de opção (null ao definir/adicionar). */
+  changeOption: (ambId: number, comp: Componente, optId: number | null, isPadrao: boolean) => void;
+  addOption: (ambId: number, comp: Componente) => void;
+  deleteOption: (ambId: number, comp: Componente, optId: number, isPadrao: boolean) => void;
 }
 
 // ── Ambiente (coluna 1) ───────────────────────────────────────────────
@@ -100,9 +101,11 @@ export function ComponenteNode({
 }) {
   const { comp, cy, empty } = node;
   const [hov, setHov] = React.useState(false);
-  const padEnt = comp.padrao !== null ? getEntity(materiais, kits, comp.padrao) : null;
+  const def = comp.options.find((o) => o.isDefault);
+  const padEnt = def ? getOptionEntity(materiais, kits, def) : null;
+  const upgrades = comp.options.filter((o) => !o.isDefault);
   const showDetail = detailed && !empty;
-  const optCount = comp.upgrades.length + (comp.padrao !== null ? 1 : 0);
+  const optCount = comp.options.length;
 
   return (
     <div
@@ -142,7 +145,7 @@ export function ComponenteNode({
                 className="h-3.5 w-3.5 shrink-0 rounded"
                 style={
                   padEnt && !padEnt.isKit
-                    ? swatchStyle(comp.padrao !== null ? getMaterial(materiais, comp.padrao) : null)
+                    ? swatchStyle(def ? getMaterial(materiais, def.baseId) : null)
                     : { background: padEnt ? "#025259" : "#f5f5f5" }
                 }
               />
@@ -184,14 +187,14 @@ export function ComponenteNode({
           <div className="px-[9px] pb-1 pt-1.5 text-[10px] font-bold uppercase tracking-wider text-neutral-gray-6">
             Associar material
           </div>
-          {comp.padrao !== null ? (
+          {def ? (
             <MenuRow
               materiais={materiais}
-              swatchId={comp.padrao}
-              isKit={padEnt?.isKit ?? false}
+              swatchId={def.baseId}
+              isKit={def.isKit}
               label="Material padrão"
               name={padEnt?.nome ?? "—"}
-              onClick={() => act.changeOption(node.ambId, comp, comp.padrao, true)}
+              onClick={() => act.changeOption(node.ambId, comp, def.id, true)}
             />
           ) : (
             <MenuRow
@@ -202,25 +205,25 @@ export function ComponenteNode({
             />
           )}
           <div className="mx-2 my-[5px] h-px bg-neutral-gray-4" />
-          {comp.upgrades.map((uid, i) => {
-            const ent = getEntity(materiais, kits, uid);
+          {upgrades.map((opt, i) => {
+            const ent = getOptionEntity(materiais, kits, opt);
             return (
               <MenuRow
-                key={uid}
+                key={opt.id}
                 materiais={materiais}
-                swatchId={uid}
-                isKit={ent?.isKit ?? false}
+                swatchId={opt.baseId}
+                isKit={opt.isKit}
                 label={"Opção " + String(i + 1).padStart(2, "0")}
                 name={ent?.nome ?? "—"}
-                onClick={() => act.changeOption(node.ambId, comp, uid, false)}
-                onDel={() => act.deleteOption(node.ambId, comp, uid, false)}
+                onClick={() => act.changeOption(node.ambId, comp, opt.id, false)}
+                onDel={() => act.deleteOption(node.ambId, comp, opt.id, false)}
               />
             );
           })}
           <MenuRow
             materiais={materiais}
             add
-            label={"Opção " + String(comp.upgrades.length + 1).padStart(2, "0")}
+            label={"Opção " + String(upgrades.length + 1).padStart(2, "0")}
             onClick={() => act.addOption(node.ambId, comp)}
           />
         </div>
@@ -234,7 +237,6 @@ export function OptionNode({
   node,
   materiais,
   kits,
-  pendingSet,
   onToggleKit,
   act,
   detailed,
@@ -242,15 +244,14 @@ export function OptionNode({
   node: OptNodeT;
   materiais: Material[];
   kits: Kit[];
-  pendingSet: ReadonlySet<string>;
   onToggleKit: (key: string) => void;
   act: CanvasActions;
   detailed: boolean;
 }) {
-  const { comp, optId, isPadrao, label, key, isKit, kit, isOpen } = node;
+  const { comp, optId, baseId, isPadrao, label, key, isKit, kit, isOpen } = node;
   const [hov, setHov] = React.useState(false);
-  const pending = optionPending(materiais, kits, pendingSet, comp, optId);
-  const mat = isKit ? null : getMaterial(materiais, optId);
+  const pending = optionPending(materiais, kits, node);
+  const mat = isKit ? null : getMaterial(materiais, baseId);
   const kitCount = isKit && kit ? kit.itens.length : 0;
   const price = mat ? mat.custoMat + mat.custoMO : 0;
 
@@ -347,15 +348,13 @@ export function OptionNode({
 export function SubItemNode({
   node,
   materiais,
-  pendingSet,
 }: {
   node: SubNodeT;
   materiais: Material[];
-  pendingSet: ReadonlySet<string>;
 }) {
-  const { comp, kitId, mid, cy } = node;
-  const m = getMaterial(materiais, mid);
-  const pending = subitemPending(materiais, pendingSet, comp, kitId, mid);
+  const { item, cy } = node;
+  const m = getMaterial(materiais, item.materialId);
+  const pending = subitemPending(item);
   return (
     <div
       style={{ left: CV.x4, top: cy - 16, width: CV.w4, height: 32, transition: NODE_TRANSITION }}
@@ -365,7 +364,7 @@ export function SubItemNode({
       )}
     >
       <span className="flex-1 truncate text-[11.5px] font-medium text-neutral-gray-9">
-        {m?.nome ?? mid}
+        {m?.nome ?? item.nome}
       </span>
       {pending && <span className="h-[7px] w-[7px] shrink-0 rounded-full bg-functional-error" />}
     </div>

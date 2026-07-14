@@ -1,43 +1,51 @@
 import { describe, expect, it } from "vitest";
 
-import { getMaterial as findMaterial } from "@/lib/data/entities";
+import { getMaterial } from "@/lib/data/entities";
 import { createSeed } from "@/lib/data/seed";
 import { TAX_COLUMNS_DEFAULT } from "@/shared/constants/budget";
-import type { BudgetColumn, Componente, Kit } from "@/shared/types/domain";
+import type { BudgetColumn, Componente, Kit, Material } from "@/shared/types/domain";
 
 import {
   calcBudgetRow,
   calcKitRow,
-  kitSubItemKey,
-  upgradeKey,
+  rowKey,
   type BudgetRowResult,
   type ColResult,
-  type GetMaterial,
 } from "./index";
 
 const seed = createSeed();
-const resolve: GetMaterial = (id) => findMaterial(seed.materiais, id);
 const cols = TAX_COLUMNS_DEFAULT;
 
-function findComp(tipId: string, compId: string): Componente {
+function mat(codigo: string): Material {
+  const m = seed.materiais.find((x) => x.codigo === codigo);
+  if (!m) throw new Error(`material ${codigo} não encontrado`);
+  return m;
+}
+
+function kitByNome(nome: string): Kit {
+  const k = seed.kits.find((x) => x.nome === nome);
+  if (!k) throw new Error(`kit ${nome} não encontrado`);
+  return k;
+}
+
+/** Material padrão (crédito) do componente, resolvido pela opção default. */
+function padraoMat(c: Componente): Material | undefined {
+  const def = c.options.find((o) => o.id === c.padrao);
+  return getMaterial(seed.materiais, def?.baseId);
+}
+
+function findComp(predicate: (c: Componente, ambNome: string, tipNome: string) => boolean): Componente {
   for (const tip of seed.tipologias) {
-    if (tip.id !== tipId) continue;
     for (const amb of tip.ambientes) {
-      const comp = amb.componentes.find((c) => c.id === compId);
-      if (comp) return comp;
+      const c = amb.componentes.find((x) => predicate(x, amb.nome, tip.nome));
+      if (c) return c;
     }
   }
-  throw new Error(`componente ${compId} não encontrado em ${tipId}`);
+  throw new Error("componente não encontrado");
 }
 
-function findKit(id: string): Kit {
-  const kit = seed.kits.find((k) => k.id === id);
-  if (!kit) throw new Error(`kit ${id} não encontrado`);
-  return kit;
-}
-
-function col(r: { colResults: Record<string, ColResult> }, id: string): ColResult {
-  const c = r.colResults[id];
+function col(r: { colResults: Record<string, ColResult> }, id: string | number): ColResult {
+  const c = r.colResults[String(id)];
   if (!c) throw new Error(`coluna ${id} sem resultado`);
   return c;
 }
@@ -47,180 +55,152 @@ function mustCalc(r: BudgetRowResult | null): BudgetRowResult {
   return r;
 }
 
+const piso001 = mat("PO-6060-CR"); // padrão: 62.5 + 22 = 84.5
+const piso002 = mat("PP-6060-BI"); // upgrade: 98 + 22 = 120
+
 describe("calcBudgetRow (material)", () => {
-  // T-M1 — c1-1-1 (qtd 18.40, rt 15, padrão piso-001) com upgrade piso-002
+  // T-M1 — Sala/Living Piso: qtd 18.40, rt 15, padrão piso-001, upgrade piso-002
   it("T-M1: linha com colunas padrão do projeto", () => {
-    const r = mustCalc(
-      calcBudgetRow(resolve, resolve("piso-002"), "piso-001", 18.4, 15, cols)
-    );
-    expect(r.qtdComRT).toBeCloseTo(21.16, 10);
+    const r = mustCalc(calcBudgetRow(piso002, piso001, 18.4, 15, cols));
+    expect(r.qtdComRT).toBeCloseTo(21.16, 10); // 18.4 * 1.15
     expect(r.valUnUpg).toBe(120);
     expect(r.valUnPad).toBe(84.5);
     expect(r.custoDeTroca).toBe(35.5);
-    expect(col(r, "tc1").value).toBeCloseTo(2.84, 10); // =custo_troca * 8%
-    expect(col(r, "tc2").value).toBeCloseTo(1.775, 10); // =custo_troca * 5%
-    expect(col(r, "tc3").value).toBeCloseTo(26.4, 10); // =valor_unitario * 22%
+    expect(col(r, 1).value).toBeCloseTo(2.84, 10); // custo_troca * 8%
+    expect(col(r, 2).value).toBeCloseTo(1.775, 10); // custo_troca * 5%
+    expect(col(r, 3).value).toBeCloseTo(26.4, 10); // valor_unitario * 22%
     expect(r.sumFree).toBeCloseTo(31.015, 10);
     expect(r.totalUnit).toBeCloseTo(66.515, 10);
-    expect(r.total).toBeCloseTo(1407.4574, 4);
+    expect(r.total).toBeCloseTo(1407.4574, 4); // 66.515 * 21.16
   });
 
-  // T-M2 — rowTotal/rowAvg somam/média APENAS das free à esquerda
+  // T-M2 — rowTotal/rowAvg somam/mediam APENAS as free à esquerda
   it("T-M2: rowTotal e rowAvg consideram só as colunas free à esquerda", () => {
-    const colsComComputadas: BudgetColumn[] = [
+    const colsComp: BudgetColumn[] = [
       cols[0]!,
       cols[1]!,
-      { id: "st", nome: "Subtotal", kind: "rowTotal", expr: "", visivel: true },
+      { id: 101, nome: "Subtotal", kind: "rowTotal", expr: "", visivel: true },
       cols[2]!,
-      { id: "md", nome: "Média", kind: "rowAvg", expr: "", visivel: true },
+      { id: 102, nome: "Média", kind: "rowAvg", expr: "", visivel: true },
     ];
-    const r = mustCalc(
-      calcBudgetRow(resolve, resolve("piso-002"), "piso-001", 18.4, 15, colsComComputadas)
-    );
-    expect(col(r, "st").value).toBeCloseTo(4.615, 10); // 2.84 + 1.775 (tc3 à direita NÃO entra)
-    expect(col(r, "st").computed).toBe(true);
-    expect(col(r, "md").value).toBeCloseTo(31.015 / 3, 10); // média das 3 free
-    // computadas não entram no sumFree
-    expect(r.sumFree).toBeCloseTo(31.015, 10);
+    const r = mustCalc(calcBudgetRow(piso002, piso001, 18.4, 15, colsComp));
+    expect(col(r, 101).value).toBeCloseTo(4.615, 10); // 2.84 + 1.775 (tc3 à direita fora)
+    expect(col(r, 101).computed).toBe(true);
+    expect(col(r, 102).value).toBeCloseTo(31.015 / 3, 10); // média das 3 free
+    expect(r.sumFree).toBeCloseTo(31.015, 10); // computadas não somam
   });
 
-  // T-M3 — referência a coluna anterior por nome (inclusive computada)
+  // T-M3 — referência a coluna anterior por nome normalizado (inclusive computada)
   it("T-M3: colunas referenciam colunas anteriores pelo nome normalizado", () => {
     const colsRef: BudgetColumn[] = [
-      cols[0]!,
-      { id: "x2", nome: "Dobro", kind: "free", expr: "=taxa_construtora * 2", visivel: true },
-      { id: "st", nome: "Subtotal", kind: "rowTotal", expr: "", visivel: true },
-      { id: "mais1", nome: "Mais um", kind: "free", expr: "=subtotal + 1", visivel: true },
+      cols[0]!, // Taxa Construtora → 2.84
+      { id: 201, nome: "Dobro", kind: "free", expr: "=taxa_construtora * 2", visivel: true },
+      { id: 202, nome: "Subtotal", kind: "rowTotal", expr: "", visivel: true },
+      { id: 203, nome: "Mais um", kind: "free", expr: "=subtotal + 1", visivel: true },
     ];
-    const r = mustCalc(
-      calcBudgetRow(resolve, resolve("piso-002"), "piso-001", 18.4, 15, colsRef)
-    );
-    expect(col(r, "x2").value).toBeCloseTo(5.68, 10); // 2.84 * 2
-    expect(col(r, "st").value).toBeCloseTo(8.52, 10); // 2.84 + 5.68
-    expect(col(r, "mais1").value).toBeCloseTo(9.52, 10); // subtotal (computada) + 1
+    const r = mustCalc(calcBudgetRow(piso002, piso001, 18.4, 15, colsRef));
+    expect(col(r, 201).value).toBeCloseTo(5.68, 10); // 2.84 * 2
+    expect(col(r, 202).value).toBeCloseTo(8.52, 10); // 2.84 + 5.68
+    expect(col(r, 203).value).toBeCloseTo(9.52, 10); // subtotal (computada) + 1
   });
 
-  // T-M4 — override por célula
+  // T-M4 — override por célula (keyed por String(col.id))
   it("T-M4: override por célula substitui a expressão padrão da coluna", () => {
     const r = mustCalc(
-      calcBudgetRow(resolve, resolve("piso-002"), "piso-001", 18.4, 15, cols, { tc1: "10" })
+      calcBudgetRow(piso002, piso001, 18.4, 15, cols, { [String(cols[0]!.id)]: "10" })
     );
-    expect(col(r, "tc1").value).toBe(10);
-    expect(col(r, "tc1").overridden).toBe(true);
-    expect(col(r, "tc2").overridden).toBe(false);
+    expect(col(r, 1).value).toBe(10);
+    expect(col(r, 1).overridden).toBe(true);
+    expect(col(r, 2).overridden).toBe(false);
     expect(r.sumFree).toBeCloseTo(10 + 1.775 + 26.4, 10);
   });
 
   // T-M5 — referência desconhecida
   it("T-M5: referência desconhecida vira erro na célula e 0 no escopo", () => {
     const colsErr: BudgetColumn[] = [
-      { id: "bad", nome: "Quebrada", kind: "free", expr: "=inexistente * 2", visivel: true },
-      { id: "dep", nome: "Dependente", kind: "free", expr: "=quebrada + 1", visivel: true },
+      { id: 301, nome: "Quebrada", kind: "free", expr: "=inexistente * 2", visivel: true },
+      { id: 302, nome: "Dependente", kind: "free", expr: "=quebrada + 1", visivel: true },
     ];
-    const r = mustCalc(
-      calcBudgetRow(resolve, resolve("piso-002"), "piso-001", 18.4, 15, colsErr)
-    );
-    expect(col(r, "bad").error).toBe('coluna "inexistente" não encontrada');
-    expect(col(r, "bad").value).toBe(0);
-    expect(col(r, "dep").value).toBe(1); // quebrada = 0 no escopo
+    const r = mustCalc(calcBudgetRow(piso002, piso001, 18.4, 15, colsErr));
+    expect(col(r, 301).error).toBe('coluna "inexistente" não encontrada');
+    expect(col(r, 301).value).toBe(0);
+    expect(col(r, 302).value).toBe(1); // quebrada = 0 no escopo
     expect(r.sumFree).toBe(1); // célula com erro não soma
   });
 
-  // T-M6 — sem padrão (c3-3-2 Nicho) → null
+  // T-M6 — sem material padrão ou sem upgrade → null
   it("T-M6: retorna null sem material padrão ou sem upgrade", () => {
-    const nicho = findComp("t3", "c3-3-2");
+    const nicho = findComp((c) => c.nome === "Nicho");
     expect(nicho.padrao).toBeNull();
-    expect(
-      calcBudgetRow(resolve, resolve("piso-002"), nicho.padrao, nicho.qtd, nicho.rt, cols)
-    ).toBeNull();
-    expect(calcBudgetRow(resolve, undefined, "piso-001", 1, 0, cols)).toBeNull();
+    expect(padraoMat(nicho)).toBeUndefined();
+    expect(calcBudgetRow(piso002, padraoMat(nicho), nicho.qtd, nicho.rt, cols)).toBeNull();
+    expect(calcBudgetRow(undefined, piso001, 1, 0, cols)).toBeNull();
   });
 });
 
 describe("calcKitRow (kit)", () => {
-  // T-K1 — kit-metais-bronze em c1-5-4 (padrão met-001, qtd 1, rt 0)
+  const bronze = kitByNome("Metais Bronze"); // 4 itens, padrão met-001
+  const barcelona = kitByNome("Piso Barcelona + Soleira + RT"); // 3 itens; rt-bcn pendente
+
+  // Metais em Banheiro Social da t1: padrão met-001, qtd 1, rt 0, kitQtds [2,1,1,1]
+  const metaisComp = seed.tipologias[0]!.ambientes[4]!.componentes.find((c) => c.nome === "Metais")!;
+  // Piso da Sala/Living na t1: qtd 18.40, rt 15, kitQtds [18.4, 2, 1.84]
+  const salaPisoT1 = seed.tipologias[0]!.ambientes[0]!.componentes[0]!;
+
+  // T-K1 — agrega sub-itens e credita o padrão
   it("T-K1: agrega sub-itens e credita o padrão", () => {
-    const r = calcKitRow(resolve, findKit("kit-metais-bronze"), findComp("t1", "c1-5-4"), cols);
-    expect(r.kitMaterialTotal).toBe(1240); // 170*2 + 520 + 280 + 100
+    const r = calcKitRow(bronze, metaisComp, padraoMat(metaisComp), cols);
+    expect(r.kitMaterialTotal).toBe(1240); // 170*2 + 520*1 + 280*1 + 100*1
     expect(r.qtdComRT).toBe(1);
-    expect(r.padCredit).toBe(850);
-    expect(r.custoDeTroca).toBe(390);
-    expect(col(r, "tc1").value).toBeCloseTo(31.2, 10);
-    expect(col(r, "tc2").value).toBeCloseTo(19.5, 10);
-    expect(col(r, "tc3").value).toBeCloseTo(272.8, 10); // valor_unitario = kitMaterialTotal
+    expect(r.padCredit).toBe(850); // met-001 (850) * 1
+    expect(r.custoDeTroca).toBe(390); // 1240 - 850
+    expect(col(r, 1).value).toBeCloseTo(31.2, 10); // custo_troca * 8%
+    expect(col(r, 2).value).toBeCloseTo(19.5, 10); // custo_troca * 5%
+    expect(col(r, 3).value).toBeCloseTo(272.8, 10); // valor_unitario (=kitMaterialTotal) * 22%
     expect(r.sumFree).toBeCloseTo(323.5, 10);
-    expect(r.total).toBeCloseTo(713.5, 10);
+    expect(r.total).toBeCloseTo(713.5, 10); // custoDeTroca + sumFree (sem multiplicar por qtdComRT)
     expect(r.anyPending).toBe(false);
   });
 
   // T-K2 — kit NÃO multiplica por qtdComRT (extensão já está nos sub-itens)
   it("T-K2: total do kit não é multiplicado por qtdComRT", () => {
-    const comp = findComp("t1", "c1-1-1"); // qtd 18.40, rt 15, padrão piso-001
-    const r = calcKitRow(resolve, findKit("kit-piso-barcelona"), comp, cols);
-    expect(r.kitMaterialTotal).toBeCloseTo(4388.4, 10); // 208*18.40 + 115*2 + 180*1.84
+    const r = calcKitRow(barcelona, salaPisoT1, padraoMat(salaPisoT1), cols);
+    // piso-bcn 208 * 18.40 + sol-bcn 115 * 2 + rt-bcn (pendente, 0) * 1.84
+    expect(r.kitMaterialTotal).toBeCloseTo(4057.2, 10);
     expect(r.qtdComRT).toBeCloseTo(21.16, 10);
     expect(r.padCredit).toBeCloseTo(1788.02, 10); // 84.5 * 21.16
-    expect(r.custoDeTroca).toBeCloseTo(2600.38, 10);
-    expect(r.sumFree).toBeCloseTo(1303.4974, 4);
-    expect(r.total).toBeCloseTo(3903.8774, 4);
+    expect(r.custoDeTroca).toBeCloseTo(2269.18, 10);
+    expect(r.sumFree).toBeCloseTo(1187.5774, 4);
+    expect(r.total).toBeCloseTo(3456.7574, 4); // custoDeTroca + sumFree
+    expect(r.anyPending).toBe(true); // rt-bcn tem custoMat 0
     // prova da semântica: o total NÃO é (custoDeTroca + sumFree) * qtdComRT
     expect(r.total).not.toBeCloseTo((r.custoDeTroca + r.sumFree) * r.qtdComRT, 0);
   });
 
-  // T-P1 — pendência por chave do Set e por custo zerado
-  it("T-P1: sub-item pendente pela chave do Set ou por custoMat <= 0", () => {
-    const pending = new Set(seed.pendingItems);
-    const r = calcKitRow(
-      resolve,
-      findKit("kit-piso-barcelona"),
-      findComp("t3", "c3-1-1"),
-      cols,
-      {},
-      pending
-    );
-    const rtBcn = r.subItems.find((s) => s.mat.id === "rt-bcn");
-    expect(rtBcn?.pending).toBe(true); // chave c3-1-1-kit-piso-barcelona-rt-bcn no Set
+  // T-P1 — pendência é derivada do custo (custoMat <= 0), não mais de um Set
+  it("T-P1: sub-item com custoMat <= 0 marca a linha como pendente", () => {
+    const r = calcKitRow(barcelona, salaPisoT1, padraoMat(salaPisoT1), cols);
+    const rtBcn = r.subItems.find((s) => s.item.nome === "Reserva Técnica Porcelanato Barcelona");
+    expect(rtBcn?.item.custoMat).toBe(0);
+    expect(rtBcn?.pending).toBe(true);
     expect(r.anyPending).toBe(true);
 
-    // custoMat <= 0 marca pendente mesmo sem chave no Set
-    const semCusto = (id: string) =>
-      id === "met-b-001" ? { ...seed.materiais.find((m) => m.id === id)!, custoMat: 0 } : resolve(id);
-    const r2 = calcKitRow(semCusto, findKit("kit-metais-bronze"), findComp("t1", "c1-5-4"), cols);
-    expect(r2.subItems.find((s) => s.mat.id === "met-b-001")?.pending).toBe(true);
-    expect(r2.anyPending).toBe(true);
+    // kit todo precificado → sem pendência; zerar um sub-item reintroduz a pendência
+    expect(calcKitRow(bronze, metaisComp, padraoMat(metaisComp), cols).anyPending).toBe(false);
+    const bronzeZerado: Kit = {
+      ...bronze,
+      itens: bronze.itens.map((it, i) => (i === 0 ? { ...it, custoMat: 0 } : it)),
+    };
+    const rz = calcKitRow(bronzeZerado, metaisComp, padraoMat(metaisComp), cols);
+    expect(rz.subItems[0]?.pending).toBe(true);
+    expect(rz.anyPending).toBe(true);
   });
 });
 
-describe("pendência é contrato do chamador (T-P2)", () => {
-  it("chaves em pendingItems excluem a linha da soma (como as telas fazem)", () => {
-    const comp = findComp("t3", "c3-1-1"); // upgrades piso-002/003/004 (+ kit)
-    const pending = new Set(seed.pendingItems);
-    const upgrades = ["piso-002", "piso-003", "piso-004"];
-    const totals = new Map(
-      upgrades.map((id) => [
-        id,
-        calcBudgetRow(resolve, resolve(id), comp.padrao, comp.qtd, comp.rt, cols)?.total ?? 0,
-      ])
-    );
-    const somaTotal = [...totals.values()].reduce((a, b) => a + b, 0);
-    const somaSemPendentes = upgrades
-      .filter((id) => !pending.has(upgradeKey(comp.id, id)))
-      .reduce((a, id) => a + (totals.get(id) ?? 0), 0);
-
-    expect(pending.has(upgradeKey(comp.id, "piso-004"))).toBe(true);
-    expect(somaSemPendentes).toBeCloseTo(
-      (totals.get("piso-002") ?? 0) + (totals.get("piso-003") ?? 0),
-      10
-    );
-    expect(somaSemPendentes).toBeLessThan(somaTotal);
-  });
-});
-
-describe("helpers de chave", () => {
-  it("formatos idênticos aos do protótipo", () => {
-    expect(upgradeKey("c3-1-1", "piso-004")).toBe("c3-1-1-piso-004");
-    expect(kitSubItemKey("c3-1-1", "kit-piso-barcelona", "rt-bcn")).toBe(
-      "c3-1-1-kit-piso-barcelona-rt-bcn"
-    );
+describe("rowKey", () => {
+  it("é o id da opção como string", () => {
+    expect(rowKey(42)).toBe("42");
+    const opt = seed.tipologias[0]!.ambientes[0]!.componentes[0]!.options[1]!;
+    expect(rowKey(opt.id)).toBe(String(opt.id));
   });
 });

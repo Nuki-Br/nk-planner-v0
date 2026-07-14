@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 
-import { withOrg } from "@/lib/api/handler";
+import { toInt, withOrg } from "@/lib/api/handler";
 import {
   deleteComponente,
   updateComponente,
@@ -14,10 +14,12 @@ interface Params {
 export async function PATCH(req: NextRequest, { params }: Params) {
   const patch = (await req.json()) as Partial<ComponenteInput>;
   return withOrg((org) =>
-    updateComponente(org, params.id, params.ambId, params.compId, patch)
+    updateComponente(org, toInt(params.id), toInt(params.ambId), toInt(params.compId), patch)
   );
 }
 
 export async function DELETE(_req: NextRequest, { params }: Params) {
-  return withOrg((org) => deleteComponente(org, params.id, params.ambId, params.compId));
+  return withOrg((org) =>
+    deleteComponente(org, toInt(params.id), toInt(params.ambId), toInt(params.compId))
+  );
 }

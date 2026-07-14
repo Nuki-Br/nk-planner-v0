@@ -1,18 +1,24 @@
-// Nuki Planner — Prisma schema (Fase 10).
-// Espelha src/shared/types/domain.ts para que a troca do store mock pelas
-// rotas /api/* seja transparente para telas e hooks:
-//  - ids são String gerados pela aplicação (genId) — o prefixo "kit-" é
-//    load-bearing (isKitId em lib/data/entities);
-//  - padrao/upgrades de Componente referenciam Material OU Kit por id
-//    (polimórfico, sem FK) e kitQtds é Json, como no domínio — a normalização
-//    em ComponentMaterial/KitItem fica para a reintegração ao nk-admin-portal;
-//  - datas de exibição ("DD/MM/AAAA HH:mm") são String, verbatim como as telas
-//    esperam; bookkeeping usa DateTime createdAt/updatedAt;
-//  - custos em Float (double precision) — mesmo semântico dos numbers do app.
+// Nuki Planner — Prisma schema (realinhado à API de customização).
+// Modelo relacional espelhando o núcleo da nk-api-customization em nomes
+// PascalCase e ids Int autoincrement, para que a lógica compartilhada porte
+// de forma limpa:
+//   Enterprise → Room → RoomComponent → Material(opção → BaseMaterial)
+//   Blueprint ⇄ Room via BlueprintRoom (M:N: room compartilhado entre plantas)
+//   Catálogo: BaseMaterial (Type single|kit) + MaterialCategory + MaterialKitItem
 //
-// Tenancy: toda linha de domínio carrega organizationId (orgs beta isoladas).
-// CellOverride/BaseCost (estado de sessão do orçamento, §12) e CanvasNote/
-// MediaAsset (adiados nas fases 5–6) ficam de fora por enquanto.
+// Divergências deliberadas da API (ver docs do plano):
+//   - CUSTO fica no BaseMaterial (catálogo), "preenche 1x": CostMaterialInCents
+//     + CostLaborInCents (Int? em centavos; NULL = pendente/sem custo). O catálogo
+//     é escopado por Organization (não por Enterprise).
+//   - Quantidade/RT variam POR PLANTA: BlueprintRoomComponent (a paleta de
+//     produtos — RoomComponent + Material — é compartilhada; a quantidade não).
+//   - Datas de exibição continuam String (*Label, verbatim "DD/MM/AAAA [HH:mm]").
+//   - Preço de venda vivo vem do motor de fórmulas; Material.PriceInCents é só
+//     snapshot de publicação.
+//
+// Tenancy: Organization/Membership são tabelas do planner (auth Supabase),
+// mantidas com id String (uuid/slug). Toda entidade de empreendimento carrega
+// EnterpriseId; o catálogo carrega OrganizationId.
 
 generator client {
   provider = "prisma-client-js"
@@ -24,17 +30,22 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+// ─── Tenancy / auth (planner-owned; id String) ──────────────────────────
+
 model Organization {
-  id        String       @id @default(uuid())
-  name      String
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
-  members   Membership[]
+  id            String             @id @default(uuid())
+  name          String
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  members       Membership[]
+  enterprises   Enterprise[]
+  baseMaterials BaseMaterial[]
+  categories    MaterialCategory[]
 
   @@map("organizations")
 }
 
-/// Links a Supabase Auth user (authUserId) to an Organization.
+/// Liga um usuário do Supabase Auth (authUserId) a uma Organization.
 model Membership {
   id             String       @id @default(uuid())
   authUserId     String       @map("auth_user_id")
@@ -49,16 +60,16 @@ model Membership {
   @@map("memberships")
 }
 
-// ─── Enums do domínio ──────────────────────────────────────────────────
+// ─── Enums (valores verbatim PT-BR; nomes de tipo em inglês) ────────────
 
-enum ProjectStatus {
+enum PlanningStatus {
   rascunho
   em_preenchimento
   em_revisao
   publicado
 }
 
-enum TipologiaStatus {
+enum BlueprintStatus {
   completa
   incompleta
 }
@@ -69,265 +80,364 @@ enum ColumnKind {
   rowAvg
 }
 
-enum CommentAutor {
+enum CommentAuthor {
   construtora
   incorporadora
 }
 
-// ─── Projeto / colunas do orçamento ────────────────────────────────────
+// ─── Enterprise (era Project) ───────────────────────────────────────────
 
-model Project {
-  id                String         @id
-  nome              String
-  torre             String
-  incorporadora     String
-  construtora       String
-  status            ProjectStatus  @default(rascunho)
-  /// Datas de exibição "DD/MM/AAAA" (verbatim das telas).
-  enviadoEm         String?        @map("enviado_em")
-  prazo             String?
-  /// "DD/MM/AAAA HH:mm" — gravado ao publicar (trava read-only).
-  publicadoEm       String?        @map("publicado_em")
-  totalItens        Int            @default(0) @map("total_itens")
-  itensPreenchidos  Int            @default(0) @map("itens_preenchidos")
-  /// Data base INCC ("MM/AAAA").
-  inccBase          String?        @map("incc_base")
-  emailConstrutora  String?        @map("email_construtora")
-  /// Taxas globais legadas {construtora, incc, incorporadora} (compat protótipo).
-  taxas             Json?
-  organizationId    String         @map("organization_id")
-  createdAt         DateTime       @default(now()) @map("created_at")
-  updatedAt         DateTime       @updatedAt @map("updated_at")
-  taxColumns        BudgetColumn[]
+model Enterprise {
+  Id             Int            @id @default(autoincrement())
+  OrganizationId String
+  Name           String
+  Developer      String? // incorporadora
+  Builder        String? // construtora
+  BuilderEmail   String?
+  TowerLabel     String? // "torre" de exibição (texto livre)
+  Status         PlanningStatus @default(rascunho)
 
-  @@index([organizationId])
-  @@map("projects")
+  /// Datas de exibição verbatim ("DD/MM/AAAA" / "DD/MM/AAAA HH:mm" / "MM/AAAA").
+  SubmittedAtLabel String?
+  DeadlineLabel    String?
+  PublishedAtLabel String?
+  InccBaseLabel    String?
+
+  TotalItems  Int   @default(0)
+  FilledItems Int   @default(0)
+  /// Taxas globais legadas {construtora, incc, incorporadora}.
+  Taxes       Json?
+
+  CreatedAt DateTime @default(now()) @db.Timestamptz()
+  UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
+
+  Organization   Organization    @relation(fields: [OrganizationId], references: [id], onDelete: Cascade)
+  Blueprints     Blueprint[]
+  Rooms          Room[]
+  Materials      Material[]
+  Towers         Tower[]
+  UnitGroups     UnitGroup[]
+  BudgetColumns  BudgetColumn[]
+  BudgetVersions BudgetVersion[]
+  Comments       Comment[]
+  FillLinks      FillLink[]
+  PortalFills    PortalFill[]
+
+  @@index([OrganizationId])
 }
 
-/// Coluna configurável do Construtor de Preço (taxColumns do projeto).
-model BudgetColumn {
-  id             String     @id
-  projectId      String     @map("project_id")
-  project        Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  nome           String
-  kind           ColumnKind
-  /// Expressão padrão: número fixo ou fórmula iniciada por "=".
-  expr           String
-  visivel        Boolean    @default(false)
-  ordem          Int
-  organizationId String     @map("organization_id")
+// ─── Blueprint (era Tipologia) ──────────────────────────────────────────
 
-  @@index([projectId])
-  @@index([organizationId])
-  @@map("budget_columns")
+model Blueprint {
+  Id           Int             @id @default(autoincrement())
+  EnterpriseId Int
+  Name         String
+  Description  String          @default("")
+  AreaSqM      Float? // metragem
+  UnitCount    Int             @default(0) // unidades
+  Status       BlueprintStatus @default(incompleta)
+  Position     Int             @default(0) // ordem
+  ImageUrl     String?
+
+  CreatedAt DateTime @default(now()) @db.Timestamptz()
+  UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
+
+  Enterprise     Enterprise      @relation(fields: [EnterpriseId], references: [Id], onDelete: Cascade)
+  BlueprintRooms BlueprintRoom[]
+
+  @@index([EnterpriseId])
 }
 
-// ─── Catálogo ──────────────────────────────────────────────────────────
+// ─── Room (era Ambiente; pertence ao Enterprise, compartilhado) ─────────
+
+model Room {
+  Id           Int     @id @default(autoincrement())
+  EnterpriseId Int
+  Name         String
+  Icon         String?
+  BaseImageUrl String?
+
+  CreatedAt DateTime @default(now()) @db.Timestamptz()
+  UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
+
+  Enterprise     Enterprise      @relation(fields: [EnterpriseId], references: [Id], onDelete: Cascade)
+  RoomComponents RoomComponent[]
+  Materials      Material[]
+  BlueprintRooms BlueprintRoom[]
+
+  @@index([EnterpriseId])
+}
+
+// ─── BlueprintRoom (era AmbienteShared; M:N real + posição por planta) ──
+
+model BlueprintRoom {
+  Id            Int     @id @default(autoincrement())
+  BlueprintId   Int
+  RoomId        Int
+  Position      Int     @default(0)
+  Polygon       Json? // RoomShape (rect/poly) — local na planta
+  DrawnImageUrl String?
+
+  Blueprint  Blueprint                @relation(fields: [BlueprintId], references: [Id], onDelete: Cascade)
+  Room       Room                     @relation(fields: [RoomId], references: [Id], onDelete: Cascade)
+  Components BlueprintRoomComponent[]
+
+  @@unique([BlueprintId, RoomId])
+  @@index([BlueprintId])
+  @@index([RoomId])
+}
+
+// ─── RoomComponent (era Componente; paleta COMPARTILHADA, sem quantidade) ─
+
+model RoomComponent {
+  Id                Int     @id @default(autoincrement())
+  RoomId            Int
+  Name              String
+  Unit              String // unidade
+  DefaultMaterialId Int? // → opção default (era padrao)
+  IsGhost           Boolean @default(false) // ghost
+  Position          Int     @default(0) // ordem
+
+  CreatedAt DateTime @default(now()) @db.Timestamptz()
+  UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
+
+  Room               Room                     @relation(fields: [RoomId], references: [Id], onDelete: Cascade)
+  Options            Material[]               @relation("ComponentOptions")
+  DefaultMaterial    Material?                @relation("DefaultOption", fields: [DefaultMaterialId], references: [Id], onDelete: SetNull)
+  BlueprintInstances BlueprintRoomComponent[]
+
+  @@index([RoomId])
+}
+
+// ─── BlueprintRoomComponent (POR PLANTA: quantidade + reserva técnica) ──
+
+model BlueprintRoomComponent {
+  Id                  Int   @id @default(autoincrement())
+  BlueprintRoomId     Int
+  RoomComponentId     Int
+  UsageQuantity       Float // qtd
+  TechnicalReservePct Float @default(0) // rt (%)
+
+  BlueprintRoom BlueprintRoom      @relation(fields: [BlueprintRoomId], references: [Id], onDelete: Cascade)
+  RoomComponent RoomComponent      @relation(fields: [RoomComponentId], references: [Id], onDelete: Cascade)
+  KitUsages     MaterialKitUsage[]
+
+  @@unique([BlueprintRoomId, RoomComponentId])
+  @@index([BlueprintRoomId])
+  @@index([RoomComponentId])
+}
+
+// ─── Material (opção por componente, COMPARTILHADA; era upgrades[]/padrao) ─
 
 model Material {
-  id             String @id
-  codigo         String
-  nome           String
-  fabricante     String
-  categoria      String
-  unidade        String
-  /// Custo de material (R$/unidade).
-  custoMat       Float  @map("custo_mat")
-  /// Custo de mão de obra (R$/unidade).
-  custoMO        Float  @map("custo_mo")
-  organizationId String @map("organization_id")
+  Id              Int     @id @default(autoincrement())
+  RoomComponentId Int
+  RoomId          Int // denormalizado (paridade API)
+  EnterpriseId    Int // denormalizado (paridade API)
+  BaseMaterialId  Int
+  Position        Int     @default(0) // ordem entre opções
+  IsDefault       Boolean @default(false)
+  /// Snapshot de preço de venda (publicação); preço vivo vem da fórmula.
+  PriceInCents    Int     @default(0)
+  Name            String?
 
-  @@index([organizationId])
-  @@map("materiais")
+  CreatedAt DateTime @default(now()) @db.Timestamptz()
+  UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
+
+  RoomComponent       RoomComponent   @relation("ComponentOptions", fields: [RoomComponentId], references: [Id], onDelete: Cascade)
+  DefaultForComponent RoomComponent[] @relation("DefaultOption")
+  Room                Room            @relation(fields: [RoomId], references: [Id], onDelete: Cascade)
+  Enterprise          Enterprise      @relation(fields: [EnterpriseId], references: [Id], onDelete: Cascade)
+  BaseMaterial        BaseMaterial    @relation(fields: [BaseMaterialId], references: [Id], onDelete: Restrict)
+  Comments            Comment[]
+
+  @@unique([RoomComponentId, BaseMaterialId])
+  @@index([RoomComponentId])
+  @@index([BaseMaterialId])
+  @@index([EnterpriseId])
 }
 
-/// Kit agrupa materiais avulsos; custo = soma dos sub-itens.
-model Kit {
-  id             String   @id
-  codigo         String
-  nome           String
-  categoria      String
-  /// Ids de Material, na ordem de exibição.
-  itens          String[]
-  organizationId String   @map("organization_id")
+// ─── BaseMaterial (catálogo; era Material + Kit) — por Organization ──────
 
-  @@index([organizationId])
-  @@map("kits")
+model BaseMaterial {
+  Id                  Int     @id @default(autoincrement())
+  OrganizationId      String
+  CategoryId          Int?
+  Type                String  @default("single") // "single" | "kit"
+  ReferenceCode       String // codigo
+  Name                String
+  Manufacturer        String? // fabricante (null p/ kit)
+  Unit                String? // unidade (null p/ kit)
+  /// Custo "preenche 1x". NULL = pendente (sem custo).
+  CostMaterialInCents Int? // custoMat (centavos)
+  CostLaborInCents    Int? // custoMO (centavos)
+  ImagePreviewUrl     String?
+
+  CreatedAt DateTime @default(now()) @db.Timestamptz()
+  UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
+
+  Organization Organization      @relation(fields: [OrganizationId], references: [id], onDelete: Cascade)
+  Category     MaterialCategory? @relation(fields: [CategoryId], references: [Id], onDelete: SetNull)
+  Options      Material[]
+  KitItems     MaterialKitItem[] @relation("KitParent")
+  ParentKits   MaterialKitItem[] @relation("KitChild")
+  PortalFills  PortalFill[]
+
+  @@index([OrganizationId])
+  @@index([OrganizationId, Type])
+  @@index([OrganizationId, CategoryId])
 }
 
-// ─── Tipologias / ambientes / componentes ──────────────────────────────
+model MaterialCategory {
+  Id             Int      @id @default(autoincrement())
+  OrganizationId String
+  Name           String
+  ColorScheme    String?
+  CreatedAt      DateTime @default(now()) @db.Timestamptz()
 
-model Tipologia {
-  id             String          @id
-  nome           String
-  metragem       Float
-  descricao      String
-  unidades       Int
-  status         TipologiaStatus @default(incompleta)
-  ordem          Int
-  organizationId String          @map("organization_id")
-  ambientes      Ambiente[]
+  Organization  Organization   @relation(fields: [OrganizationId], references: [id], onDelete: Cascade)
+  BaseMaterials BaseMaterial[]
 
-  @@index([organizationId])
-  @@map("tipologias")
+  @@index([OrganizationId])
 }
 
-model Ambiente {
-  id             String       @id
-  tipologiaId    String       @map("tipologia_id")
-  tipologia      Tipologia    @relation(fields: [tipologiaId], references: [id], onDelete: Cascade)
-  nome           String
-  icon           String?
-  /// {name, url} (AmbienteImagem) — upload real fica para depois.
-  imagem         Json?
-  /// RoomShape (rect/poly) — reservado até haver plantas reais.
-  local          Json?
-  ordem          Int
-  organizationId String       @map("organization_id")
-  componentes    Componente[]
+/// Composição do kit (era Kit.itens): sub-materiais de um BaseMaterial kit.
+model MaterialKitItem {
+  Id                   Int    @id @default(autoincrement())
+  ParentMaterialId     Int
+  ChildMaterialId      Int
+  Position             Int    @default(0)
+  DefaultUsageQuantity Float?
 
-  @@index([tipologiaId])
-  @@index([organizationId])
-  @@map("ambientes")
+  ParentMaterial BaseMaterial       @relation("KitParent", fields: [ParentMaterialId], references: [Id], onDelete: Cascade)
+  ChildMaterial  BaseMaterial       @relation("KitChild", fields: [ChildMaterialId], references: [Id], onDelete: Restrict)
+  Usages         MaterialKitUsage[]
+
+  @@unique([ParentMaterialId, ChildMaterialId])
+  @@index([ParentMaterialId])
 }
 
-model Componente {
-  id             String   @id
-  ambienteId     String   @map("ambiente_id")
-  ambiente       Ambiente @relation(fields: [ambienteId], references: [id], onDelete: Cascade)
-  nome           String
-  unidade        String
-  qtd            Float
-  /// Reserva técnica (%) → qtdComRT = qtd * (1 + rt/100).
-  rt             Float
-  /// Id de Material/Kit padrão (crédito) — polimórfico, sem FK.
-  padrao         String?
-  /// Ids de Material/Kit oferecidos como upgrade, na ordem de exibição.
-  upgrades       String[]
-  /// Override de taxa por componente — reservado (§6).
-  taxaEspecifica Json?    @map("taxa_especifica")
-  ghost          Boolean  @default(false)
-  ordem          Int
-  /// kitId → (matId → quantitativo do sub-item).
-  kitQtds        Json?    @map("kit_qtds")
-  organizationId String   @map("organization_id")
+/// Quantitativo de sub-item de kit POR PLANTA (era Componente.kitQtds).
+model MaterialKitUsage {
+  Id                       Int   @id @default(autoincrement())
+  BlueprintRoomComponentId Int
+  KitItemId                Int
+  UsageQuantity            Float
 
-  @@index([ambienteId])
-  @@index([organizationId])
-  @@map("componentes")
+  BlueprintRoomComponent BlueprintRoomComponent @relation(fields: [BlueprintRoomComponentId], references: [Id], onDelete: Cascade)
+  KitItem                MaterialKitItem        @relation(fields: [KitItemId], references: [Id], onDelete: Cascade)
+
+  @@unique([BlueprintRoomComponentId, KitItemId])
+  @@index([BlueprintRoomComponentId])
 }
 
-/// Compartilhamento de ambientes entre tipologias (sharedReg/ambShared do
-/// domínio): cada linha diz a que grupo (shareId) um ambiente pertence.
-model AmbienteShared {
-  ambienteId     String @id @map("ambiente_id")
-  shareId        String @map("share_id")
-  tipologiaId    String @map("tipologia_id")
-  organizationId String @map("organization_id")
+// ─── Features só do planner (re-escopadas a Enterprise, ids Int) ────────
 
-  @@index([shareId])
-  @@index([organizationId])
-  @@map("ambientes_compartilhados")
-}
+/// Coluna configurável do Construtor de Preço (fórmula por Name).
+model BudgetColumn {
+  Id           Int        @id @default(autoincrement())
+  EnterpriseId Int
+  Name         String
+  Kind         ColumnKind
+  Expr         String
+  Visible      Boolean    @default(false)
+  Position     Int        @default(0)
 
-// ─── Torres / grupos de unidades ───────────────────────────────────────
+  Enterprise Enterprise @relation(fields: [EnterpriseId], references: [Id], onDelete: Cascade)
 
-model Tower {
-  id             String @id
-  nome           String
-  ordem          Int
-  organizationId String @map("organization_id")
-
-  @@index([organizationId])
-  @@map("torres")
-}
-
-model UnitGroup {
-  id             String   @id
-  nome           String
-  torre          String
-  unidades       String[]
-  organizationId String   @map("organization_id")
-
-  @@index([organizationId])
-  @@map("unit_groups")
-}
-
-// ─── Orçamento: pendências e versões ───────────────────────────────────
-
-/// Linha do orçamento sem custo base (chaves `${compId}-${optId}` ou
-/// `${compId}-${kitId}-${matId}`) — o Set PENDING_ITEMS do domínio.
-model PendingItem {
-  key            String @id
-  organizationId String @map("organization_id")
-
-  @@index([organizationId])
-  @@map("pending_items")
+  @@index([EnterpriseId])
 }
 
 model BudgetVersion {
-  id             String  @id
-  /// "v1", "v2"…
-  label          String
-  /// Data de exibição "DD/MM/AAAA às HH:mm" (verbatim das telas).
-  criadoEm       String  @map("criado_em")
-  createdBy      String  @map("created_by")
-  isCurrent      Boolean @default(false) @map("is_current")
-  summary        String
-  /// VersionChanges {materiais, custos, taxas, tipologias}.
-  changes        Json
-  ordem          Int
-  organizationId String  @map("organization_id")
+  Id             Int      @id @default(autoincrement())
+  EnterpriseId   Int
+  Label          String
+  CreatedAtLabel String // "DD/MM/AAAA às HH:mm"
+  CreatedBy      String
+  IsCurrent      Boolean  @default(false)
+  Summary        String
+  Changes        Json
+  Position       Int      @default(0)
+  CreatedAt      DateTime @default(now()) @db.Timestamptz()
 
-  @@index([organizationId])
-  @@map("budget_versions")
+  Enterprise Enterprise @relation(fields: [EnterpriseId], references: [Id], onDelete: Cascade)
+
+  @@index([EnterpriseId])
 }
 
-// ─── Comentários (threads por linha) ───────────────────────────────────
-
+/// Thread de comentário por opção de material (era rowKey compId-optId).
 model Comment {
-  id             String       @id @default(uuid())
-  /// `${compId}-${optId}` — chave da thread.
-  rowKey         String       @map("row_key")
-  autor          CommentAutor
-  texto          String
-  /// Data de exibição "DD/MM/AAAA HH:mm".
-  data           String
-  organizationId String       @map("organization_id")
-  createdAt      DateTime     @default(now()) @map("created_at")
+  Id           Int           @id @default(autoincrement())
+  MaterialId   Int
+  EnterpriseId Int
+  Author       CommentAuthor
+  Text         String
+  DateLabel    String // "DD/MM/AAAA HH:mm"
+  CreatedAt    DateTime      @default(now()) @db.Timestamptz()
 
-  @@index([rowKey])
-  @@index([organizationId])
-  @@map("comments")
+  Material   Material   @relation(fields: [MaterialId], references: [Id], onDelete: Cascade)
+  Enterprise Enterprise @relation(fields: [EnterpriseId], references: [Id], onDelete: Cascade)
+
+  @@index([MaterialId])
+  @@index([EnterpriseId])
 }
 
-// ─── Link de preenchimento + portal do terceiro (Fase 8) ───────────────
+// ─── Portal do terceiro (coleta de custo pela construtora) ──────────────
 
 model FillLink {
-  id             String   @id
-  token          String   @unique
-  tipologiaIds   String[] @map("tipologia_ids")
-  /// FillLinkCampos {mat, mo, comment}.
-  campos         Json
-  prazo          String?
-  /// Senha em claro no MVP (hash entra com auth de terceiros, se necessário).
-  senha          String?
-  /// "DD/MM/AAAA HH:mm".
-  criadoEm       String   @map("criado_em")
-  organizationId String   @map("organization_id")
+  Id             Int      @id @default(autoincrement())
+  EnterpriseId   Int
+  Token          String   @unique
+  BlueprintIds   Int[]    @default([]) // era tipologiaIds
+  Fields         Json // FillLinkCampos {mat, mo, comment}
+  DeadlineLabel  String? // prazo
+  Password       String? // senha (plaintext no MVP)
+  CreatedAtLabel String // "DD/MM/AAAA HH:mm"
+  CreatedAt      DateTime @default(now()) @db.Timestamptz()
 
-  @@index([organizationId])
-  @@map("fill_links")
+  Enterprise Enterprise @relation(fields: [EnterpriseId], references: [Id], onDelete: Cascade)
+
+  @@index([EnterpriseId])
 }
 
-/// Custos/comentário preenchidos pelo terceiro no portal (matId → fill).
+/// Custo preenchido pela construtora no portal — vai para o BaseMaterial.
 model PortalFill {
-  materialId     String @map("material_id")
-  mat            String
-  mo             String
-  comment        String
-  organizationId String @map("organization_id")
+  EnterpriseId   Int
+  BaseMaterialId Int
+  Mat            String
+  Mo             String
+  Comment        String
 
-  @@id([organizationId, materialId])
-  @@map("portal_fills")
+  Enterprise   Enterprise   @relation(fields: [EnterpriseId], references: [Id], onDelete: Cascade)
+  BaseMaterial BaseMaterial @relation(fields: [BaseMaterialId], references: [Id], onDelete: Cascade)
+
+  @@id([EnterpriseId, BaseMaterialId])
+}
+
+// ─── Torres / grupos de unidades ────────────────────────────────────────
+
+model Tower {
+  Id           Int    @id @default(autoincrement())
+  EnterpriseId Int
+  Name         String
+  Position     Int    @default(0)
+
+  Enterprise Enterprise  @relation(fields: [EnterpriseId], references: [Id], onDelete: Cascade)
+  UnitGroups UnitGroup[]
+
+  @@index([EnterpriseId])
+}
+
+model UnitGroup {
+  Id           Int      @id @default(autoincrement())
+  EnterpriseId Int
+  TowerId      Int?
+  Name         String
+  UnitNumbers  String[] @default([])
+
+  Enterprise Enterprise @relation(fields: [EnterpriseId], references: [Id], onDelete: Cascade)
+  Tower      Tower?     @relation(fields: [TowerId], references: [Id], onDelete: SetNull)
+
+  @@index([EnterpriseId])
+  @@index([TowerId])
 }

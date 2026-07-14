@@ -2,13 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import { createSeed } from "@/lib/data/seed";
 import { TAX_COLUMNS_DEFAULT } from "@/shared/constants/budget";
+import type { Componente, MaterialOption } from "@/shared/types/domain";
 
 import {
   ambTotal,
   buildScopeRefs,
   calcAnyRow,
   effMaterial,
-  isBasePending,
+  isOptionPending,
   type BudgetDeps,
 } from "./calc";
 
@@ -19,63 +20,83 @@ const deps = (extra?: Partial<BudgetDeps>): BudgetDeps => ({
   cols: TAX_COLUMNS_DEFAULT,
   overrides: {},
   baseCosts: {},
-  pendingSet: new Set(seed.pendingItems),
   ...extra,
 });
 
-const t1 = seed.tipologias.find((t) => t.id === "t1")!;
-const t3 = seed.tipologias.find((t) => t.id === "t3")!;
+const t1 = seed.tipologias[0]!;
+const t3 = seed.tipologias[2]!;
+const salaPisoT1 = t1.ambientes[0]!.componentes[0]!;
+const salaPisoT3 = t3.ambientes[0]!.componentes[0]!;
 
-describe("effMaterial / isBasePending", () => {
+const piso004 = seed.materiais.find((m) => m.codigo === "MC-NAT-CA")!; // pendente (custoMat 0)
+
+/** Opção de um componente pelo código do BaseMaterial (material ou kit) referenciado. */
+function optByCodigo(comp: Componente, codigo: string): MaterialOption {
+  const base =
+    seed.materiais.find((m) => m.codigo === codigo) ?? seed.kits.find((k) => k.codigo === codigo);
+  const opt = comp.options.find((o) => o.baseId === base?.id);
+  if (!opt) throw new Error(`opção ${codigo} não encontrada`);
+  return opt;
+}
+
+describe("effMaterial / isOptionPending", () => {
   it("custo base preenchido sobrepõe o catálogo e tira a pendência", () => {
-    const mat = seed.materiais.find((m) => m.id === "piso-004")!;
-    const base = { "piso-004": { mat: "310", mo: "50" } };
-    const eff = effMaterial(base, "piso-004", mat);
+    const base = { [piso004.id]: { mat: "310", mo: "50" } };
+    const eff = effMaterial(base, piso004);
     expect(eff.custoMat).toBe(310);
     expect(eff.custoMO).toBe(50);
-    const pend = new Set(["c3-1-1-piso-004"]);
-    expect(isBasePending(pend, {}, "c3-1-1-piso-004", "piso-004")).toBe(true);
-    expect(isBasePending(pend, base, "c3-1-1-piso-004", "piso-004")).toBe(false);
+
+    const optPiso004 = optByCodigo(salaPisoT1, "MC-NAT-CA");
+    expect(isOptionPending(deps(), optPiso004)).toBe(true); // custoMat 0 no catálogo
+    expect(isOptionPending(deps({ baseCosts: base }), optPiso004)).toBe(false); // custo base cobre
+
+    const optPiso002 = optByCodigo(salaPisoT1, "PP-6060-BI");
+    expect(isOptionPending(deps(), optPiso002)).toBe(false); // material precificado
   });
 });
 
 describe("calcAnyRow", () => {
   it("material → BudgetRowResult (T-M1 do motor)", () => {
-    const comp = t1.ambientes[0]!.componentes[0]!; // c1-1-1
-    const r = calcAnyRow(deps(), comp, "piso-002", "c1-1-1-piso-002");
+    const opt = optByCodigo(salaPisoT1, "PP-6060-BI"); // upgrade piso-002
+    const r = calcAnyRow(deps(), salaPisoT1, opt);
     expect(r?.kind).toBe("material");
     if (r?.kind === "material") expect(r.result.total).toBeCloseTo(1407.4574, 4);
   });
 
   it("kit → KitRowResult com pendência de sub-item", () => {
-    const comp = t3.ambientes[0]!.componentes[0]!; // c3-1-1 com kit-piso-barcelona
-    const r = calcAnyRow(deps(), comp, "kit-piso-barcelona", "c3-1-1-kit-piso-barcelona");
+    const opt = optByCodigo(salaPisoT3, "KIT-PB"); // kit Piso Barcelona, kitQtds [36.8, 3, 3.68]
+    const r = calcAnyRow(deps(), salaPisoT3, opt);
     expect(r?.kind).toBe("kit");
-    if (r?.kind === "kit") expect(r.result.anyPending).toBe(true);
+    if (r?.kind === "kit") {
+      // 208*36.8 + 115*3 + 0*3.68 (rt-bcn pendente)
+      expect(r.result.kitMaterialTotal).toBeCloseTo(7999.4, 10);
+      expect(r.result.anyPending).toBe(true);
+    }
   });
 });
 
 describe("ambTotal", () => {
-  it("soma os upgrades não pendentes do ambiente", () => {
-    const amb = t1.ambientes[0]!; // Sala/Living: c1-1-1 (3 upgrades) + c1-1-2 (1 upgrade)
-    expect(ambTotal(deps(), amb)).toBeGreaterThan(0);
+  it("soma só os upgrades não pendentes do ambiente (Sala t1)", () => {
+    // Sala t1: Piso (piso-002 ok; piso-003/004 e kit pendentes) + Rodapé (rod-002 ok)
+    // piso-002 total = 1407.4574 ; rod-002 total = 449.82
+    expect(ambTotal(deps(), t1.ambientes[0]!)).toBeCloseTo(1407.4574 + 449.82, 4);
   });
 
   it("linha pendente fica fora do total e volta ao preencher custo base", () => {
-    const amb = t3.ambientes[0]!; // c3-1-1: piso-002/003/004 + kit (004 e sub do kit pendentes)
+    const amb = t3.ambientes[0]!; // Sala t3: piso-004 pendente entra ao ganhar custo base
     const semPendentes = ambTotal(deps(), amb);
     const comCusto = ambTotal(
-      deps({ baseCosts: { "piso-004": { mat: "310", mo: "50" } } }),
+      deps({ baseCosts: { [piso004.id]: { mat: "310", mo: "50" } } }),
       amb
     );
-    expect(comCusto).toBeGreaterThan(semPendentes); // piso-004 entrou no total
+    expect(comCusto).toBeGreaterThan(semPendentes);
   });
 });
 
 describe("buildScopeRefs", () => {
   it("expõe refs fixas + colunas à esquerda (não as à direita)", () => {
-    const comp = t1.ambientes[0]!.componentes[0]!;
-    const r = calcAnyRow(deps(), comp, "piso-002", "c1-1-1-piso-002");
+    const opt = optByCodigo(salaPisoT1, "PP-6060-BI");
+    const r = calcAnyRow(deps(), salaPisoT1, opt);
     if (r?.kind !== "material") throw new Error("esperava material");
     const { scope, refs } = buildScopeRefs(TAX_COLUMNS_DEFAULT, r.result, 2);
     expect(scope.custo_troca).toBe(35.5);

@@ -41,7 +41,6 @@ export function useSubmitPortalFills(token: string, senha: string | null) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["portal", token] });
       void queryClient.invalidateQueries({ queryKey: queryKeys.materiais });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.pendingItems });
       void queryClient.invalidateQueries({ queryKey: queryKeys.projects });
     },
   });

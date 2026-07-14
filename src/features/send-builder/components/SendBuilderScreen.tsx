@@ -19,10 +19,10 @@ import { useProject, useUpdateProject } from "@/lib/hooks/useProjects";
 import { useTipologias } from "@/lib/hooks/useTipologias";
 import type { FillLink, Tipologia } from "@/shared/types/domain";
 
-/** Itens preenchíveis (padrão + upgrades por componente). */
+/** Itens preenchíveis (opções por componente). */
 function itemCount(tip: Tipologia): number {
   return tip.ambientes.reduce(
-    (a, amb) => a + amb.componentes.reduce((c, comp) => c + comp.upgrades.length + 1, 0),
+    (a, amb) => a + amb.componentes.reduce((c, comp) => c + comp.options.length, 0),
     0
   );
 }
@@ -73,12 +73,13 @@ export function SendBuilderScreen() {
 
   const totalItems = tipologias.reduce((total, tip) => total + itemCount(tip), 0);
   const uniqueMaterials = React.useMemo(() => {
-    const ids = new Set<string>();
+    const ids = new Set<number>();
     for (const tip of tipologias) {
       for (const amb of tip.ambientes) {
         for (const comp of amb.componentes) {
-          if (comp.padrao) ids.add(comp.padrao);
-          for (const u of comp.upgrades) ids.add(u);
+          for (const opt of comp.options) {
+            if (!opt.isKit) ids.add(opt.baseId);
+          }
         }
       }
     }

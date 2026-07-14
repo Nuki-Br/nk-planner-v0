@@ -8,8 +8,8 @@ import { ActBtn } from "./primitives";
 
 interface BlueprintRailProps {
   blueprints: Tipologia[];
-  selId: string;
-  onSelect: (id: string) => void;
+  selId: number;
+  onSelect: (id: number) => void;
   onNew: () => void;
   onEdit: (tip: Tipologia) => void;
   onDuplicate: (tip: Tipologia) => void;
@@ -18,7 +18,10 @@ interface BlueprintRailProps {
 
 const comps = (t: Tipologia) => t.ambientes.reduce((a, b) => a + b.componentes.length, 0);
 const configured = (t: Tipologia) =>
-  t.ambientes.reduce((a, b) => a + b.componentes.filter((c) => c.upgrades.length > 0).length, 0);
+  t.ambientes.reduce(
+    (a, b) => a + b.componentes.filter((c) => c.options.some((o) => !o.isDefault)).length,
+    0
+  );
 
 /** Rail esquerdo do canvas: seletor visual + CRUD de tipologias. */
 export function BlueprintRail({

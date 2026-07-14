@@ -1,38 +1,36 @@
-// Resolvedores de id de material/kit — funções puras sobre listas (o
-// protótipo fechava sobre globals; aqui o chamador passa os dados, que na
-// prática vêm dos hooks React Query). Load-bearing: a detecção de kit por
-// prefixo de id é usada em toda a UI.
-import type { Kit, Material } from "@/shared/types/domain";
+// Resolvedores de catálogo — funções puras sobre listas (os dados vêm dos
+// hooks React Query). No modelo normalizado, kit-ness é um atributo da entidade
+// (Kit vs Material) / da opção, não mais um prefixo de id.
+import type { Kit, Material, MaterialOption } from "@/shared/types/domain";
 
 export type Entity = (Material & { isKit: false }) | (Kit & { isKit: true });
 
-/** Um id de kit sempre começa com "kit-". */
-export function isKitId(id: string): boolean {
-  return id.startsWith("kit-");
-}
-
 export function getMaterial(
   materiais: readonly Material[],
-  id: string | null | undefined
+  id: number | null | undefined
 ): Material | undefined {
   if (id == null) return undefined;
   return materiais.find((m) => m.id === id);
 }
 
-export function getKit(kits: readonly Kit[], id: string): Kit | undefined {
+export function getKit(
+  kits: readonly Kit[],
+  id: number | null | undefined
+): Kit | undefined {
+  if (id == null) return undefined;
   return kits.find((k) => k.id === id);
 }
 
-/** Resolve qualquer id para sua entidade, anotando se é kit. */
-export function getEntity(
+/** Resolve uma opção de material (baseId + isKit) para sua entidade de catálogo. */
+export function getOptionEntity(
   materiais: readonly Material[],
   kits: readonly Kit[],
-  id: string
+  opt: Pick<MaterialOption, "baseId" | "isKit">
 ): Entity | null {
-  if (isKitId(id)) {
-    const kit = getKit(kits, id);
+  if (opt.isKit) {
+    const kit = getKit(kits, opt.baseId);
     return kit ? { ...kit, isKit: true } : null;
   }
-  const mat = getMaterial(materiais, id);
+  const mat = getMaterial(materiais, opt.baseId);
   return mat ? { ...mat, isKit: false } : null;
 }
