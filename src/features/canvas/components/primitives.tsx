@@ -7,7 +7,7 @@ import { getMaterial } from "@/lib/data/entities";
 import { cn } from "@/lib/utils";
 import type { Material } from "@/shared/types/domain";
 
-import { swatchStyle } from "../swatch";
+import { MaterialSwatch } from "./MaterialSwatch";
 
 /** Ícones locais do canvas (hexágono de kit etc.). */
 export function CvIcon({
@@ -217,9 +217,10 @@ export function MenuRow({
           <CvIcon name="hex" size={14} />
         </span>
       ) : (
-        <span
-          className="h-6 w-6 shrink-0 rounded-[7px] border border-neutral-gray-5"
-          style={swatchStyle(mat)}
+        <MaterialSwatch
+          mat={mat}
+          size={24}
+          className="h-6 w-6 rounded-[7px] border border-neutral-gray-5"
         />
       )}
       <span className="min-w-0 flex-1">

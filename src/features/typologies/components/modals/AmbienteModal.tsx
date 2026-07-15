@@ -2,9 +2,8 @@
 
 import React from "react";
 
-import { Button, Icon, Input, Modal } from "@/components/ui";
+import { Button, Input, Modal } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import type { AmbienteImagem } from "@/shared/types/domain";
 
 import { AMB_ICON_KEYS, guessAmbIcon } from "../../ambIcons";
 import { AmbIcon } from "../AmbIcon";
@@ -12,7 +11,6 @@ import { AmbIcon } from "../AmbIcon";
 export interface AmbienteFormValue {
   nome: string;
   icon: string;
-  imagem: AmbienteImagem | null;
 }
 
 interface AmbienteModalProps {
@@ -79,29 +77,21 @@ function IconPickerModal({
   );
 }
 
-// Modal Adicionar/Editar ambiente: ícone (picker de 23), nome* e imagem
-// base. "Local na planta" (BlueprintDrawModal) está ADIADO até haver planta
-// real — o shape RoomShape fica reservado no domínio.
+// Modal Adicionar/Editar ambiente: ícone (picker de 23) e nome*.
+// Sem imagem: no Planner só o Material tem imagem (docs/context/product.md).
+// "Local na planta" (BlueprintDrawModal) está ADIADO até haver planta real — o
+// shape RoomShape fica reservado no domínio.
 export function AmbienteModal({ open, mode, initial, onClose, onSave, saving }: AmbienteModalProps) {
   const [nome, setNome] = React.useState("");
   const [icon, setIcon] = React.useState("apps");
-  const [imagem, setImagem] = React.useState<AmbienteImagem | null>(null);
   const [showIcons, setShowIcons] = React.useState(false);
-  const fileRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
     if (!open) return;
     setNome(initial?.nome ?? "");
     setIcon(initial?.icon ?? guessAmbIcon(initial?.nome ?? ""));
-    setImagem(initial?.imagem ?? null);
     setShowIcons(false);
   }, [open, initial]);
-
-  const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (f) setImagem({ name: f.name, url: URL.createObjectURL(f) });
-    e.target.value = "";
-  };
 
   const title = mode === "edit" ? "Editar ambiente" : "Adicionar ambiente";
   const subtitle =
@@ -123,7 +113,7 @@ export function AmbienteModal({ open, mode, initial, onClose, onSave, saving }: 
             <Button
               variant="teal"
               isLoading={saving}
-              onPress={() => onSave({ nome: nome.trim() || "Novo ambiente", icon, imagem })}
+              onPress={() => onSave({ nome: nome.trim() || "Novo ambiente", icon })}
             >
               Salvar
             </Button>
@@ -156,50 +146,6 @@ export function AmbienteModal({ open, mode, initial, onClose, onSave, saving }: 
             onValueChange={setNome}
             placeholder="Digite o nome do ambiente"
           />
-
-          <div className="border-t border-neutral-gray-4 pt-4">
-            <p className="text-[13px] font-bold text-neutral-gray-11">Imagem base</p>
-            <p className="mb-3 mt-0.5 text-xs text-neutral-gray-7">
-              Imagem de referência do ambiente (render ou foto).
-            </p>
-            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
-            {imagem ? (
-              <div className="flex items-center gap-3 rounded-lg border border-neutral-gray-4 p-3">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={imagem.url}
-                  alt="Imagem base"
-                  className="h-[72px] w-[72px] rounded-lg border border-neutral-gray-4 object-cover"
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-[13px] font-semibold text-neutral-gray-11">
-                    {imagem.name}
-                  </p>
-                  <p className="text-xs text-neutral-gray-7">Imagem carregada</p>
-                </div>
-                <div className="flex gap-1.5">
-                  <Button variant="bordered" size="sm" onPress={() => fileRef.current?.click()}>
-                    Substituir
-                  </Button>
-                  <Button variant="ghost" size="sm" icon="trash" onPress={() => setImagem(null)}>
-                    Remover
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => fileRef.current?.click()}
-                className="flex w-full flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-neutral-gray-5 bg-neutral-gray-2 p-[18px]"
-              >
-                <Icon name="upload" size={24} className="text-neutral-gray-7" />
-                <p className="text-[13px] font-semibold text-neutral-gray-9">
-                  Clique para enviar a imagem base
-                </p>
-                <p className="text-[11px] text-neutral-gray-6">PNG, JPG ou SVG até 10MB</p>
-              </button>
-            )}
-          </div>
         </div>
       </Modal>
 

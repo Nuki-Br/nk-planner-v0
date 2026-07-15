@@ -12,7 +12,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "dotenv -e .env.local -- prisma migrate dev",
     "db:seed": "dotenv -e .env.local -- tsx prisma/seed.ts",
-    "db:onboard": "dotenv -e .env.local -- tsx prisma/onboard.ts"
+    "db:onboard": "dotenv -e .env.local -- tsx prisma/onboard.ts",
+    "storage:bootstrap": "dotenv -e .env.local -- tsx prisma/storage-bootstrap.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

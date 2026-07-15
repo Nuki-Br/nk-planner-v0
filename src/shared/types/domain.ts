@@ -39,6 +39,12 @@ export interface Material {
   custoMat: number;
   /** Custo de mão de obra (R$/unidade; 0 = pendente). */
   custoMO: number;
+  /**
+   * Imagem do material (BaseMaterial.ImagePreviewUrl / MediaFileId).
+   * Opcional: MaterialInput = Omit<Material,"id"> e o import de CSV usa esse
+   * mesmo tipo — exigir imagem quebraria a importação em lote.
+   */
+  imagem?: ImagemVinculada | null;
 }
 
 /** Kit do catálogo (BaseMaterial Type="kit"); custo = soma dos sub-itens. */
@@ -102,12 +108,24 @@ export type RoomShape =
   | { type: "rect"; x: number; y: number; w: number; h: number }
   | { type: "poly"; pts: [number, number][] };
 
-export interface AmbienteImagem {
+/** Imagem de uma entidade, vinda do media center (ou legada). */
+export interface ImagemVinculada {
   name: string;
   url: string;
+  /**
+   * MediaFile vinculado. Ausente = URL legada (linha antiga, gravada antes do
+   * media center). Opcional de propósito: o store resolve os dois casos via
+   * resolveMediaUrl.
+   */
+  mediaFileId?: number;
 }
 
-/** Ambiente (Room) resolvido para uma planta (via BlueprintRoom). */
+/**
+ * Ambiente (Room) resolvido para uma planta (via BlueprintRoom).
+ *
+ * Sem imagem: no Planner a única entidade com imagem é o Material. Imagem de
+ * ambiente e de planta é assunto do Personaliza (ver docs/context/product.md).
+ */
 export interface Ambiente {
   /** Room id (compartilhado entre plantas). */
   id: number;
@@ -116,7 +134,6 @@ export interface Ambiente {
   nome: string;
   componentes: Componente[];
   icon?: string;
-  imagem?: AmbienteImagem | null;
   local?: RoomShape | null;
 }
 

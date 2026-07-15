@@ -20,10 +20,12 @@ import { randomUUID } from "crypto";
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { assertMediaFileInOrg } from "@/lib/server/media";
+import { resolveMediaUrl } from "@/lib/server/mediaRules";
 import { TAX_COLUMNS_DEFAULT } from "@/shared/constants/budget";
 import type {
   Ambiente,
-  AmbienteImagem,
+  ImagemVinculada,
   BudgetColumn,
   BudgetVersion,
   Categoria,
@@ -77,6 +79,54 @@ function imageName(url: string): string {
 
 function isFkRestrict(e: unknown): boolean {
   return e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2003";
+}
+
+// ─── Imagem de entidade (media center) ──────────────────────────────────
+
+type MediaFileRow = Prisma.MediaFileGetPayload<object>;
+
+/**
+ * Linha (MediaFile + coluna legada) → ImagemVinculada do domínio.
+ *
+ * Só reporta mediaFileId quando o arquivo está ATIVO: se foi excluído, a URL
+ * resolvida é a legada, e devolver o id de um arquivo morto faria o picker
+ * exibir um vínculo que não existe mais.
+ */
+function toImagem(
+  media: MediaFileRow | null,
+  legacyUrl: string | null
+): ImagemVinculada | null {
+  const active = media && media.Status === "Active" ? media : null;
+  const url = resolveMediaUrl(media, legacyUrl);
+  if (!url) return null;
+  return { name: active?.DisplayName ?? imageName(url), url, mediaFileId: active?.Id };
+}
+
+/**
+ * ImagemVinculada → colunas do banco. Três casos, e o terceiro é o que morde:
+ *   - null            → remove os dois
+ *   - com mediaFileId → vincula e zera a legada (substituir descarta a antiga,
+ *     senão excluir a nova ressuscitaria a velha, o que ninguém espera)
+ *   - só url (legada) → PRESERVA a legada. Uma entidade antiga editada devolve
+ *     a imagem sem mediaFileId; zerar aqui apagaria a imagem dela.
+ */
+function imageColumns(
+  imagem: ImagemVinculada | null | undefined
+): { legacyUrl: string | null; mediaFileId: number | null } {
+  if (imagem == null) return { legacyUrl: null, mediaFileId: null };
+  if (imagem.mediaFileId != null) return { legacyUrl: null, mediaFileId: imagem.mediaFileId };
+  return { legacyUrl: imagem.url, mediaFileId: null };
+}
+
+/** Impede vincular um MediaFile de OUTRA organização (CLAUDE.md: toda linha é
+ *  org-scoped). Sem isto, um request forjado leria a URL de arquivo alheio. */
+async function assertImagemInOrg(
+  organizationId: string,
+  imagem: ImagemVinculada | null | undefined
+): Promise<void> {
+  if (imagem?.mediaFileId != null) {
+    await assertMediaFileInOrg(organizationId, imagem.mediaFileId);
+  }
 }
 
 // ─── Empreendimento âncora (single-Enterprise por org no beta) ──────────
@@ -148,7 +198,17 @@ function toProject(row: EnterpriseRow): Project {
   };
 }
 
-type BaseMaterialRow = Prisma.BaseMaterialGetPayload<{ include: { Category: true } }>;
+/** Include reusado por todo caminho que monta um Material.
+ *  `MediaFile` é obrigatório: toMaterial o exige, então esquecê-lo em algum
+ *  caller vira erro de tipo em vez de imagem sumindo em runtime. */
+const BASE_MATERIAL_INCLUDE = {
+  Category: true,
+  MediaFile: true,
+} satisfies Prisma.BaseMaterialInclude;
+type BaseMaterialRow = Prisma.BaseMaterialGetPayload<{ include: typeof BASE_MATERIAL_INCLUDE }>;
+
+// KitItems mapeia para KitItem inline (sem imagem no domínio), então o
+// ChildMaterial aqui não precisa de MediaFile.
 const KIT_INCLUDE = {
   Category: true,
   KitItems: { include: { ChildMaterial: { include: { Category: true } } } },
@@ -165,6 +225,7 @@ function toMaterial(row: BaseMaterialRow): Material {
     unidade: (row.Unit ?? "und") as Unidade,
     custoMat: fromCents(row.CostMaterialInCents),
     custoMO: fromCents(row.CostLaborInCents),
+    imagem: toImagem(row.MediaFile, row.ImagePreviewUrl),
   };
 }
 
@@ -192,16 +253,17 @@ function toKit(row: KitRow): Kit {
 // Árvore de uma planta (Blueprint) em duas camadas: paleta compartilhada
 // (Room→RoomComponent→Options→BaseMaterial) + overrides por planta
 // (BlueprintRoomComponent + MaterialKitUsage).
+/** Include do Room reusado por todos os caminhos que montam um Ambiente. */
+const ROOM_INCLUDE = {
+  RoomComponents: {
+    include: { Options: { include: { BaseMaterial: true } } },
+  },
+} satisfies Prisma.RoomInclude;
+
 const BLUEPRINT_INCLUDE = {
   BlueprintRooms: {
     include: {
-      Room: {
-        include: {
-          RoomComponents: {
-            include: { Options: { include: { BaseMaterial: true } } },
-          },
-        },
-      },
+      Room: { include: ROOM_INCLUDE },
       Components: { include: { KitUsages: true } },
     },
   },
@@ -248,15 +310,11 @@ function toAmbiente(br: BlueprintRoomRow): Ambiente {
   const componentes = [...br.Room.RoomComponents]
     .sort((a, b) => a.Position - b.Position)
     .map((rc) => toComponente(rc, brcByRc.get(rc.Id)));
-  const imagem: AmbienteImagem | null = br.Room.BaseImageUrl
-    ? { name: imageName(br.Room.BaseImageUrl), url: br.Room.BaseImageUrl }
-    : null;
   return {
     id: br.Room.Id,
     blueprintRoomId: br.Id,
     nome: br.Room.Name,
     icon: br.Room.Icon ?? undefined,
-    imagem,
     local: (br.Polygon as unknown as RoomShape | null) ?? null,
     componentes,
   };
@@ -496,7 +554,7 @@ export type MaterialInput = Omit<Material, "id">;
 export async function listMateriais(organizationId: string): Promise<Material[]> {
   const rows = await prisma.baseMaterial.findMany({
     where: { OrganizationId: organizationId, Type: "single" },
-    include: { Category: true },
+    include: BASE_MATERIAL_INCLUDE,
     orderBy: { Id: "asc" },
   });
   return rows.map(toMaterial);
@@ -507,6 +565,11 @@ async function baseMaterialCreateData(
   input: MaterialInput,
   categoryId: number
 ): Promise<Prisma.BaseMaterialCreateManyInput> {
+  // O guard mora AQUI, não nos callers: createMaterial e createMateriais
+  // convergem nesta função, e a versão anterior guardava só o singular — o
+  // POST /api/materiais com body em array furava o escopo de org.
+  await assertImagemInOrg(organizationId, input.imagem);
+  const { legacyUrl, mediaFileId } = imageColumns(input.imagem);
   return {
     OrganizationId: organizationId,
     CategoryId: categoryId,
@@ -517,6 +580,8 @@ async function baseMaterialCreateData(
     Unit: input.unidade,
     CostMaterialInCents: toCentsOrNull(input.custoMat),
     CostLaborInCents: toCentsOrNull(input.custoMO),
+    ImagePreviewUrl: legacyUrl,
+    MediaFileId: mediaFileId,
   };
 }
 
@@ -524,10 +589,11 @@ export async function createMaterial(
   organizationId: string,
   input: MaterialInput
 ): Promise<Material> {
+  // Sem assertImagemInOrg aqui — baseMaterialCreateData já guarda.
   const categoryId = await resolveCategoryId(organizationId, input.categoria);
   const row = await prisma.baseMaterial.create({
     data: await baseMaterialCreateData(organizationId, input, categoryId),
-    include: { Category: true },
+    include: BASE_MATERIAL_INCLUDE,
   });
   return toMaterial(row);
 }
@@ -544,7 +610,10 @@ export async function createMateriais(
   const data = await Promise.all(
     inputs.map((input) => baseMaterialCreateData(organizationId, input, catByName.get(input.categoria)!))
   );
-  const rows = await prisma.baseMaterial.createManyAndReturn({ data, include: { Category: true } });
+  const rows = await prisma.baseMaterial.createManyAndReturn({
+    data,
+    include: BASE_MATERIAL_INCLUDE,
+  });
   return rows.map(toMaterial);
 }
 
@@ -558,6 +627,7 @@ export async function updateMaterial(
     select: { Id: true },
   });
   if (!exists) throw new Error("Material não encontrado.");
+  await assertImagemInOrg(organizationId, patch.imagem);
   const data: Prisma.BaseMaterialUpdateInput = {};
   if (patch.codigo !== undefined) data.ReferenceCode = patch.codigo;
   if (patch.nome !== undefined) data.Name = patch.nome;
@@ -568,10 +638,16 @@ export async function updateMaterial(
   if (patch.categoria !== undefined) {
     data.Category = { connect: { Id: await resolveCategoryId(organizationId, patch.categoria) } };
   }
+  if (patch.imagem !== undefined) {
+    const { legacyUrl, mediaFileId } = imageColumns(patch.imagem);
+    data.ImagePreviewUrl = legacyUrl;
+    // Input "checked" (Category usa connect), então a FK também vai por relação.
+    data.MediaFile = mediaFileId === null ? { disconnect: true } : { connect: { Id: mediaFileId } };
+  }
   const row = await prisma.baseMaterial.update({
     where: { Id: id },
     data,
-    include: { Category: true },
+    include: BASE_MATERIAL_INCLUDE,
   });
   return toMaterial(row);
 }
@@ -795,7 +871,6 @@ async function cloneBlueprintRoomInto(
       EnterpriseId: enterpriseId,
       Name: br.Room.Name,
       Icon: br.Room.Icon,
-      BaseImageUrl: br.Room.BaseImageUrl,
     },
     select: { Id: true },
   });
@@ -805,7 +880,6 @@ async function cloneBlueprintRoomInto(
       RoomId: room.Id,
       Position: position,
       Polygon: br.Polygon ?? Prisma.JsonNull,
-      DrawnImageUrl: br.DrawnImageUrl,
     },
     select: { Id: true },
   });
@@ -869,8 +943,7 @@ async function cloneBlueprintRoomInto(
 
 // ─── Ambientes (Room + BlueprintRoom) ───────────────────────────────────
 
-export type AmbienteInput = Pick<Ambiente, "nome"> &
-  Partial<Pick<Ambiente, "icon" | "imagem" | "local">>;
+export type AmbienteInput = Pick<Ambiente, "nome"> & Partial<Pick<Ambiente, "icon" | "local">>;
 
 export async function createAmbiente(
   organizationId: string,
@@ -887,7 +960,6 @@ export async function createAmbiente(
       EnterpriseId: enterpriseId,
       Name: input.nome,
       Icon: input.icon ?? null,
-      BaseImageUrl: input.imagem?.url ?? null,
     },
     select: { Id: true },
   });
@@ -899,7 +971,7 @@ export async function createAmbiente(
       Polygon: json(input.local),
     },
     include: {
-      Room: { include: { RoomComponents: { include: { Options: { include: { BaseMaterial: true } } } } } },
+      Room: { include: ROOM_INCLUDE },
       Components: { include: { KitUsages: true } },
     },
   });
@@ -913,11 +985,10 @@ export async function updateAmbiente(
   patch: Partial<AmbienteInput>
 ): Promise<Ambiente> {
   const ctx = await findBlueprintRoomCtx(organizationId, tipologiaId, blueprintRoomId);
-  // nome/icon/imagem são do Room (compartilhado); local é por planta (BlueprintRoom).
-  const roomData: Prisma.RoomUpdateInput = {};
+  // nome/icon são do Room (compartilhado); local é por planta (BlueprintRoom).
+  const roomData: Prisma.RoomUncheckedUpdateInput = {};
   if (patch.nome !== undefined) roomData.Name = patch.nome;
   if (patch.icon !== undefined) roomData.Icon = patch.icon ?? null;
-  if (patch.imagem !== undefined) roomData.BaseImageUrl = patch.imagem?.url ?? null;
   if (Object.keys(roomData).length > 0) {
     await prisma.room.update({ where: { Id: ctx.roomId }, data: roomData });
   }
@@ -930,7 +1001,7 @@ export async function updateAmbiente(
   const br = await prisma.blueprintRoom.findUniqueOrThrow({
     where: { Id: blueprintRoomId },
     include: {
-      Room: { include: { RoomComponents: { include: { Options: { include: { BaseMaterial: true } } } } } },
+      Room: { include: ROOM_INCLUDE },
       Components: { include: { KitUsages: true } },
     },
   });
@@ -959,7 +1030,7 @@ export async function cloneAmbiente(
   const src = await prisma.blueprintRoom.findUniqueOrThrow({
     where: { Id: blueprintRoomId },
     include: {
-      Room: { include: { RoomComponents: { include: { Options: { include: { BaseMaterial: true } } } } } },
+      Room: { include: ROOM_INCLUDE },
       Components: { include: { KitUsages: true } },
     },
   });
@@ -976,7 +1047,7 @@ export async function cloneAmbiente(
     where: { BlueprintId: tipologiaId, Room: { Name: clonedName } },
     orderBy: { Id: "desc" },
     include: {
-      Room: { include: { RoomComponents: { include: { Options: { include: { BaseMaterial: true } } } } } },
+      Room: { include: ROOM_INCLUDE },
       Components: { include: { KitUsages: true } },
     },
   });
@@ -1369,7 +1440,7 @@ export async function linkAmbiente(
   const created = await prisma.blueprintRoom.findUniqueOrThrow({
     where: { Id: newBr.Id },
     include: {
-      Room: { include: { RoomComponents: { include: { Options: { include: { BaseMaterial: true } } } } } },
+      Room: { include: ROOM_INCLUDE },
       Components: { include: { KitUsages: true } },
     },
   });

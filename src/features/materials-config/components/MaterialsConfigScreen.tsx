@@ -9,10 +9,12 @@ import {
   EmptyState,
   Icon,
   LoadingState,
+  MaterialThumb,
   Modal,
   PageHeader,
   StatusBadge,
 } from "@/components/ui";
+import { MaterialImageModal } from "@/features/catalog";
 import { getMaterial, getOptionEntity } from "@/lib/data/entities";
 import { useKits } from "@/lib/hooks/useKits";
 import { useMateriais } from "@/lib/hooks/useMateriais";
@@ -80,6 +82,7 @@ export function MaterialsConfigScreen({
   const [modal, setModal] = React.useState<"padrao" | "upgrade" | null>(null);
   const [expandedUpg, setExpandedUpg] = React.useState<Set<number>>(new Set());
   const [removeTarget, setRemoveTarget] = React.useState<number | null>(null);
+  const [imageTarget, setImageTarget] = React.useState<Material | null>(null);
   const seededExpandRef = React.useRef(false);
 
   const found = React.useMemo(() => {
@@ -217,7 +220,14 @@ export function MaterialsConfigScreen({
         </div>
         {padrao && !padrao.isKit && (
           <div className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-4 rounded-lg border border-primary-7 bg-primary-1 px-4 py-3">
-            <div className="h-2.5 w-2.5 rounded-full bg-primary-7" />
+            <button
+              type="button"
+              title="Editar imagem"
+              onClick={() => setImageTarget(padrao)}
+              className="rounded-lg transition-opacity hover:opacity-80"
+            >
+              <MaterialThumb url={padrao.imagem?.url} alt={padrao.nome} size={40} />
+            </button>
             <div>
               <p className="text-[13px] font-bold text-primary-8">{padrao.nome}</p>
               <p className="mt-0.5 text-[11px] text-primary-7">
@@ -369,8 +379,22 @@ export function MaterialsConfigScreen({
                 return (
                   <tr key={opt.id} className="border-b border-neutral-gray-4 last:border-b-0">
                     <td className="px-3 py-2.5">
-                      <p className="text-[13px] font-semibold text-neutral-gray-11">{ent.nome}</p>
-                      <code className="text-[10px] text-neutral-gray-6">{ent.codigo}</code>
+                      <div className="flex items-center gap-2.5">
+                        <button
+                          type="button"
+                          title="Editar imagem"
+                          onClick={() => setImageTarget(ent)}
+                          className="rounded-lg transition-opacity hover:opacity-80"
+                        >
+                          <MaterialThumb url={ent.imagem?.url} alt={ent.nome} size={36} />
+                        </button>
+                        <div className="min-w-0">
+                          <p className="text-[13px] font-semibold text-neutral-gray-11">
+                            {ent.nome}
+                          </p>
+                          <code className="text-[10px] text-neutral-gray-6">{ent.codigo}</code>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-3 py-2.5 text-[13px] text-neutral-gray-8">
                       {ent.fabricante}
@@ -458,6 +482,8 @@ export function MaterialsConfigScreen({
           das opções de upgrade deste componente?
         </p>
       </Modal>
+
+      <MaterialImageModal material={imageTarget} onClose={() => setImageTarget(null)} />
     </div>
   );
 }

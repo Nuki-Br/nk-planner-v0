@@ -200,7 +200,6 @@ async function main(): Promise<void> {
             EnterpriseId: activeId,
             Name: amb.nome,
             Icon: amb.icon ?? null,
-            BaseImageUrl: amb.imagem?.url ?? null,
           },
           select: { Id: true },
         });

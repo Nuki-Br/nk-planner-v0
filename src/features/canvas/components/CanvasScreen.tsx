@@ -26,13 +26,14 @@ import {
 } from "@/lib/hooks/useTipologiaMutations";
 import { useTipologias } from "@/lib/hooks/useTipologias";
 import { cn } from "@/lib/utils";
+import { MaterialImageModal } from "@/features/catalog";
 import { guessAmbIcon } from "@/features/typologies/ambIcons";
 import { AmbienteModal, type AmbienteFormValue } from "@/features/typologies/components/modals/AmbienteModal";
 import {
   EditComponentModal,
   type ComponentEditValue,
 } from "@/features/typologies/components/modals/EditComponentModal";
-import type { Ambiente, Componente, Tipologia, Unidade } from "@/shared/types/domain";
+import type { Ambiente, Componente, Material, Tipologia, Unidade } from "@/shared/types/domain";
 
 import { useCanvasView } from "../useCanvasView";
 import { BlueprintRail } from "./BlueprintRail";
@@ -97,6 +98,7 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
   const [compModal, setCompModal] = React.useState<{ mode: "add" | "edit"; ambId: number; comp: Componente | null } | null>(null);
   const [tipModal, setTipModal] = React.useState<{ mode: "add" | "edit"; tip: Tipologia | null } | null>(null);
   const [confirm, setConfirm] = React.useState<ConfirmState | null>(null);
+  const [imageTarget, setImageTarget] = React.useState<Material | null>(null);
 
   // Mutations (Fase 5 + replaceUpgrade)
   const createTip = useCreateTipologia();
@@ -149,6 +151,7 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
 
   // ── Ações dos nós ──
   const act: CanvasActions = {
+    editImage: (mat) => setImageTarget(mat),
     editAmb: (amb) => setAmbModal({ mode: "edit", amb }),
     addAmb: () => setAmbModal({ mode: "add", amb: null }),
     cloneAmb: (amb) => cloneAmb.mutate({ tipologiaId: tipId, ambienteId: amb.blueprintRoomId }),
@@ -226,13 +229,13 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
         {
           tipologiaId: tipId,
           ambienteId: ambModal.amb.blueprintRoomId,
-          patch: { nome: value.nome, icon: value.icon, imagem: value.imagem },
+          patch: { nome: value.nome, icon: value.icon },
         },
         { onSuccess: () => setAmbModal(null) }
       );
     } else {
       createAmb.mutate(
-        { tipologiaId: tipId, input: { nome: value.nome, icon: value.icon, imagem: value.imagem } },
+        { tipologiaId: tipId, input: { nome: value.nome, icon: value.icon } },
         { onSuccess: () => setAmbModal(null) }
       );
     }
@@ -450,7 +453,6 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
             ? {
                 nome: ambModal.amb.nome,
                 icon: iconFor(ambModal.amb),
-                imagem: ambModal.amb.imagem ?? null,
               }
             : null
         }
@@ -503,6 +505,8 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
       >
         <p className="text-[13px] leading-relaxed text-neutral-gray-9">{confirm?.body}</p>
       </Modal>
+
+      <MaterialImageModal material={imageTarget} onClose={() => setImageTarget(null)} />
     </div>
   );
 }

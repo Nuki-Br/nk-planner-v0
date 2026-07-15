@@ -153,8 +153,7 @@ export async function duplicateTipologia(id: number): Promise<Tipologia> {
 
 // ─── Ambientes (Room + BlueprintRoom; ambienteId = blueprintRoomId) ─────
 
-export type AmbienteInput = Pick<Ambiente, "nome"> &
-  Partial<Pick<Ambiente, "icon" | "imagem" | "local">>;
+export type AmbienteInput = Pick<Ambiente, "nome"> & Partial<Pick<Ambiente, "icon" | "local">>;
 
 export async function createAmbiente(
   tipologiaId: number,

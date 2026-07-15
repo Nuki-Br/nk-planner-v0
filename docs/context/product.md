@@ -30,12 +30,18 @@ PUBLICAÇÃO    → Publicar → alimenta a fase 02
 ### Conceitos-chave do domínio
 - **Empreendimento (Project)** — torres, taxas globais, colunas de preço, status.
 - **Grupo de unidades (UnitGroup)** — números de apartamentos compatíveis, por torre; vinculado a tipologias.
-- **Tipologia (Blueprint)** — variação de planta: ambientes, características, imagem da planta.
-- **Ambiente (Room)** — ícone, imagem base, local na planta; pode ser compartilhado entre tipologias.
+- **Tipologia (Blueprint)** — variação de planta: ambientes, características.
+- **Ambiente (Room)** — ícone, local na planta; pode ser compartilhado entre tipologias.
 - **Componente (Component)** — unidade, quantidade, tolerância RT; material/kit padrão + upgrades; flag fantasma.
-- **Material** / **Kit** (kit = soma de materiais avulsos; quantitativos por tipologia).
+- **Material** / **Kit** (kit = soma de materiais avulsos; quantitativos por tipologia) — o material
+  carrega **imagem** (foto/render do acabamento), vinda do media center.
 - **Orçamento por tipologia** — colunas configuráveis com fórmulas livres; recálculo em tempo real no cliente.
 - **Versão do orçamento (BudgetVersion)**, **Comentário**, **Post-it (CanvasNote)**, **MediaAsset**.
 
 ### Fora de escopo (v1 do produto)
 Integração com ERPs · aprovação multinível · render 3D · comparação multi-fornecedor · módulo de obra.
+
+**Imagem de ambiente e de planta é do Personaliza, não do Planner** (confirmado em 2026-07-15).
+No Planner a única imagem é a do material. As colunas `Room.BaseImageUrl`,
+`Blueprint.ImageUrl` e `BlueprintRoom.DrawnImageUrl` existem no schema por
+alinhamento à API de customização, mas não são superfície deste módulo.
