@@ -41,6 +41,9 @@ model Organization {
   enterprises   Enterprise[]
   baseMaterials BaseMaterial[]
   categories    MaterialCategory[]
+  mediaFiles    MediaFile[]
+  mediaFolders  MediaFolder[]
+  storageUsage  StorageUsage?
 
   @@map("organizations")
 }
@@ -100,8 +103,8 @@ model Enterprise {
   DeadlineLabel    String?
   PublishedAtLabel String?
 
-  TotalItems  Int   @default(0)
-  FilledItems Int   @default(0)
+  TotalItems  Int @default(0)
+  FilledItems Int @default(0)
 
   CreatedAt DateTime @default(now()) @db.Timestamptz()
   UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
@@ -132,7 +135,6 @@ model Blueprint {
   UnitCount    Int             @default(0) // unidades
   Status       BlueprintStatus @default(incompleta)
   Position     Int             @default(0) // ordem
-  ImageUrl     String?
 
   CreatedAt DateTime @default(now()) @db.Timestamptz()
   UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
@@ -150,7 +152,6 @@ model Room {
   EnterpriseId Int
   Name         String
   Icon         String?
-  BaseImageUrl String?
 
   CreatedAt DateTime @default(now()) @db.Timestamptz()
   UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
@@ -166,12 +167,11 @@ model Room {
 // ─── BlueprintRoom (era AmbienteShared; M:N real + posição por planta) ──
 
 model BlueprintRoom {
-  Id            Int     @id @default(autoincrement())
-  BlueprintId   Int
-  RoomId        Int
-  Position      Int     @default(0)
-  Polygon       Json? // RoomShape (rect/poly) — local na planta
-  DrawnImageUrl String?
+  Id          Int   @id @default(autoincrement())
+  BlueprintId Int
+  RoomId      Int
+  Position    Int   @default(0)
+  Polygon     Json? // RoomShape (rect/poly) — local na planta
 
   Blueprint  Blueprint                @relation(fields: [BlueprintId], references: [Id], onDelete: Cascade)
   Room       Room                     @relation(fields: [RoomId], references: [Id], onDelete: Cascade)
@@ -266,13 +266,16 @@ model BaseMaterial {
   /// Custo "preenche 1x". NULL = pendente (sem custo).
   CostMaterialInCents Int? // custoMat (centavos)
   CostLaborInCents    Int? // custoMO (centavos)
+  /// URL legada — fallback quando MediaFileId é null (ver resolveMediaUrl).
   ImagePreviewUrl     String?
+  MediaFileId         Int?
 
   CreatedAt DateTime @default(now()) @db.Timestamptz()
   UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
 
   Organization Organization      @relation(fields: [OrganizationId], references: [id], onDelete: Cascade)
   Category     MaterialCategory? @relation(fields: [CategoryId], references: [Id], onDelete: SetNull)
+  MediaFile    MediaFile?        @relation("BaseMaterialPreviewMedia", fields: [MediaFileId], references: [Id], onDelete: SetNull)
   Options      Material[]
   KitItems     MaterialKitItem[] @relation("KitParent")
   ParentKits   MaterialKitItem[] @relation("KitChild")
@@ -281,6 +284,7 @@ model BaseMaterial {
   @@index([OrganizationId])
   @@index([OrganizationId, Type])
   @@index([OrganizationId, CategoryId])
+  @@index([MediaFileId])
 }
 
 model MaterialCategory {
@@ -435,4 +439,111 @@ model UnitGroup {
 
   @@index([EnterpriseId])
   @@index([TowerId])
+}
+
+// ─── Media Center ───────────────────────────────────────────────────────
+//
+// Biblioteca de mídia por organização, espelhando o contrato do media center
+// da nk-api-customization (docs/media-center-frontend-integration.md) para que
+// o front porte 1:1 e uma eventual reintegração seja troca de driver, não
+// reescrita. Divergências deliberadas do contrato:
+//   - OrganizationId é String (uuid): o planner tem Organization própria.
+//   - Storage é Supabase (bucket público), não Azure Blob + SAS.
+//   - PublicOptimizedUrl existe mas fica SEMPRE null no v0 (sem sharp; o
+//     next/image já otimiza o grid). O front faz `optimized ?? public`.
+//   - Sem coluna de render em BaseMaterial → FileUsagesDto.materials.asRender
+//     é sempre [].
+
+enum MediaFileStatus {
+  Pending
+  Active
+  Deleted
+}
+
+enum MediaFileType {
+  Image
+  Document
+}
+
+model MediaFolder {
+  Id             Int    @id @default(autoincrement())
+  OrganizationId String
+  ParentFolderId Int?
+  Name           String
+  /// Derivado do Name pelo backend (minúsculo, sem acento). Read-only.
+  Slug           String
+  /// 0 = raiz, máx 4 (o teto de 5 níveis é contado a partir de 1).
+  Depth          Int    @default(0)
+
+  CreatedAt DateTime @default(now()) @db.Timestamptz()
+  UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
+
+  Organization Organization  @relation(fields: [OrganizationId], references: [id], onDelete: Cascade)
+  // NoAction, não Restrict: NO ACTION é checado no fim da statement, então o
+  // cascade de delete da org apaga a árvore inteira de uma vez. Restrict
+  // abortaria ao remover um pai antes do filho. Um delete avulso de pasta com
+  // filho ainda falha — de propósito: o store re-parenteia ANTES de excluir.
+  ParentFolder MediaFolder?  @relation("FolderTree", fields: [ParentFolderId], references: [Id], onDelete: NoAction, onUpdate: NoAction)
+  ChildFolders MediaFolder[] @relation("FolderTree")
+  Files        MediaFile[]
+
+  // Atenção: NÃO cobre a raiz — Postgres trata NULL como distinto, então duas
+  // pastas raiz de mesmo nome passam por aqui. O store valida (e precisa
+  // validar de qualquer forma, para dar erro em PT-BR em vez de P2002 cru).
+  @@unique([OrganizationId, ParentFolderId, Name])
+  @@index([OrganizationId, ParentFolderId])
+}
+
+model MediaFile {
+  Id                 Int             @id @default(autoincrement())
+  OrganizationId     String
+  FolderId           Int?
+  /// authUserId do Supabase (= Membership.authUserId).
+  UploadedById       String
+  DisplayName        String
+  OriginalFilename   String
+  /// "{organizationId}/{uuid}.{ext}" — não adivinhável (bucket é público).
+  StoragePath        String
+  /// Bucket do Supabase Storage. Paridade com o container do Azure.
+  StorageContainer   String
+  /// null enquanto Status = Pending.
+  PublicUrl          String?
+  /// Sempre null no v0 — ver nota do bloco.
+  PublicOptimizedUrl String?
+  MimeType           String
+  FileType           MediaFileType
+  SizeBytes          BigInt
+  Width              Int?
+  Height             Int?
+  Status             MediaFileStatus @default(Pending)
+
+  CreatedAt DateTime @default(now()) @db.Timestamptz()
+  UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
+
+  Organization Organization @relation(fields: [OrganizationId], references: [id], onDelete: Cascade)
+  // SetNull: excluir pasta NUNCA apaga a linha do arquivo (o store re-parenteia
+  // antes; isto é rede de segurança contra objeto órfão no bucket).
+  Folder       MediaFolder? @relation(fields: [FolderId], references: [Id], onDelete: SetNull)
+
+  // Só BaseMaterial tem imagem no Planner: imagem de ambiente e de planta é
+  // assunto do Personaliza (docs/context/product.md). Por isso FileUsagesDto
+  // devolve blueprints/rooms sempre vazios — os campos ficam lá só por
+  // paridade com o contrato da API de customização.
+  BaseMaterials BaseMaterial[] @relation("BaseMaterialPreviewMedia")
+
+  @@unique([StorageContainer, StoragePath])
+  @@index([OrganizationId, Status, FolderId])
+  @@index([OrganizationId, Status, CreatedAt])
+}
+
+/// Uso de armazenamento por organização. Incrementa só na transição
+/// Pending → Active do confirm; decrementa no delete.
+model StorageUsage {
+  Id             Int      @id @default(autoincrement())
+  OrganizationId String   @unique
+  UsedBytes      BigInt   @default(0)
+  FileCount      Int      @default(0)
+  UpdatedAt      DateTime @default(now()) @updatedAt @db.Timestamptz()
+
+  Organization Organization @relation(fields: [OrganizationId], references: [id], onDelete: Cascade)
 }

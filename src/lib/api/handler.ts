@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getAuthContext } from "@/lib/auth/session";
+import { getAuthContext, type AuthContext } from "@/lib/auth/session";
 import type { BaseResult } from "@/shared/types/api";
 
 // Envelope BaseResult + resolução de organização para as rotas /api/*.
@@ -39,12 +39,23 @@ async function run<T>(fn: () => Promise<T>): Promise<NextResponse> {
   }
 }
 
-export async function withOrg<T>(
-  fn: (organizationId: string) => Promise<T>
+/**
+ * Como withOrg, mas entrega o AuthContext inteiro. Use quando a rota precisa de
+ * mais que a org — hoje só o upload de mídia, que grava o userId em
+ * MediaFile.UploadedById.
+ */
+export async function withAuth<T>(
+  fn: (auth: AuthContext) => Promise<T>
 ): Promise<NextResponse> {
   const auth = await getAuthContext();
   if (!auth) return fail("Não autenticado.", 401);
-  return run(() => fn(auth.organizationId));
+  return run(() => fn(auth));
+}
+
+export async function withOrg<T>(
+  fn: (organizationId: string) => Promise<T>
+): Promise<NextResponse> {
+  return withAuth((auth) => fn(auth.organizationId));
 }
 
 export async function publicRoute<T>(fn: () => Promise<T>): Promise<NextResponse> {

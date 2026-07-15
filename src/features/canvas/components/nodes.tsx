@@ -10,7 +10,7 @@ import { AmbIcon } from "@/features/typologies/components/AmbIcon";
 import type { Ambiente, Componente, Kit, Material } from "@/shared/types/domain";
 
 import { optionPending, subitemPending } from "../pending";
-import { swatchStyle } from "../swatch";
+import { MaterialSwatch } from "./MaterialSwatch";
 import { AddPill, CvIcon, Flyout, MenuRow, VMenu } from "./primitives";
 
 /** Ações disparadas pelos nós (implementadas no CanvasScreen com as mutations da Fase 5). */
@@ -26,6 +26,8 @@ export interface CanvasActions {
   changeOption: (ambId: number, comp: Componente, optId: number | null, isPadrao: boolean) => void;
   addOption: (ambId: number, comp: Componente) => void;
   deleteOption: (ambId: number, comp: Componente, optId: number, isPadrao: boolean) => void;
+  /** Edita só a imagem do material (kits não têm imagem própria). */
+  editImage: (mat: Material) => void;
 }
 
 // ── Ambiente (coluna 1) ───────────────────────────────────────────────
@@ -141,14 +143,17 @@ export function ComponenteNode({
         {showDetail && (
           <>
             <div className="flex items-center gap-1.5 text-[10.5px] text-neutral-gray-7">
-              <span
-                className="h-3.5 w-3.5 shrink-0 rounded"
-                style={
-                  padEnt && !padEnt.isKit
-                    ? swatchStyle(def ? getMaterial(materiais, def.baseId) : null)
-                    : { background: padEnt ? "#025259" : "#f5f5f5" }
-                }
-              />
+              {padEnt && !padEnt.isKit ? (
+                // padEnt JÁ é o material aqui (getOptionEntity acima o resolveu
+                // e o TS estreitou) — refazer o getMaterial seria um Array.find
+                // sobre o catálogo inteiro por nó, por render.
+                <MaterialSwatch mat={padEnt} size={14} className="h-3.5 w-3.5 rounded" />
+              ) : (
+                <span
+                  className="h-3.5 w-3.5 shrink-0 rounded"
+                  style={{ background: padEnt ? "#025259" : "#f5f5f5" }}
+                />
+              )}
               <span className="truncate">{padEnt ? padEnt.nome : "sem material padrão"}</span>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
@@ -282,10 +287,10 @@ export function OptionNode({
             <CvIcon name="hex" size={24} />
           </div>
         ) : (
-          <div
-            title="Material associado"
-            className="h-[46px] w-[46px] shrink-0 rounded-lg border border-neutral-gray-5"
-            style={swatchStyle(mat)}
+          <MaterialSwatch
+            mat={mat}
+            size={46}
+            className="h-[46px] w-[46px] rounded-lg border border-neutral-gray-5"
           />
         )}
         <div className="min-w-0 flex-1">
@@ -335,6 +340,10 @@ export function OptionNode({
         <VMenu
           items={[
             { icon: "edit", label: "Trocar material", onClick: () => act.changeOption(node.ambId, comp, optId, isPadrao) },
+            // Kit não tem imagem própria (o domínio Kit não tem o campo).
+            ...(mat
+              ? [{ icon: "library" as const, label: "Editar imagem", onClick: () => act.editImage(mat) }]
+              : []),
             { divider: true },
             { icon: "trash", label: "Excluir opção", danger: true, onClick: () => act.deleteOption(node.ambId, comp, optId, isPadrao) },
           ]}

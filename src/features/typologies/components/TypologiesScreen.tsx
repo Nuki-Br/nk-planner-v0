@@ -41,8 +41,9 @@ import { useTipologias } from "@/lib/hooks/useTipologias";
 import { useUnitGroups } from "@/lib/hooks/useUnitGroups";
 import { useSelection } from "@/lib/store/selection";
 import { cn } from "@/lib/utils";
+import { MaterialImageModal } from "@/features/catalog";
 import { UnitGroupsDrawer } from "@/features/unit-groups/components/UnitGroupsDrawer";
-import type { Ambiente, Componente, Tipologia } from "@/shared/types/domain";
+import type { Ambiente, Componente, Material, Tipologia } from "@/shared/types/domain";
 
 import { guessAmbIcon } from "../ambIcons";
 import { AmbienteAccordion, type SharedBadgeInfo } from "./AmbienteAccordion";
@@ -104,6 +105,7 @@ export function TypologiesScreen() {
   const [linkModal, setLinkModal] = React.useState(false);
   const [addCompAmb, setAddCompAmb] = React.useState<Ambiente | null>(null);
   const [editComp, setEditComp] = React.useState<{ amb: Ambiente; comp: Componente; ordem: number } | null>(null);
+  const [imageTarget, setImageTarget] = React.useState<Material | null>(null);
 
   // Mutations
   const duplicateTip = useDuplicateTipologia();
@@ -175,13 +177,13 @@ export function TypologiesScreen() {
         {
           tipologiaId: tip.id,
           ambienteId: ambModal.amb.blueprintRoomId,
-          patch: { nome: value.nome, icon: value.icon, imagem: value.imagem },
+          patch: { nome: value.nome, icon: value.icon },
         },
         { onSuccess: () => setAmbModal(null) }
       );
     } else {
       createAmbiente.mutate(
-        { tipologiaId: tip.id, input: { nome: value.nome, icon: value.icon, imagem: value.imagem } },
+        { tipologiaId: tip.id, input: { nome: value.nome, icon: value.icon } },
         {
           onSuccess: (a) => {
             setExpandedRooms((r) => [...r, a.id]);
@@ -368,6 +370,7 @@ export function TypologiesScreen() {
                     onConfigComp={(c) =>
                       router.push(`/tipologias/${tip.id}/componente/${c.id}`)
                     }
+                    onEditImage={setImageTarget}
                     onReorderComps={(a, orderedIds) =>
                       reorderComponentes.mutate({
                         tipologiaId: tip.id,
@@ -434,7 +437,6 @@ export function TypologiesScreen() {
             ? {
                 nome: ambModal.amb.nome,
                 icon: ambModal.amb.icon ?? guessAmbIcon(ambModal.amb.nome),
-                imagem: ambModal.amb.imagem ?? null,
               }
             : null
         }
@@ -501,6 +503,8 @@ export function TypologiesScreen() {
         onClose={() => setShowUnitGroups(false)}
         empreendimento={project?.nome ?? "Empreendimento"}
       />
+
+      <MaterialImageModal material={imageTarget} onClose={() => setImageTarget(null)} />
     </div>
   );
 }

@@ -7,7 +7,7 @@ import { Button, Icon, Modal } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { Kit, Material } from "@/shared/types/domain";
 
-import { swatchStyle } from "../swatch";
+import { MaterialSwatch } from "./MaterialSwatch";
 import { CvIcon } from "./primitives";
 
 interface MaterialPickerProps {
@@ -85,9 +85,10 @@ export function MaterialPicker({
             <CvIcon name="hex" size={18} />
           </span>
         ) : (
-          <span
-            className="h-9 w-9 shrink-0 rounded-[7px] border border-neutral-gray-5"
-            style={swatchStyle(mat)}
+          <MaterialSwatch
+            mat={mat}
+            size={36}
+            className="h-9 w-9 rounded-[7px] border border-neutral-gray-5"
           />
         )}
         <span className="min-w-0 flex-1">

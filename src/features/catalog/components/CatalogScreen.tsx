@@ -12,6 +12,7 @@ import {
   EmptyState,
   Icon,
   LoadingState,
+  MaterialThumb,
   PageHeader,
   type DataTableColumn,
 } from "@/components/ui";
@@ -123,25 +124,36 @@ export function CatalogScreen() {
       key: "nome",
       label: "Especificação",
       sortValue: (r) => r.nome,
-      render: (r) =>
-        r.isKit ? (
-          <div>
-            <span className="font-bold text-neutral-gray-11">{r.nome}</span>
-            <span className="block text-[11px] text-neutral-gray-7">
-              {r.itens
-                .map((it) => it.nome)
-                .filter(Boolean)
-                .slice(0, 2)
-                .join(" · ")}
-              {r.itens.length > 2 ? ` · +${r.itens.length - 2}` : ""} · {r.itens.length} itens
-            </span>
-          </div>
-        ) : (
-          <div>
-            <span className="font-semibold text-neutral-gray-11">{r.nome}</span>
-            <span className="block text-[11px] text-neutral-gray-7">{r.fabricante}</span>
-          </div>
-        ),
+      // A miniatura vai DENTRO da célula do nome (não em coluna própria): é onde
+      // o olho já está e não mexe na largura das outras colunas.
+      render: (r) => (
+        <div className="flex items-center gap-2.5">
+          <MaterialThumb
+            url={r.isKit ? null : r.imagem?.url}
+            alt={r.nome}
+            isKit={r.isKit}
+            size={36}
+          />
+          {r.isKit ? (
+            <div className="min-w-0">
+              <span className="font-bold text-neutral-gray-11">{r.nome}</span>
+              <span className="block text-[11px] text-neutral-gray-7">
+                {r.itens
+                  .map((it) => it.nome)
+                  .filter(Boolean)
+                  .slice(0, 2)
+                  .join(" · ")}
+                {r.itens.length > 2 ? ` · +${r.itens.length - 2}` : ""} · {r.itens.length} itens
+              </span>
+            </div>
+          ) : (
+            <div className="min-w-0">
+              <span className="font-semibold text-neutral-gray-11">{r.nome}</span>
+              <span className="block text-[11px] text-neutral-gray-7">{r.fabricante}</span>
+            </div>
+          )}
+        </div>
+      ),
     },
     {
       key: "categoria",

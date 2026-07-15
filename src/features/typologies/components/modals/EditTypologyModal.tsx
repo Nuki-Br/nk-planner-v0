@@ -18,8 +18,12 @@ interface EditTypologyModalProps {
 }
 
 // Modal Editar tipologia. Persiste nome/descrição via store; quartos/suítes
-// (derivados por regex), características, grupos vinculados e imagem da
-// planta são locais como no protótipo (o domínio ainda não os comporta).
+// (derivados por regex), características e grupos vinculados são locais como no
+// protótipo (o domínio ainda não os comporta).
+//
+// A seção "Imagem da planta" foi REMOVIDA: além de imagem de planta ser assunto
+// do Personaliza (docs/context/product.md), o campo era um mock morto — o
+// handleSave nunca enviou a imagem, então ela sumia em silêncio ao salvar.
 export function EditTypologyModal({ open, onClose, tip, unitGroups }: EditTypologyModalProps) {
   const updateTipologia = useUpdateTipologia();
 
@@ -40,8 +44,6 @@ export function EditTypologyModal({ open, onClose, tip, unitGroups }: EditTypolo
   const [grupos, setGrupos] = React.useState<string[]>(unitGroups);
   const [grupoInput, setGrupoInput] = React.useState("");
   const [caracts, setCaracts] = React.useState<string[]>([]);
-  const [blueprint, setBlueprint] = React.useState<{ name: string; url: string } | null>(null);
-  const fileRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
     if (!open) return;
@@ -52,7 +54,6 @@ export function EditTypologyModal({ open, onClose, tip, unitGroups }: EditTypolo
     setGrupos(unitGroups);
     setGrupoInput("");
     setCaracts([]);
-    setBlueprint(null);
   }, [open, tip, defaults, unitGroups]);
 
   const addGrupo = () => {
@@ -64,11 +65,6 @@ export function EditTypologyModal({ open, onClose, tip, unitGroups }: EditTypolo
   };
   const toggleCaract = (c: string) =>
     setCaracts((cs) => (cs.includes(c) ? cs.filter((x) => x !== c) : [...cs, c]));
-  const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (f) setBlueprint({ name: f.name, url: URL.createObjectURL(f) });
-    e.target.value = "";
-  };
 
   const handleSave = () => {
     updateTipologia.mutate(
@@ -183,46 +179,6 @@ export function EditTypologyModal({ open, onClose, tip, unitGroups }: EditTypolo
           </div>
         </div>
 
-        <div className="border-t border-neutral-gray-4 pt-4">
-          <SectionTitle>Imagem da planta</SectionTitle>
-          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
-          {blueprint ? (
-            <div className="flex items-center gap-3 rounded-lg border border-neutral-gray-4 p-3">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={blueprint.url}
-                alt="Planta"
-                className="h-24 w-24 rounded-lg border border-neutral-gray-4 object-cover"
-              />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[13px] font-semibold text-neutral-gray-11">
-                  {blueprint.name}
-                </p>
-                <p className="text-xs text-neutral-gray-7">Imagem carregada</p>
-              </div>
-              <div className="flex gap-1.5">
-                <Button variant="bordered" size="sm" onPress={() => fileRef.current?.click()}>
-                  Substituir
-                </Button>
-                <Button variant="ghost" size="sm" icon="trash" onPress={() => setBlueprint(null)}>
-                  Remover
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              className="flex w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-neutral-gray-5 bg-neutral-gray-2 p-6"
-            >
-              <Icon name="upload" size={26} className="text-neutral-gray-7" />
-              <p className="text-[13px] font-semibold text-neutral-gray-9">
-                Clique para enviar a imagem da planta
-              </p>
-              <p className="text-[11px] text-neutral-gray-6">PNG, JPG ou SVG até 10MB</p>
-            </button>
-          )}
-        </div>
       </div>
     </Modal>
   );

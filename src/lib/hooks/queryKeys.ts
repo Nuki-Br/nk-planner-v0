@@ -17,4 +17,26 @@ export const queryKeys = {
   commentThreads: ["comments"] as const,
   /** Payload público do portal — muda com o token e com a senha fornecida. */
   portal: (token: string, senha: string | null) => ["portal", token, senha ?? ""] as const,
+
+  // ─── Media Center ─────────────────────────────────────────────────────
+  // Cada recurso tem a key parametrizada + um prefixo cru para invalidar o
+  // conjunto (mesmo padrão de comments/commentThreads acima). `null` de pasta
+  // vira "root" porque null não distingue bem dentro de uma key.
+  /** Lista paginada de arquivos. */
+  mediaFiles: (
+    folderId: number | null,
+    page: number,
+    search: string,
+    fileType: string
+  ) => ["media-files", folderId ?? "root", page, search, fileType] as const,
+  /** Prefixo de TODAS as listas de arquivos. */
+  mediaFilesAll: ["media-files"] as const,
+  mediaRecent: (fileType: string) => ["media-recent", fileType] as const,
+  mediaRecentAll: ["media-recent"] as const,
+  mediaFolders: (parentFolderId: number | null) =>
+    ["media-folders", parentFolderId ?? "root"] as const,
+  mediaFoldersAll: ["media-folders"] as const,
+  mediaFolderTree: ["media-folder-tree"] as const,
+  mediaUsage: ["media-usage"] as const,
+  mediaFileUsages: (id: number) => ["media-file-usages", id] as const,
 };

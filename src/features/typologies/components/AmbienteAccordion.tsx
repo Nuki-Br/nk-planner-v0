@@ -17,7 +17,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
-import { Button, Icon } from "@/components/ui";
+import { Button, Icon, MaterialThumb } from "@/components/ui";
 import { getOptionEntity } from "@/lib/data/entities";
 import { cn, fmtNum } from "@/lib/utils";
 import type { Ambiente, Componente, Kit, Material } from "@/shared/types/domain";
@@ -47,9 +47,18 @@ interface ComponenteRowProps {
   kits: Kit[];
   onEdit: (comp: Componente, ordem: number) => void;
   onConfig: (comp: Componente) => void;
+  onEditImage: (mat: Material) => void;
 }
 
-function ComponenteRow({ comp, index, materiais, kits, onEdit, onConfig }: ComponenteRowProps) {
+function ComponenteRow({
+  comp,
+  index,
+  materiais,
+  kits,
+  onEdit,
+  onConfig,
+  onEditImage,
+}: ComponenteRowProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: comp.id,
   });
@@ -91,9 +100,22 @@ function ComponenteRow({ comp, index, materiais, kits, onEdit, onConfig }: Compo
               <TipKitBadge />
             </span>
           ) : (
-            <span className="text-[11px] text-neutral-gray-6">
-              Padrão: {padraoEnt.nome.substring(0, 30)}
-              {padraoEnt.nome.length > 30 ? "…" : ""}
+            // Miniatura só do material padrão: esta tela não lista upgrades (só
+            // os conta), então a cobertura aqui é parcial por natureza — o resto
+            // fica na config. do componente.
+            <span className="inline-flex items-center gap-1.5">
+              <button
+                type="button"
+                title="Editar imagem"
+                onClick={() => onEditImage(padraoEnt)}
+                className="rounded-md transition-opacity hover:opacity-80"
+              >
+                <MaterialThumb url={padraoEnt.imagem?.url} alt={padraoEnt.nome} size={22} />
+              </button>
+              <span className="text-[11px] text-neutral-gray-6">
+                Padrão: {padraoEnt.nome.substring(0, 30)}
+                {padraoEnt.nome.length > 30 ? "…" : ""}
+              </span>
             </span>
           ))}
       </div>
@@ -139,6 +161,7 @@ interface AmbienteAccordionProps {
   onEditComp: (amb: Ambiente, comp: Componente, ordem: number) => void;
   onConfigComp: (comp: Componente) => void;
   onReorderComps: (amb: Ambiente, orderedIds: number[]) => void;
+  onEditImage: (mat: Material) => void;
 }
 
 /** Um ambiente do acordeão: header arrastável + componentes reordenáveis. */
@@ -156,6 +179,7 @@ export function AmbienteAccordion({
   onEditComp,
   onConfigComp,
   onReorderComps,
+  onEditImage,
 }: AmbienteAccordionProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: amb.blueprintRoomId,
@@ -291,6 +315,7 @@ export function AmbienteAccordion({
                   kits={kits}
                   onEdit={(c, ordem) => onEditComp(amb, c, ordem)}
                   onConfig={onConfigComp}
+                  onEditImage={onEditImage}
                 />
               ))}
             </SortableContext>
