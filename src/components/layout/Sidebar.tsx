@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -79,10 +80,14 @@ export function Sidebar() {
       className="fixed left-0 top-0 z-20 flex h-screen flex-col overflow-y-auto border-r border-neutral-gray-3 bg-white"
     >
       <div className="flex h-16 shrink-0 items-center gap-2 border-b border-neutral-gray-3 px-5">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-4 font-bold text-white">
-          N
-        </div>
-        <span className="text-sm-p-bold text-neutral-gray-10">Nuki</span>
+        <Image
+          src="/img/logos/nuki-logo-black-horizontal.svg"
+          alt="Nuki"
+          width={62}
+          height={26}
+          priority
+          className="h-[26px] w-auto object-contain"
+        />
         <span className="border-l border-neutral-gray-4 pl-2 text-[10px] font-semibold text-neutral-gray-6">
           Planejamento
         </span>

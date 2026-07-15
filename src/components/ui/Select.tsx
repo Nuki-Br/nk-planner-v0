@@ -2,8 +2,6 @@
 
 import { Select as HeroSelect, SelectItem } from "@heroui/react";
 
-import { cn } from "@/lib/utils";
-
 export interface SelectOption {
   value: string;
   label: string;
@@ -26,7 +24,10 @@ export interface SelectProps {
   className?: string;
 }
 
-/** Select Nuki: label interna, borda preta 1px (NSelect do protótipo). */
+/**
+ * Select Nuki: padrão HeroUI `bordered`, alinhado ao nk-admin-portal (borda
+ * cinza padrão, cantos/altura padrão). API controlada por `value`/`onValueChange`.
+ */
 export function Select({
   label,
   "aria-label": ariaLabel,
@@ -47,9 +48,7 @@ export function Select({
       aria-label={ariaLabel}
       placeholder={placeholder}
       variant="bordered"
-      radius="sm"
-      size={small ? "sm" : "lg"}
-      labelPlacement="inside"
+      size={small ? "sm" : "md"}
       isDisabled={isDisabled}
       isInvalid={isInvalid}
       errorMessage={errorMessage}
@@ -60,18 +59,6 @@ export function Select({
         if (keys === "all") return;
         const first = Array.from(keys)[0];
         onValueChange(first == null ? "" : String(first));
-      }}
-      classNames={{
-        label: "text-[11px] text-neutral-gray-7",
-        value: cn(small ? "text-xs" : "text-sm", "text-neutral-gray-11"),
-        description: "text-[11px] text-neutral-gray-7",
-        trigger: cn(
-          // !important: ver nota no Input — border-medium da variante vence
-          // um border-small simples no merge de slots.
-          "!border-small border-neutral-gray-13 bg-white",
-          "data-[hover=true]:border-neutral-gray-13",
-          "data-[open=true]:border-primary-7 data-[focus=true]:border-primary-7"
-        ),
       }}
     >
       {options.map((o) => (
