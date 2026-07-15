@@ -79,17 +79,17 @@ export function Sidebar() {
       style={{ width: SIDEBAR_WIDTH }}
       className="fixed left-0 top-0 z-20 flex h-screen flex-col overflow-y-auto border-r border-neutral-gray-3 bg-white"
     >
-      <div className="flex h-16 shrink-0 items-center gap-2 border-b border-neutral-gray-3 px-5">
+      <div className="flex h-16 shrink-0 items-center justify-center gap-2 border-b border-neutral-gray-3 px-5">
         <Image
           src="/img/logos/nuki-logo-black-horizontal.svg"
           alt="Nuki"
           width={62}
-          height={26}
+          height={36}
           priority
-          className="h-[26px] w-auto object-contain"
+          className="h-[36px] w-auto object-contain"
         />
-        <span className="border-l border-neutral-gray-4 pl-2 text-[10px] font-semibold text-neutral-gray-6">
-          Planejamento
+        <span className="border-l border-neutral-gray-4 pl-2 text-[14px] font-semibold text-neutral-gray-6">
+          Planner
         </span>
       </div>
 
@@ -129,7 +129,7 @@ export function Sidebar() {
       </nav>
 
       <div className="border-t border-neutral-gray-3 px-5 py-3 text-xs-p text-neutral-gray-6">
-        MVP · v0
+        v0.0.3
       </div>
     </aside>
   );

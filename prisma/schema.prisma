@@ -92,21 +92,16 @@ model Enterprise {
   OrganizationId String
   Name           String
   Developer      String? // incorporadora
-  Builder        String? // construtora
-  BuilderEmail   String?
   TowerLabel     String? // "torre" de exibição (texto livre)
   Status         PlanningStatus @default(rascunho)
 
-  /// Datas de exibição verbatim ("DD/MM/AAAA" / "DD/MM/AAAA HH:mm" / "MM/AAAA").
+  /// Datas de exibição verbatim ("DD/MM/AAAA" / "DD/MM/AAAA HH:mm").
   SubmittedAtLabel String?
   DeadlineLabel    String?
   PublishedAtLabel String?
-  InccBaseLabel    String?
 
   TotalItems  Int   @default(0)
   FilledItems Int   @default(0)
-  /// Taxas globais legadas {construtora, incc, incorporadora}.
-  Taxes       Json?
 
   CreatedAt DateTime @default(now()) @db.Timestamptz()
   UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()

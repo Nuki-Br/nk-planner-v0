@@ -85,7 +85,6 @@ async function main(): Promise<void> {
         Name: projectNome,
         TowerLabel: "",
         Developer: orgName,
-        Builder: "",
         Status: "rascunho",
         TotalItems: 0,
         FilledItems: 0,

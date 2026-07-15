@@ -37,7 +37,6 @@ import type {
   MaterialOption,
   PortalFill,
   Project,
-  ProjectTaxas,
   RoomShape,
   Tipologia,
   TipologiaStatus,
@@ -136,16 +135,12 @@ function toProject(row: EnterpriseRow): Project {
     nome: row.Name,
     torre: row.TowerLabel ?? "",
     incorporadora: row.Developer ?? "",
-    construtora: row.Builder ?? "",
     status: row.Status,
     enviadoEm: row.SubmittedAtLabel,
     prazo: row.DeadlineLabel,
     publicadoEm: row.PublishedAtLabel,
     totalItens: row.TotalItems,
     itensPreenchidos: row.FilledItems,
-    inccBase: row.InccBaseLabel ?? undefined,
-    emailConstrutora: row.BuilderEmail ?? undefined,
-    taxas: (row.Taxes as unknown as ProjectTaxas | null) ?? undefined,
     taxColumns:
       row.BudgetColumns.length > 0
         ? [...row.BudgetColumns].sort((a, b) => a.Position - b.Position).map(toBudgetColumn)
@@ -387,13 +382,9 @@ export type ProjectPatch = Partial<
     Project,
     | "nome"
     | "torre"
-    | "construtora"
     | "status"
     | "enviadoEm"
     | "prazo"
-    | "inccBase"
-    | "emailConstrutora"
-    | "taxas"
     | "totalItens"
     | "itensPreenchidos"
   >
@@ -403,15 +394,11 @@ function projectPatchToData(patch: ProjectPatch): Prisma.EnterpriseUpdateInput {
   const data: Prisma.EnterpriseUpdateInput = {};
   if (patch.nome !== undefined) data.Name = patch.nome;
   if (patch.torre !== undefined) data.TowerLabel = patch.torre;
-  if (patch.construtora !== undefined) data.Builder = patch.construtora;
   if (patch.status !== undefined) data.Status = patch.status;
   if (patch.enviadoEm !== undefined) data.SubmittedAtLabel = patch.enviadoEm;
   if (patch.prazo !== undefined) data.DeadlineLabel = patch.prazo;
-  if (patch.inccBase !== undefined) data.InccBaseLabel = patch.inccBase;
-  if (patch.emailConstrutora !== undefined) data.BuilderEmail = patch.emailConstrutora;
   if (patch.totalItens !== undefined) data.TotalItems = patch.totalItens;
   if (patch.itensPreenchidos !== undefined) data.FilledItems = patch.itensPreenchidos;
-  if (patch.taxas !== undefined) data.Taxes = json(patch.taxas) ?? Prisma.JsonNull;
   return data;
 }
 

@@ -16,6 +16,19 @@ body {
   color: #262626;
 }
 
+/* O foco fica na borda do wrapper HeroUI, não no <input> interno. O Firefox
+   desenha um outline azul nativo no input (que o Chrome suprime) — removemos
+   para o foco ficar consistente entre navegadores (igual ao nk-admin-portal). */
+[data-slot="input"]:focus,
+[data-slot="input"]:focus-visible,
+input:focus,
+input:focus-visible,
+textarea:focus,
+textarea:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
 /* Custom scrollbar — matches nk-admin-portal */
 ::-webkit-scrollbar {
   width: 6px;

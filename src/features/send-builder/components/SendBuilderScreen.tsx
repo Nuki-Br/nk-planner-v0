@@ -58,7 +58,6 @@ export function SendBuilderScreen() {
   React.useEffect(() => {
     if (!project || initialized.current) return;
     initialized.current = true;
-    setEmails(project.emailConstrutora ?? "");
     setMsg(
       `Prezados, segue o link para preenchimento dos custos de materiais e mão de obra do empreendimento ${project.nome}.\n\nPor favor, preencher até a data indicada. Qualquer dúvida estou à disposição.`
     );
@@ -92,7 +91,7 @@ export function SendBuilderScreen() {
 
   const saveDraft = () => {
     updateProject.mutate(
-      { id: projectId, patch: { emailConstrutora: emails, prazo: prazo || null } },
+      { id: projectId, patch: { prazo: prazo || null } },
       {
         onSuccess: () => {
           setDraftSaved(true);
@@ -120,7 +119,6 @@ export function SendBuilderScreen() {
               status: "em_preenchimento",
               enviadoEm: todayBR(),
               prazo: prazo.trim() === "" ? null : prazo.trim(),
-              emailConstrutora: emails,
             },
           });
         },
@@ -144,7 +142,7 @@ export function SendBuilderScreen() {
             <Icon name="check" size={32} className="text-functional-success" />
           </div>
           <h2 className="mb-2 text-[22px] font-bold text-neutral-gray-11">
-            Link enviado para a {project?.construtora ?? "construtora"}!
+            Link enviado para a construtora!
           </h2>
           <p className="mb-8 text-sm text-neutral-gray-7">
             A construtora foi notificada por e-mail.
@@ -188,7 +186,7 @@ export function SendBuilderScreen() {
           { label: "Envio para construtora" },
         ]}
         title="Enviar para a construtora"
-        subtitle={`Gere o link de preenchimento e notifique a ${project?.construtora ?? "construtora"}`}
+        subtitle="Gere o link de preenchimento e notifique a construtora"
         action={
           <Button variant="bordered" onPress={() => router.push("/catalogo")}>
             ← Catálogo de materiais

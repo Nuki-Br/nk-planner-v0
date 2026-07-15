@@ -215,28 +215,18 @@ export type ProjectStatus =
   | "em_revisao"
   | "publicado";
 
-export interface ProjectTaxas {
-  construtora: number;
-  incc: number;
-  incorporadora: number;
-}
-
 /** Empreendimento (Enterprise). */
 export interface Project {
   id: number;
   nome: string;
   torre: string;
   incorporadora: string;
-  construtora: string;
   status: ProjectStatus;
   enviadoEm: string | null;
   prazo: string | null;
   publicadoEm?: string | null;
   totalItens: number;
   itensPreenchidos: number;
-  inccBase?: string;
-  emailConstrutora?: string;
-  /** Taxas globais legadas (fonte viva são as taxColumns). */
-  taxas?: ProjectTaxas;
+  /** Fonte viva das taxas de formação de preço. */
   taxColumns?: BudgetColumn[];
 }

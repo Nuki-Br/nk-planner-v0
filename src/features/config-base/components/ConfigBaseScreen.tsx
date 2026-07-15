@@ -6,30 +6,17 @@ import { useRouter } from "next/navigation";
 import { Button, Card, Input, LoadingState, PageHeader } from "@/components/ui";
 import { useActiveProjectId } from "@/lib/hooks/useActiveProject";
 import { useProject, useUpdateProject } from "@/lib/hooks/useProjects";
-import { parseBR } from "@/lib/utils";
 import type { Project } from "@/shared/types/domain";
 
 interface FormState {
   nome: string;
   torre: string;
-  construtora: string;
-  email: string;
-  inccBase: string;
-  taxConstrutora: string;
-  taxINCC: string;
-  taxIncorporadora: string;
 }
 
 function toForm(p: Project): FormState {
   return {
     nome: p.nome,
     torre: p.torre,
-    construtora: p.construtora,
-    email: p.emailConstrutora ?? "",
-    inccBase: p.inccBase ?? "",
-    taxConstrutora: String(p.taxas?.construtora ?? 8),
-    taxINCC: String(p.taxas?.incc ?? 5),
-    taxIncorporadora: String(p.taxas?.incorporadora ?? 22),
   };
 }
 
@@ -79,14 +66,6 @@ export function ConfigBaseScreen() {
         patch: {
           nome: form.nome,
           torre: form.torre,
-          construtora: form.construtora,
-          emailConstrutora: form.email,
-          inccBase: form.inccBase,
-          taxas: {
-            construtora: parseBR(form.taxConstrutora),
-            incc: parseBR(form.taxINCC),
-            incorporadora: parseBR(form.taxIncorporadora),
-          },
         },
       },
       {
@@ -143,66 +122,6 @@ export function ConfigBaseScreen() {
           </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <Input label="Incorporadora" value={project?.incorporadora ?? ""} isDisabled />
-            <Input
-              label="Data base INCC"
-              value={form.inccBase}
-              onValueChange={set("inccBase")}
-              placeholder="MM/AAAA"
-            />
-          </div>
-        </Card>
-
-        <Card>
-          <SectionTitle sub="A construtora receberá um link para preencher os custos dos materiais">
-            Construtora
-          </SectionTitle>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <Input
-              label="Nome da construtora"
-              value={form.construtora}
-              onValueChange={set("construtora")}
-              placeholder="Ex: Vertex Engenharia"
-            />
-            <Input
-              label="E-mail(s) para envio do link"
-              value={form.email}
-              onValueChange={set("email")}
-              placeholder="email@construtora.com"
-              type="email"
-            />
-          </div>
-        </Card>
-
-        <Card>
-          <SectionTitle sub="Esses valores se aplicam a todos os itens por padrão. Podem ser sobrescritos por componente.">
-            Taxas globais de formação de preço
-          </SectionTitle>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            <Input
-              label="Taxa construtora (%)"
-              value={form.taxConstrutora}
-              onValueChange={set("taxConstrutora")}
-              type="number"
-              description="Aplicada sobre o custo de troca"
-            />
-            <Input
-              label="Contingência INCC (%)"
-              value={form.taxINCC}
-              onValueChange={set("taxINCC")}
-              type="number"
-              description="Aplicada sobre o custo de troca"
-            />
-            <Input
-              label="Taxa incorporadora (%)"
-              value={form.taxIncorporadora}
-              onValueChange={set("taxIncorporadora")}
-              type="number"
-              description="Aplicada sobre o custo total"
-            />
-          </div>
-          <div className="mt-4 rounded-lg bg-primary-1 px-4 py-3 text-xs text-primary-8">
-            <strong>Fórmula:</strong> Preço final = Custo de troca + Taxa construtora +
-            Contingência INCC + Taxa incorporadora
           </div>
         </Card>
       </div>

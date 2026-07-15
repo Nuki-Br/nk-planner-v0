@@ -20,8 +20,6 @@ describe("createSeed", () => {
     const p = seed.projects[0];
     expect(p?.nome).toBe("Parque Ibirapuera Residências");
     expect(p?.itensPreenchidos).toBe(50);
-    expect(p?.inccBase).toBe("04/2026");
-    expect(p?.taxas?.incorporadora).toBe(22);
     expect(p?.taxColumns).toHaveLength(3);
     expect(p?.taxColumns?.[2]?.expr).toBe("=valor_unitario * 22%");
   });

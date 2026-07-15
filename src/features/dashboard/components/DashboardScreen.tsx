@@ -71,9 +71,7 @@ export function DashboardScreen() {
       render: (r) => (
         <div>
           <span className="font-semibold text-neutral-gray-11">{r.nome}</span>
-          <span className="block text-[11px] text-neutral-gray-7">
-            {r.torre} · {r.construtora}
-          </span>
+          <span className="block text-[11px] text-neutral-gray-7">{r.torre}</span>
         </div>
       ),
     },

@@ -27,13 +27,9 @@ export type ProjectPatch = Partial<
     Project,
     | "nome"
     | "torre"
-    | "construtora"
     | "status"
     | "enviadoEm"
     | "prazo"
-    | "inccBase"
-    | "emailConstrutora"
-    | "taxas"
     | "totalItens"
     | "itensPreenchidos"
   >
