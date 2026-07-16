@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 
-import { Icon, StatusBadge } from "@/components/ui";
+import { Icon, Skeleton, StatusBadge } from "@/components/ui";
 import { useActiveProjectId } from "@/lib/hooks/useActiveProject";
 import { useProject } from "@/lib/hooks/useProjects";
 import { useSelection } from "@/lib/store/selection";
@@ -33,7 +33,9 @@ export function Header({ orgName, email, inProject }: HeaderProps) {
   const router = useRouter();
   const clearSelection = useSelection((s) => s.clearSelection);
   const projectId = useActiveProjectId();
-  const { data: project } = useProject(inProject ? projectId : null);
+  const { data: project, isLoading: projectLoading } = useProject(
+    inProject ? projectId : null,
+  );
 
   const logout = async () => {
     const supabase = createSupabaseBrowserClient();
@@ -76,14 +78,19 @@ export function Header({ orgName, email, inProject }: HeaderProps) {
             >
               <Icon name="back" size={17} />
             </button>
-            {project && (
+            {project ? (
               <>
                 <span className="max-w-[280px] truncate text-[13px] font-bold text-neutral-gray-11">
                   {project.nome}
                 </span>
                 <StatusBadge status={project.status} />
               </>
-            )}
+            ) : projectLoading ? (
+              <>
+                <Skeleton className="h-3.5 w-36" />
+                <Skeleton className="h-5 w-16 rounded-full" />
+              </>
+            ) : null}
           </div>
         )}
       </div>
