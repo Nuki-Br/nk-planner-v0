@@ -20,7 +20,7 @@ export function IntroModal() {
   // `false`; storage bloqueado (modo privado) nunca mostra nem quebra.
   React.useEffect(() => {
     try {
-      // if (!localStorage.getItem(INTRO_SEEN_KEY)) 
+      if (!localStorage.getItem(INTRO_SEEN_KEY)) 
         setOpen(true);
     } catch {
       // storage indisponível — segue sem modal

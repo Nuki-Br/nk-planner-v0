@@ -6,7 +6,11 @@ import { usePathname } from "next/navigation";
 import { FeedbackFab } from "@/components/layout/FeedbackFab";
 import { Header } from "@/components/layout/Header";
 import { IntroModal } from "@/components/layout/IntroModal";
-import { CONTENT_LEFT_OFFSET_PX, Sidebar } from "@/components/layout/Sidebar";
+import {
+  CONTENT_LEFT_OFFSET_COLLAPSED_PX,
+  CONTENT_LEFT_OFFSET_PX,
+  Sidebar,
+} from "@/components/layout/Sidebar";
 import { useSelection } from "@/lib/store/selection";
 import { DASHBOARD_MODE_ROUTES } from "@/shared/constants/navigation";
 
@@ -29,18 +33,38 @@ export function AppShell({ orgName, email, children }: AppShellProps) {
 
   const isCanvas = pathname.includes("/canvas");
 
+  // Construtor de Preço (tabela larga): sidebar recolhida por padrão. O toggle
+  // manual vale até a próxima entrada/saída da rota.
+  const isOrcamento = pathname === "/orcamento" || pathname.startsWith("/orcamento/");
+  const [sidebarCollapsed, setSidebarCollapsed] = React.useState(isOrcamento);
+  React.useEffect(() => {
+    setSidebarCollapsed(isOrcamento);
+  }, [isOrcamento]);
+
   // Voltar ao dashboard limpa a seleção (tipologia/componente ativos). Vive
   // aqui porque a Sidebar não monta em modo dashboard.
   React.useEffect(() => {
     if (pathname === "/dashboard") clearSelection();
   }, [pathname, clearSelection]);
 
+  const contentLeft = isDashboardMode || isCanvas
+    ? 0
+    : sidebarCollapsed
+      ? CONTENT_LEFT_OFFSET_COLLAPSED_PX
+      : CONTENT_LEFT_OFFSET_PX;
+
   return (
     <div className="min-h-screen bg-background-standard">
       <Header orgName={orgName} email={email} inProject={!isDashboardMode} />
-      {!isDashboardMode && !isCanvas && <Sidebar />}
+      {!isDashboardMode && !isCanvas && (
+        <Sidebar
+          collapsed={sidebarCollapsed}
+          onToggleCollapsed={() => setSidebarCollapsed((v) => !v)}
+        />
+      )}
       <main
-        style={{ marginLeft: isDashboardMode || isCanvas ? 0 : CONTENT_LEFT_OFFSET_PX, paddingTop: 64 }}
+        className="transition-[margin-left] duration-200"
+        style={{ marginLeft: contentLeft, paddingTop: 64 }}
       >
         <div className="p-6">{children}</div>
       </main>
