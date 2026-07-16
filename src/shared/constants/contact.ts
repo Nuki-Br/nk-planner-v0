@@ -8,3 +8,11 @@ export const NUKI_EMAIL = "contato@nukibr.com";
 export function nukiWhatsAppUrl(mensagem: string): string {
   return `https://wa.me/${NUKI_WHATSAPP}?text=${encodeURIComponent(mensagem)}`;
 }
+
+/** WhatsApp do Pedro para feedback do beta do Planner (não é o número oficial da Nuki). */
+export const FEEDBACK_WHATSAPP = "5515974025415";
+
+/** Link wa.me do canal de feedback do beta com mensagem pré-preenchida. */
+export function feedbackWhatsAppUrl(mensagem: string): string {
+  return `https://wa.me/${FEEDBACK_WHATSAPP}?text=${encodeURIComponent(mensagem)}`;
+}

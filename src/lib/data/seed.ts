@@ -10,7 +10,6 @@ import { TAX_COLUMNS_DEFAULT } from "@/shared/constants/budget";
 import type {
   Ambiente,
   BudgetVersion,
-  Categoria,
   Comment,
   Componente,
   Kit,
@@ -23,8 +22,15 @@ import type {
   Unidade,
 } from "@/shared/types/domain";
 
+/**
+ * Material do seed com `unidade`: o domínio não tem mais unidade no Material,
+ * mas o prisma/seed.ts ainda grava BaseMaterial.Unit (fallback de exibição de
+ * kits antigos) e os sub-itens de kit herdam a unidade daqui.
+ */
+export type SeedMaterial = Material & { unidade: Unidade };
+
 export interface SeedData {
-  materiais: Material[];
+  materiais: SeedMaterial[];
   kits: Kit[];
   tipologias: Tipologia[];
   torres: string[];
@@ -43,26 +49,26 @@ export function createSeed(): SeedData {
   let seq = 0;
   const nid = () => ++seq;
 
-  // ── Catálogo: materiais (key → Material) ──
-  const M: Record<string, Material> = {};
+  // ── Catálogo: materiais (key → SeedMaterial) ──
+  const M: Record<string, SeedMaterial> = {};
   const matKeyById: Record<number, string> = {};
   function mat(
     key: string,
     codigo: string,
     nome: string,
     fabricante: string,
-    categoria: Categoria,
+    categoria: string,
     unidade: Unidade,
     custoMat: number,
     custoMO: number
-  ): Material {
-    const m: Material = { id: nid(), codigo, nome, fabricante, categoria, unidade, custoMat, custoMO };
+  ): SeedMaterial {
+    const m: SeedMaterial = { id: nid(), codigo, nome, fabricante, categoria, unidade, custoMat, custoMO };
     M[key] = m;
     matKeyById[m.id] = key;
     return m;
   }
 
-  const materiais: Material[] = [
+  const materiais: SeedMaterial[] = [
     // Pisos
     mat("piso-001", "PO-6060-CR", "Porcelanato Acetinado 60×60 Creme", "Eliane", "Piso", "m²", 62.5, 22.0),
     mat("piso-002", "PP-6060-BI", "Porcelanato Polido 60×60 Bianco", "Portinari", "Piso", "m²", 98.0, 22.0),
@@ -100,7 +106,7 @@ export function createSeed(): SeedData {
 
   // ── Catálogo: kits (key → Kit) ──
   const K: Record<string, Kit> = {};
-  function kit(key: string, codigo: string, nome: string, categoria: Categoria, itemKeys: string[]): Kit {
+  function kit(key: string, codigo: string, nome: string, categoria: string, itemKeys: string[]): Kit {
     const itens: KitItem[] = itemKeys.map((k) => {
       const src = M[k]!;
       return {

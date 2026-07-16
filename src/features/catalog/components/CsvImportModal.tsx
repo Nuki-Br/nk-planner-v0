@@ -198,7 +198,7 @@ export function CsvImportModal({ open, onClose }: CsvImportModalProps) {
               Formato esperado
             </p>
             <code className="font-mono text-xs text-neutral-gray-9">
-              codigo, nome, fabricante, categoria, unidade, custo_mat, custo_mo
+              codigo, nome, fabricante, categoria, custo_mat, custo_mo
             </code>
             <p className="mt-1.5 text-[11px] text-neutral-gray-6">
               Custo pode ser vazio — preenchido depois pela construtora.

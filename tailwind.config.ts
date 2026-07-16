@@ -110,7 +110,14 @@ const config = {
           emerald: { bg: "#d1fae5", fg: "#065f46" },
           sky: { bg: "#e0f2fe", fg: "#0369a1" },
           red: { bg: "#fee2e2", fg: "#dc2626" },
-          orange: { fg: "#d97706" },
+          orange: { bg: "#ffedd5", fg: "#d97706" },
+          // Cores de categoria (COLOR_SCHEMES em shared/constants/categorias.ts)
+          gray: { bg: "#f5f5f5", fg: "#595959" },
+          yellow: { bg: "#fef9c3", fg: "#a16207" },
+          green: { bg: "#dcfce7", fg: "#15803d" },
+          teal: { bg: "#ccfbf1", fg: "#0f766e" },
+          cyan: { bg: "#cffafe", fg: "#0e7490" },
+          purple: { bg: "#f3e8ff", fg: "#7e22ce" },
         },
       },
       borderRadius: {

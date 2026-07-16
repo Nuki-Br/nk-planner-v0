@@ -324,7 +324,7 @@ export function OptionNode({
               </span>
               {!isKit && mat && price > 0 && (
                 <span className="rounded-full bg-neutral-gray-2 px-[7px] py-px text-[10px] font-bold text-neutral-gray-9">
-                  {fmtBRL(price)}/{mat.unidade}
+                  {fmtBRL(price)}
                 </span>
               )}
             </div>

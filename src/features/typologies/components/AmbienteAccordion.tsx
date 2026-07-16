@@ -42,17 +42,15 @@ function TipKitBadge() {
 
 interface ComponenteRowProps {
   comp: Componente;
-  index: number;
   materiais: Material[];
   kits: Kit[];
-  onEdit: (comp: Componente, ordem: number) => void;
+  onEdit: (comp: Componente) => void;
   onConfig: (comp: Componente) => void;
   onEditImage: (mat: Material) => void;
 }
 
 function ComponenteRow({
   comp,
-  index,
   materiais,
   kits,
   onEdit,
@@ -136,7 +134,7 @@ function ComponenteRow({
           title="Editar componente"
           onClick={(e) => {
             e.stopPropagation();
-            onEdit(comp, comp.ordem ?? index + 1);
+            onEdit(comp);
           }}
         />
         <Button variant="ghost" size="sm" onPress={() => onConfig(comp)}>
@@ -158,7 +156,7 @@ interface AmbienteAccordionProps {
   onCloneAmb: (amb: Ambiente) => void;
   onDeleteAmb: (amb: Ambiente) => void;
   onAddComp: (amb: Ambiente) => void;
-  onEditComp: (amb: Ambiente, comp: Componente, ordem: number) => void;
+  onEditComp: (amb: Ambiente, comp: Componente) => void;
   onConfigComp: (comp: Componente) => void;
   onReorderComps: (amb: Ambiente, orderedIds: number[]) => void;
   onEditImage: (mat: Material) => void;
@@ -306,14 +304,13 @@ export function AmbienteAccordion({
               items={amb.componentes.map((c) => c.id)}
               strategy={verticalListSortingStrategy}
             >
-              {amb.componentes.map((comp, ci) => (
+              {amb.componentes.map((comp) => (
                 <ComponenteRow
                   key={comp.id}
                   comp={comp}
-                  index={ci}
                   materiais={materiais}
                   kits={kits}
-                  onEdit={(c, ordem) => onEditComp(amb, c, ordem)}
+                  onEdit={(c) => onEditComp(amb, c)}
                   onConfig={onConfigComp}
                   onEditImage={onEditImage}
                 />

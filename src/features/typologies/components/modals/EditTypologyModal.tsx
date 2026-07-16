@@ -4,10 +4,9 @@ import React from "react";
 
 import { Button, Icon, Input, Modal, Textarea } from "@/components/ui";
 import { useUpdateTipologia } from "@/lib/hooks/useTipologiaMutations";
-import { cn } from "@/lib/utils";
 import type { Tipologia } from "@/shared/types/domain";
 
-import { PLANTA_CARACTERISTICAS } from "../../shared";
+import { CaracteristicasPicker } from "./CaracteristicasPicker";
 
 interface EditTypologyModalProps {
   open: boolean;
@@ -156,27 +155,7 @@ export function EditTypologyModal({ open, onClose, tip, unitGroups }: EditTypolo
           <SectionTitle sub="Selecione as personalizações estruturais disponíveis nesta planta.">
             Características da planta
           </SectionTitle>
-          <div className="flex flex-wrap gap-2">
-            {PLANTA_CARACTERISTICAS.map((c) => {
-              const on = caracts.includes(c);
-              return (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => toggleCaract(c)}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full border px-3 py-[7px] text-xs font-semibold transition-colors",
-                    on
-                      ? "border-primary-7 bg-primary-1 text-primary-7"
-                      : "border-neutral-gray-5 bg-white text-neutral-gray-8 hover:border-neutral-gray-6"
-                  )}
-                >
-                  <Icon name={on ? "check" : "plus"} size={13} />
-                  {c}
-                </button>
-              );
-            })}
-          </div>
+          <CaracteristicasPicker value={caracts} onToggle={toggleCaract} />
         </div>
 
       </div>

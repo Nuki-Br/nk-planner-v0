@@ -33,6 +33,7 @@ export { Select, type SelectOption, type SelectProps } from "./Select";
 export { Skeleton } from "./Skeleton";
 export { Spinner } from "./Spinner";
 export { StatCard } from "./StatCard";
+export { TableSkeleton } from "./TableSkeleton";
 export { StatusBadge } from "./StatusBadge";
 export { Switch, type SwitchProps } from "./Switch";
 export { Textarea, type TextareaProps } from "./Textarea";

@@ -7,6 +7,7 @@ export const queryKeys = {
   tipologia: (id: number) => ["tipologias", id] as const,
   materiais: ["materiais"] as const,
   kits: ["kits"] as const,
+  categorias: ["categorias"] as const,
   unitGroups: ["unit-groups"] as const,
   torres: ["torres"] as const,
   budgetColumns: (projectId: number) => ["budget-columns", projectId] as const,

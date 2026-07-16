@@ -1,20 +1,11 @@
 "use client";
 
-import React from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { Icon, StatusBadge, type IconName } from "@/components/ui";
-import { useActiveProjectId } from "@/lib/hooks/useActiveProject";
-import { useProject } from "@/lib/hooks/useProjects";
-import { useSelection } from "@/lib/store/selection";
+import { Icon, type IconName } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import {
-  DASHBOARD_ITEM,
-  DASHBOARD_MODE_ROUTES,
-  WORKFLOW_NAV,
-} from "@/shared/constants/navigation";
+import { WORKFLOW_NAV } from "@/shared/constants/navigation";
 
 const SIDEBAR_WIDTH = 212;
 
@@ -48,27 +39,11 @@ function NavItem({ href, icon, label, active, done = false }: NavItemProps) {
   );
 }
 
-// Sidebar com os dois modos do protótipo:
-//  - dashboard/config-base: apenas "Empreendimentos"
-//  - projeto ativo: bloco do projeto (nome + status) + passos do fluxo,
-//    com passos anteriores marcados como concluídos (check teal).
+// Sidebar flutuante do modo projeto: apenas os passos do fluxo, com passos
+// anteriores marcados como concluídos (check teal). O bloco do projeto ativo
+// vive no Header; em modo dashboard a sidebar nem é montada (AppShell).
 export function Sidebar() {
   const pathname = usePathname();
-  const clearSelection = useSelection((s) => s.clearSelection);
-  const projectId = useActiveProjectId();
-
-  const isDashboardMode = DASHBOARD_MODE_ROUTES.some(
-    (route) => pathname === route || pathname.startsWith(`${route}/`)
-  );
-
-  // Voltar ao dashboard limpa a seleção (tipologia/componente ativos). O
-  // projeto ativo é resolvido por useActiveProjectId (seleção ou 1º da org).
-  React.useEffect(() => {
-    if (pathname === "/dashboard") clearSelection();
-  }, [pathname, clearSelection]);
-
-  const { data: project } = useProject(projectId);
-  const inProject = !isDashboardMode && !!project;
 
   const activeIndex = WORKFLOW_NAV.findIndex(
     (step) => pathname === step.href || pathname.startsWith(`${step.href}/`)
@@ -77,58 +52,25 @@ export function Sidebar() {
   return (
     <aside
       style={{ width: SIDEBAR_WIDTH }}
-      className="fixed left-0 top-0 z-20 flex h-screen flex-col overflow-y-auto border-r border-neutral-gray-3 bg-white"
+      className="fixed left-4 top-[80px] z-20 max-h-[calc(100vh-96px)] overflow-y-auto rounded-nk-2xl border border-neutral-gray-3 bg-white shadow-[0_8px_28px_rgba(0,0,0,0.08)]"
     >
-      <div className="flex h-16 shrink-0 items-center justify-center gap-2 border-b border-neutral-gray-3 px-5">
-        <Image
-          src="/img/logos/nuki-logo-black-horizontal.svg"
-          alt="Nuki"
-          width={62}
-          height={36}
-          priority
-          className="h-[36px] w-auto object-contain"
-        />
-        <span className="border-l border-neutral-gray-4 pl-2 text-[14px] font-semibold text-neutral-gray-6">
-          Planner
-        </span>
-      </div>
-
-      <nav className="flex-1 px-3 py-3">
-        <NavItem
-          href={DASHBOARD_ITEM.href}
-          icon={DASHBOARD_ITEM.icon}
-          label={DASHBOARD_ITEM.label}
-          active={pathname === DASHBOARD_ITEM.href}
-        />
-
-        {inProject && (
-          <>
-            <div className="mb-2 mt-3 px-2">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-gray-6">
-                Projeto ativo
-              </p>
-              <p className="mb-0.5 mt-1 text-xs font-bold leading-snug text-neutral-gray-11">
-                {project.nome}
-              </p>
-              <StatusBadge status={project.status} />
-            </div>
-            <div className="mt-2 border-t border-neutral-gray-4 pt-2">
-              {WORKFLOW_NAV.map((step, i) => (
-                <NavItem
-                  key={step.key}
-                  href={step.href}
-                  icon={step.icon}
-                  label={step.label}
-                  active={i === activeIndex}
-                  done={activeIndex > -1 && i < activeIndex}
-                />
-              ))}
-            </div>
-          </>
-        )}
+      <nav className="px-3 py-3">
+        <p className="mb-1.5 px-2 text-[10px] font-bold uppercase tracking-wider text-neutral-gray-6">
+          NAVEGAÇÃO
+        </p>
+        {WORKFLOW_NAV.map((step, i) => (
+          <NavItem
+            key={step.key}
+            href={step.href}
+            icon={step.icon}
+            label={step.label}
+            active={i === activeIndex}
+            done={activeIndex > -1 && i < activeIndex}
+          />
+        ))}
       </nav>
 
-      <div className="border-t border-neutral-gray-3 px-5 py-3 text-xs-p text-neutral-gray-6">
+      <div className="border-t border-neutral-gray-3 px-4 py-2 text-xs-p text-neutral-gray-6 text-center">
         v0.0.3
       </div>
     </aside>
@@ -136,3 +78,6 @@ export function Sidebar() {
 }
 
 export const SIDEBAR_WIDTH_PX = SIDEBAR_WIDTH;
+
+/** Offset do conteúdo em modo projeto: 16px de margem + sidebar + 16px de vão. */
+export const CONTENT_LEFT_OFFSET_PX = 16 + SIDEBAR_WIDTH + 16;

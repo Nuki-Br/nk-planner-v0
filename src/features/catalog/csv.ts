@@ -4,8 +4,6 @@
 import type { MaterialInput } from "@/lib/data/store";
 import { parseBR } from "@/lib/utils";
 import { normName } from "@/lib/formula";
-import { CATEGORIAS, type Categoria } from "@/shared/constants/categorias";
-import { UNIDADES, type Unidade } from "@/shared/constants/unidades";
 
 /** Campo Nuki alvo de uma coluna do CSV ("" = ignorar). */
 export type CsvField =
@@ -14,7 +12,6 @@ export type CsvField =
   | "nome"
   | "fabricante"
   | "categoria"
-  | "unidade"
   | "custoMat"
   | "custoMO";
 
@@ -24,7 +21,6 @@ export const CSV_FIELD_OPTS: { value: CsvField; label: string }[] = [
   { value: "nome", label: "Especificação completa" },
   { value: "fabricante", label: "Fabricante" },
   { value: "categoria", label: "Categoria" },
-  { value: "unidade", label: "Unidade de medida" },
   { value: "custoMat", label: "Custo material (R$/unid)" },
   { value: "custoMO", label: "Custo mão de obra (R$/unid)" },
 ];
@@ -33,6 +29,8 @@ export const CSV_FIELD_OPTS: { value: CsvField; label: string }[] = [
 export type CsvMapping = Record<string, CsvField>;
 
 // Sinônimos aceitos no auto-mapeamento (chaves já normalizadas via normName).
+// Material não tem unidade de medida (ela vem do componente ou do kit), então
+// colunas "unidade"/"und" caem no "Ignorar".
 const HEADER_ALIASES: Record<string, CsvField> = {
   codigo: "codigo",
   codigo_de_referencia: "codigo",
@@ -49,10 +47,6 @@ const HEADER_ALIASES: Record<string, CsvField> = {
   fornecedor: "fabricante",
   categoria: "categoria",
   tipo: "categoria",
-  unidade: "unidade",
-  und: "unidade",
-  un: "unidade",
-  unidade_de_medida: "unidade",
   custo_mat: "custoMat",
   custo_material: "custoMat",
   custo: "custoMat",
@@ -80,17 +74,6 @@ export function guessMapping(headers: string[]): CsvMapping {
   return mapping;
 }
 
-function matchCategoria(raw: string): Categoria | null {
-  const norm = normName(raw);
-  return CATEGORIAS.find((c) => normName(c) === norm) ?? null;
-}
-
-function matchUnidade(raw: string): Unidade | null {
-  const norm = normName(raw);
-  const alias: Record<string, Unidade> = { m: "m²", m2: "m²", un: "und", unidade: "und" };
-  return alias[norm] ?? UNIDADES.find((u) => normName(u) === norm) ?? null;
-}
-
 function parseCusto(raw: string): number {
   const cleaned = raw.trim();
   if (cleaned === "" || cleaned === "—" || cleaned === "-") return 0;
@@ -106,8 +89,8 @@ export interface CsvConversion {
 
 /**
  * Converte as linhas cruas (header: true do PapaParse) em MaterialInput.
- * Regras: nome obrigatório; categoria desconhecida descarta a linha;
- * unidade desconhecida vira "und"; custos vazios/inválidos viram 0
+ * Regras: nome e categoria obrigatórios; categoria nova é criada no servidor
+ * (find-or-create case-insensitive); custos vazios/inválidos viram 0
  * (permanecem pendentes até a revisão/link, como no cadastro manual).
  */
 export function convertRows(
@@ -128,13 +111,9 @@ export function convertRows(
       descartadas.push({ linha, motivo: "sem especificação" });
       return;
     }
-    const rawCategoria = get(row, "categoria");
-    const categoria = matchCategoria(rawCategoria);
-    if (categoria === null) {
-      descartadas.push({
-        linha,
-        motivo: rawCategoria === "" ? "sem categoria" : `categoria desconhecida "${rawCategoria}"`,
-      });
+    const categoria = get(row, "categoria");
+    if (categoria === "") {
+      descartadas.push({ linha, motivo: "sem categoria" });
       return;
     }
     materiais.push({
@@ -142,7 +121,6 @@ export function convertRows(
       nome,
       fabricante: get(row, "fabricante"),
       categoria,
-      unidade: matchUnidade(get(row, "unidade")) ?? "und",
       custoMat: parseCusto(get(row, "custoMat")),
       custoMO: parseCusto(get(row, "custoMO")),
     });

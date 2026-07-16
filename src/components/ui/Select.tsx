@@ -1,6 +1,10 @@
 "use client";
 
-import { Select as HeroSelect, SelectItem } from "@heroui/react";
+import {
+  Select as HeroSelect,
+  SelectItem,
+  type SelectProps as HeroSelectProps,
+} from "@heroui/react";
 
 export interface SelectOption {
   value: string;
@@ -22,6 +26,8 @@ export interface SelectProps {
   errorMessage?: string;
   description?: string;
   className?: string;
+  /** Passthrough dos slots do HeroUI (ex.: trigger para casar altura/borda). */
+  classNames?: HeroSelectProps["classNames"];
 }
 
 /**
@@ -41,6 +47,7 @@ export function Select({
   errorMessage,
   description,
   className,
+  classNames,
 }: SelectProps) {
   return (
     <HeroSelect
@@ -54,6 +61,7 @@ export function Select({
       errorMessage={errorMessage}
       description={description}
       className={className}
+      classNames={classNames}
       selectedKeys={value ? [value] : []}
       onSelectionChange={(keys) => {
         if (keys === "all") return;

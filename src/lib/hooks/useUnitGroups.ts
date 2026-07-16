@@ -7,7 +7,9 @@ import {
   deleteUnitGroup,
   listTorres,
   listUnitGroups,
+  updateTorres,
   updateUnitGroup,
+  type TorreInput,
   type UnitGroupInput,
 } from "@/lib/data/store";
 
@@ -19,6 +21,20 @@ export function useUnitGroups() {
 
 export function useTorres() {
   return useQuery({ queryKey: queryKeys.torres, queryFn: listTorres });
+}
+
+/** Salva a lista completa de torres (config base do empreendimento). */
+export function useUpdateTorres() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (items: TorreInput[]) => updateTorres(items),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.torres });
+      // Rename/exclusão muda o `torre` dos grupos e o TowerLabel do projeto.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.unitGroups });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+    },
+  });
 }
 
 function useUnitGroupMutation<TArgs, TResult>(mutationFn: (args: TArgs) => Promise<TResult>) {

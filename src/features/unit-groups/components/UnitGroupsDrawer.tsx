@@ -70,9 +70,10 @@ export function UnitGroupsDrawer({ open, onClose, empreendimento }: UnitGroupsDr
   };
 
   // Agrupa por torre na ordem das torres + bucket "Sem torre definida".
+  const torreNames = torres.map((t) => t.nome);
   const buckets = [
-    ...torres.map((t) => ({ torre: t, items: groups.filter((g) => g.torre === t) })),
-    { torre: "Sem torre definida", items: groups.filter((g) => !torres.includes(g.torre)) },
+    ...torreNames.map((t) => ({ torre: t, items: groups.filter((g) => g.torre === t) })),
+    { torre: "Sem torre definida", items: groups.filter((g) => !torreNames.includes(g.torre)) },
   ].filter((b) => b.items.length > 0);
 
   const totalUnidades = groups.reduce((a, g) => a + g.unidades.length, 0);
@@ -170,7 +171,7 @@ export function UnitGroupsDrawer({ open, onClose, empreendimento }: UnitGroupsDr
             <UnitGroupEditor
               key={selected.id}
               group={selected}
-              torres={torres}
+              torres={torreNames}
               onPatch={(patch) => updateGroup.mutate({ id: selected.id, patch })}
               onRemove={handleRemove}
             />

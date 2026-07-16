@@ -31,7 +31,7 @@ interface ChipProps {
 
 /**
  * Chip pastel genérico (categorias, marcadores). Para status de fluxo use
- * StatusBadge; para categorias de material combine com CAT_COLORS via className.
+ * StatusBadge; para categorias de material use o CategoryChip do catálogo.
  */
 export function Chip({ children, tone = "gray", className }: ChipProps) {
   return (

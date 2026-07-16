@@ -5,10 +5,13 @@ import { Input as HeroInput } from "@heroui/react";
 
 import { Button, Icon, Input, Modal, Select } from "@/components/ui";
 import { getMaterial } from "@/lib/data/entities";
+import { useCategorias } from "@/lib/hooks/useCategorias";
 import { useCreateKit, useUpdateKit } from "@/lib/hooks/useKits";
-import { cn } from "@/lib/utils";
-import { CAT_COLORS, CATEGORIAS, type Categoria } from "@/shared/constants/categorias";
+import { UNIDADES, type Unidade } from "@/shared/constants/unidades";
 import type { Kit, KitItem, Material } from "@/shared/types/domain";
+
+import { CategoryChip } from "./CategoryChip";
+import { CategoryCombobox } from "./CategoryCombobox";
 
 interface KitModalProps {
   open: boolean;
@@ -18,7 +21,7 @@ interface KitModalProps {
   materiais: Material[];
 }
 
-const CATEGORIA_OPTIONS = CATEGORIAS.map((c) => ({ value: c, label: c }));
+const UNIDADE_OPTIONS = UNIDADES.map((u) => ({ value: u, label: u }));
 
 /** Código automático do kit: "KIT-" + iniciais do nome (mock). */
 function kitCodigo(nome: string): string {
@@ -33,10 +36,11 @@ function kitCodigo(nome: string): string {
 }
 
 // Modal Criar/Editar kit (largura 640). Trocar a categoria reseta a
-// composição, como no protótipo. Desvio documentado: a unidade de cada
-// sub-item é a do próprio material (chip read-only) — o select por item do
-// protótipo não era persistido em lugar nenhum e o tipo Kit não o comporta.
+// composição, como no protótipo. A unidade de cada sub-item é escolhida AQUI
+// (select por item, persistida em MaterialKitItem.Unit) — o material não
+// carrega unidade; ela pertence ao contexto de uso.
 export function KitModal({ open, onClose, kit, materiais }: KitModalProps) {
+  const { data: categorias = [] } = useCategorias();
   const createKit = useCreateKit();
   const updateKit = useUpdateKit();
   const isEdit = kit !== null;
@@ -65,7 +69,7 @@ export function KitModal({ open, onClose, kit, materiais }: KitModalProps) {
               materialId: m.id,
               nome: m.nome,
               fabricante: m.fabricante,
-              unidade: m.unidade,
+              unidade: "und",
               custoMat: m.custoMat,
               custoMO: m.custoMO,
             },
@@ -73,6 +77,8 @@ export function KitModal({ open, onClose, kit, materiais }: KitModalProps) {
     );
   const removeItem = (materialId: number) =>
     setItens((xs) => xs.filter((it) => it.materialId !== materialId));
+  const setItemUnidade = (materialId: number, unidade: Unidade) =>
+    setItens((xs) => xs.map((it) => (it.materialId === materialId ? { ...it, unidade } : it)));
 
   const candidates = materiais
     .filter((m) => categoria === "" || m.categoria === categoria)
@@ -88,7 +94,7 @@ export function KitModal({ open, onClose, kit, materiais }: KitModalProps) {
 
   const handleSubmit = () => {
     if (!valid) return;
-    const base = { nome: nome.trim(), categoria: categoria as Categoria, itens };
+    const base = { nome: nome.trim(), categoria, itens };
     const opts = { onSuccess: onClose };
     if (isEdit) updateKit.mutate({ id: kit.id, patch: base }, opts);
     else createKit.mutate({ ...base, codigo: kitCodigo(nome) }, opts);
@@ -124,14 +130,14 @@ export function KitModal({ open, onClose, kit, materiais }: KitModalProps) {
             onValueChange={setNome}
             placeholder="Ex: Metais Bronze"
           />
-          <Select
-            label="Categoria"
-            options={CATEGORIA_OPTIONS}
+          <CategoryCombobox
             value={categoria}
-            onValueChange={(v) => {
+            onChange={(v) => {
               setCategoria(v);
               setItens([]);
             }}
+            // Rename da categoria selecionada NÃO reseta a composição.
+            onRenamed={setCategoria}
           />
         </div>
 
@@ -163,20 +169,23 @@ export function KitModal({ open, onClose, kit, materiais }: KitModalProps) {
                       </p>
                       <code className="text-[10px] text-neutral-gray-6">{m.codigo}</code>
                     </div>
-                    <span
-                      className={cn(
-                        "rounded-full px-[9px] py-0.5 text-[10px] font-semibold",
-                        CAT_COLORS[m.categoria]
-                      )}
-                    >
-                      {m.categoria}
-                    </span>
-                    <span
-                      title="Unidade de medida deste item (do cadastro do material)"
-                      className="rounded border border-neutral-gray-5 bg-white px-1.5 py-0.5 text-xs text-neutral-gray-11"
-                    >
-                      {m.unidade}
-                    </span>
+                    <CategoryChip
+                      nome={m.categoria}
+                      categorias={categorias}
+                      className="!text-[10px]"
+                    />
+                    <Select
+                      aria-label="Unidade de medida deste item"
+                      options={UNIDADE_OPTIONS}
+                      value={it.unidade}
+                      // Guarda contra deseleção (HeroUI emite "" ao limpar).
+                      onValueChange={(v) => {
+                        if (v !== "") setItemUnidade(it.materialId, v as Unidade);
+                      }}
+                      small
+                      className="w-[76px] shrink-0"
+                      classNames={{ trigger: "h-8 min-h-8 bg-white" }}
+                    />
                     <button
                       type="button"
                       onClick={() => removeItem(it.materialId)}

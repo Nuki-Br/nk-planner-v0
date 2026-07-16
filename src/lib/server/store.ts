@@ -28,7 +28,7 @@ import type {
   ImagemVinculada,
   BudgetColumn,
   BudgetVersion,
-  Categoria,
+  CategoriaCatalogo,
   Comment,
   Componente,
   FillLink,
@@ -42,6 +42,7 @@ import type {
   RoomShape,
   Tipologia,
   TipologiaStatus,
+  Torre,
   Unidade,
   UnitGroup,
   VersionChanges,
@@ -155,19 +156,102 @@ export async function getActiveProjectId(organizationId: string): Promise<number
   return activeEnterpriseIdOrNull(organizationId);
 }
 
-// ─── Categorias de catálogo (MaterialCategory por org, resolve por nome) ─
+// ─── Categorias de catálogo (MaterialCategory por org) ──────────────────
 
-async function resolveCategoryId(organizationId: string, categoria: Categoria): Promise<number> {
-  const existing = await prisma.materialCategory.findFirst({
-    where: { OrganizationId: organizationId, Name: categoria },
+// Match case-insensitive em todos os caminhos: sem unique no banco, é o que
+// impede o CSV com "piso" de duplicar a categoria "Piso".
+async function findCategoryByName(organizationId: string, nome: string) {
+  return prisma.materialCategory.findFirst({
+    where: { OrganizationId: organizationId, Name: { equals: nome, mode: "insensitive" } },
     select: { Id: true },
   });
+}
+
+async function resolveCategoryId(organizationId: string, categoria: string): Promise<number> {
+  const existing = await findCategoryByName(organizationId, categoria);
   if (existing) return existing.Id;
   const created = await prisma.materialCategory.create({
-    data: { OrganizationId: organizationId, Name: categoria },
+    data: { OrganizationId: organizationId, Name: categoria, ColorScheme: "gray" },
     select: { Id: true },
   });
   return created.Id;
+}
+
+export type CategoriaInput = { nome: string; cor: string };
+
+const CATEGORY_INCLUDE = {
+  _count: { select: { BaseMaterials: true } },
+} satisfies Prisma.MaterialCategoryInclude;
+type CategoryRow = Prisma.MaterialCategoryGetPayload<{ include: typeof CATEGORY_INCLUDE }>;
+
+function toCategoria(row: CategoryRow): CategoriaCatalogo {
+  return {
+    id: row.Id,
+    nome: row.Name,
+    cor: row.ColorScheme ?? "gray",
+    usos: row._count.BaseMaterials,
+  };
+}
+
+export async function listCategorias(organizationId: string): Promise<CategoriaCatalogo[]> {
+  const rows = await prisma.materialCategory.findMany({
+    where: { OrganizationId: organizationId },
+    include: CATEGORY_INCLUDE,
+    orderBy: { Name: "asc" },
+  });
+  return rows.map(toCategoria);
+}
+
+export async function createCategoria(
+  organizationId: string,
+  input: CategoriaInput
+): Promise<CategoriaCatalogo> {
+  const nome = input.nome.trim();
+  if (nome === "") throw new Error("Informe o nome da categoria.");
+  if (await findCategoryByName(organizationId, nome))
+    throw new Error("Já existe uma categoria com esse nome.");
+  const row = await prisma.materialCategory.create({
+    data: { OrganizationId: organizationId, Name: nome, ColorScheme: input.cor },
+    include: CATEGORY_INCLUDE,
+  });
+  return toCategoria(row);
+}
+
+export async function updateCategoria(
+  organizationId: string,
+  id: number,
+  patch: Partial<CategoriaInput>
+): Promise<CategoriaCatalogo> {
+  const exists = await prisma.materialCategory.findFirst({
+    where: { Id: id, OrganizationId: organizationId },
+    select: { Id: true },
+  });
+  if (!exists) throw new Error("Categoria não encontrada.");
+  const data: Prisma.MaterialCategoryUpdateInput = {};
+  if (patch.nome !== undefined) {
+    const nome = patch.nome.trim();
+    if (nome === "") throw new Error("Informe o nome da categoria.");
+    const dupe = await findCategoryByName(organizationId, nome);
+    if (dupe && dupe.Id !== id) throw new Error("Já existe uma categoria com esse nome.");
+    data.Name = nome;
+  }
+  if (patch.cor !== undefined) data.ColorScheme = patch.cor;
+  const row = await prisma.materialCategory.update({
+    where: { Id: id },
+    data,
+    include: CATEGORY_INCLUDE,
+  });
+  return toCategoria(row);
+}
+
+export async function deleteCategoria(organizationId: string, id: number): Promise<void> {
+  const exists = await prisma.materialCategory.findFirst({
+    where: { Id: id, OrganizationId: organizationId },
+    select: { Id: true },
+  });
+  if (!exists) throw new Error("Categoria não encontrada.");
+  // FK BaseMaterial.CategoryId é SetNull: materiais ficam "sem categoria".
+  await prisma.materialCategory.delete({ where: { Id: id } });
 }
 
 // ─── Mapeadores: linha do banco → domínio ──────────────────────────────
@@ -221,8 +305,7 @@ function toMaterial(row: BaseMaterialRow): Material {
     codigo: row.ReferenceCode,
     nome: row.Name,
     fabricante: row.Manufacturer ?? "",
-    categoria: (row.Category?.Name ?? "Piso") as Categoria,
-    unidade: (row.Unit ?? "und") as Unidade,
+    categoria: row.Category?.Name ?? "",
     custoMat: fromCents(row.CostMaterialInCents),
     custoMO: fromCents(row.CostLaborInCents),
     imagem: toImagem(row.MediaFile, row.ImagePreviewUrl),
@@ -237,7 +320,9 @@ function toKit(row: KitRow): Kit {
       materialId: ki.ChildMaterialId,
       nome: ki.ChildMaterial.Name,
       fabricante: ki.ChildMaterial.Manufacturer ?? "",
-      unidade: (ki.ChildMaterial.Unit ?? "und") as Unidade,
+      // Fallback para o Unit do material: kits antigos (antes da coluna
+      // MaterialKitItem.Unit) mantêm a unidade que exibiam.
+      unidade: (ki.Unit ?? ki.ChildMaterial.Unit ?? "und") as Unidade,
       custoMat: fromCents(ki.ChildMaterial.CostMaterialInCents),
       custoMO: fromCents(ki.ChildMaterial.CostLaborInCents),
     }));
@@ -245,7 +330,7 @@ function toKit(row: KitRow): Kit {
     id: row.Id,
     codigo: row.ReferenceCode,
     nome: row.Name,
-    categoria: (row.Category?.Name ?? "Piso") as Categoria,
+    categoria: row.Category?.Name ?? "",
     itens,
   };
 }
@@ -435,11 +520,12 @@ async function nextPosition(current: number | null | undefined): Promise<number>
 
 // ─── Projects (Enterprise) ──────────────────────────────────────────────
 
+// TowerLabel NÃO entra no patch: é derivado das torres em updateTorres
+// (escritor único — evita o label divergir da lista real).
 export type ProjectPatch = Partial<
   Pick<
     Project,
     | "nome"
-    | "torre"
     | "status"
     | "enviadoEm"
     | "prazo"
@@ -451,7 +537,6 @@ export type ProjectPatch = Partial<
 function projectPatchToData(patch: ProjectPatch): Prisma.EnterpriseUpdateInput {
   const data: Prisma.EnterpriseUpdateInput = {};
   if (patch.nome !== undefined) data.Name = patch.nome;
-  if (patch.torre !== undefined) data.TowerLabel = patch.torre;
   if (patch.status !== undefined) data.Status = patch.status;
   if (patch.enviadoEm !== undefined) data.SubmittedAtLabel = patch.enviadoEm;
   if (patch.prazo !== undefined) data.DeadlineLabel = patch.prazo;
@@ -577,7 +662,6 @@ async function baseMaterialCreateData(
     ReferenceCode: input.codigo,
     Name: input.nome,
     Manufacturer: input.fabricante,
-    Unit: input.unidade,
     CostMaterialInCents: toCentsOrNull(input.custoMat),
     CostLaborInCents: toCentsOrNull(input.custoMO),
     ImagePreviewUrl: legacyUrl,
@@ -603,7 +687,7 @@ export async function createMateriais(
   inputs: MaterialInput[]
 ): Promise<Material[]> {
   // Resolve as categorias distintas de uma vez (evita N find-or-create).
-  const catByName = new Map<Categoria, number>();
+  const catByName = new Map<string, number>();
   for (const cat of new Set(inputs.map((i) => i.categoria))) {
     catByName.set(cat, await resolveCategoryId(organizationId, cat));
   }
@@ -632,7 +716,6 @@ export async function updateMaterial(
   if (patch.codigo !== undefined) data.ReferenceCode = patch.codigo;
   if (patch.nome !== undefined) data.Name = patch.nome;
   if (patch.fabricante !== undefined) data.Manufacturer = patch.fabricante;
-  if (patch.unidade !== undefined) data.Unit = patch.unidade;
   if (patch.custoMat !== undefined) data.CostMaterialInCents = toCentsOrNull(patch.custoMat);
   if (patch.custoMO !== undefined) data.CostLaborInCents = toCentsOrNull(patch.custoMO);
   if (patch.categoria !== undefined) {
@@ -698,6 +781,7 @@ export async function createKit(organizationId: string, input: KitInput): Promis
         create: input.itens.map((it, i) => ({
           ChildMaterialId: it.materialId,
           Position: i,
+          Unit: it.unidade || null, // "" nunca persiste — cai no fallback do material
         })),
       },
     },
@@ -733,6 +817,7 @@ export async function updateKit(
           ParentMaterialId: id,
           ChildMaterialId: it.materialId,
           Position: i,
+          Unit: it.unidade || null, // "" nunca persiste — cai no fallback do material
         })),
       }),
     ]);
@@ -1524,14 +1609,79 @@ export async function deleteUnitGroup(organizationId: string, id: number): Promi
   if (res.count === 0) throw new Error("Grupo de unidades não encontrado.");
 }
 
-export async function listTorres(organizationId: string): Promise<string[]> {
+export async function listTorres(organizationId: string): Promise<Torre[]> {
   const enterpriseId = await activeEnterpriseIdOrNull(organizationId);
   if (enterpriseId == null) return [];
   const rows = await prisma.tower.findMany({
     where: { EnterpriseId: enterpriseId },
     orderBy: { Position: "asc" },
   });
-  return rows.map((r) => r.Name);
+  return rows.map((r) => ({ id: r.Id, nome: r.Name }));
+}
+
+export type TorreInput = { id: number | null; nome: string };
+
+/** Rótulo de exibição do dashboard, derivado da lista de torres. */
+function towerLabel(nomes: string[]): string | null {
+  if (nomes.length === 0) return null;
+  if (nomes.length === 1) return nomes[0]!;
+  return `${nomes.length} torres`;
+}
+
+/**
+ * Reconcilia a lista COMPLETA de torres do empreendimento âncora — por id, não
+ * delete-all+recreate: UnitGroup.TowerId (SetNull) perderia o vínculo dos
+ * grupos a cada salvamento. Grupos de torres removidas caem em "Sem torre
+ * definida" (comportamento do FK).
+ */
+export async function updateTorres(
+  organizationId: string,
+  items: TorreInput[]
+): Promise<Torre[]> {
+  const enterpriseId = await activeEnterpriseId(organizationId);
+
+  const normalized = items
+    .map((t) => ({ id: t.id, nome: t.nome.trim() }))
+    .filter((t) => t.nome !== "");
+  const seen = new Set<string>();
+  for (const t of normalized) {
+    const key = t.nome.toLowerCase();
+    if (seen.has(key)) throw new Error("Nomes de torre duplicados.");
+    seen.add(key);
+  }
+
+  const current = await prisma.tower.findMany({
+    where: { EnterpriseId: enterpriseId },
+    select: { Id: true },
+  });
+  const currentIds = new Set(current.map((t) => t.Id));
+  for (const t of normalized) {
+    if (t.id != null && !currentIds.has(t.id)) throw new Error("Torre não encontrada.");
+  }
+
+  const keptIds = new Set(normalized.flatMap((t) => (t.id != null ? [t.id] : [])));
+  const removedIds = [...currentIds].filter((id) => !keptIds.has(id));
+
+  await prisma.$transaction([
+    ...(removedIds.length > 0
+      ? [prisma.tower.deleteMany({ where: { Id: { in: removedIds } } })]
+      : []),
+    ...normalized.flatMap((t, i) =>
+      t.id != null
+        ? [prisma.tower.update({ where: { Id: t.id }, data: { Name: t.nome, Position: i } })]
+        : [
+            prisma.tower.create({
+              data: { EnterpriseId: enterpriseId, Name: t.nome, Position: i },
+            }),
+          ]
+    ),
+    prisma.enterprise.update({
+      where: { Id: enterpriseId },
+      data: { TowerLabel: towerLabel(normalized.map((t) => t.nome)) },
+    }),
+  ]);
+
+  return listTorres(organizationId);
 }
 
 // ─── Versions (BudgetVersion) ───────────────────────────────────────────

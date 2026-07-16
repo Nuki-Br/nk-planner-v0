@@ -2,12 +2,12 @@
 
 import React from "react";
 
-import { Button, Input, Modal, Select } from "@/components/ui";
+import { Button, Input, Modal } from "@/components/ui";
 import { ImagePickerField } from "@/features/media";
 import { useCreateMaterial, useUpdateMaterial } from "@/lib/hooks/useMateriais";
-import { CATEGORIAS, type Categoria } from "@/shared/constants/categorias";
-import { UNIDADES, type Unidade } from "@/shared/constants/unidades";
 import type { ImagemVinculada, Material } from "@/shared/types/domain";
+
+import { CategoryCombobox } from "./CategoryCombobox";
 
 interface MaterialModalProps {
   open: boolean;
@@ -16,13 +16,10 @@ interface MaterialModalProps {
   material: Material | null;
 }
 
-const CATEGORIA_OPTIONS = CATEGORIAS.map((c) => ({ value: c, label: c }));
-const UNIDADE_OPTIONS = UNIDADES.map((u) => ({ value: u, label: u }));
-
 // Modal Adicionar/Editar material. Decisão §12: só identificação — custos
-// nascem 0 (pendentes) e são preenchidos na revisão ou via link. O campo
-// Unidade não existia no modal do protótipo, mas o domínio exige (exibições
-// "R$/m²" etc.).
+// nascem 0 (pendentes) e são preenchidos na revisão ou via link. Material NÃO
+// tem unidade de medida: ela vem do contexto de uso (componente da tipologia
+// ou sub-item do kit).
 export function MaterialModal({ open, onClose, material }: MaterialModalProps) {
   const createMaterial = useCreateMaterial();
   const updateMaterial = useUpdateMaterial();
@@ -32,7 +29,6 @@ export function MaterialModal({ open, onClose, material }: MaterialModalProps) {
   const [categoria, setCategoria] = React.useState("");
   const [nome, setNome] = React.useState("");
   const [fabricante, setFabricante] = React.useState("");
-  const [unidade, setUnidade] = React.useState("und");
   const [imagem, setImagem] = React.useState<ImagemVinculada | null>(null);
 
   React.useEffect(() => {
@@ -41,7 +37,6 @@ export function MaterialModal({ open, onClose, material }: MaterialModalProps) {
     setCategoria(material?.categoria ?? "");
     setNome(material?.nome ?? "");
     setFabricante(material?.fabricante ?? "");
-    setUnidade(material?.unidade ?? "und");
     setImagem(material?.imagem ?? null);
   }, [open, material]);
 
@@ -54,8 +49,7 @@ export function MaterialModal({ open, onClose, material }: MaterialModalProps) {
       codigo: codigo.trim(),
       nome: nome.trim(),
       fabricante: fabricante.trim(),
-      categoria: categoria as Categoria,
-      unidade: unidade as Unidade,
+      categoria,
       imagem,
     };
     const opts = { onSuccess: onClose };
@@ -91,12 +85,7 @@ export function MaterialModal({ open, onClose, material }: MaterialModalProps) {
             onValueChange={setCodigo}
             placeholder="Ex: PP-6060-BI"
           />
-          <Select
-            label="Categoria"
-            options={CATEGORIA_OPTIONS}
-            value={categoria}
-            onValueChange={setCategoria}
-          />
+          <CategoryCombobox value={categoria} onChange={setCategoria} />
         </div>
         <Input
           label="Especificação completa"
@@ -104,25 +93,17 @@ export function MaterialModal({ open, onClose, material }: MaterialModalProps) {
           onValueChange={setNome}
           placeholder="Ex: Porcelanato Polido 60×60 Bianco"
         />
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <Input
-            label="Fabricante"
-            value={fabricante}
-            onValueChange={setFabricante}
-            placeholder="Ex: Portinari"
-          />
-          <Select
-            label="Unidade de medida"
-            options={UNIDADE_OPTIONS}
-            value={unidade}
-            onValueChange={setUnidade}
-          />
-        </div>
+        <Input
+          label="Fabricante"
+          value={fabricante}
+          onValueChange={setFabricante}
+          placeholder="Ex: Portinari"
+        />
 
         <div className="border-t border-neutral-gray-4 pt-4">
           <ImagePickerField
-            label="Imagem do material"
-            hint="Foto ou render do acabamento, exibida no memorial."
+            label="Imagem de Preview"
+            hint="Imagem de pré-visualização do material"
             value={imagem}
             onChange={setImagem}
           />

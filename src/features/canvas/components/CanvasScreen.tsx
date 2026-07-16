@@ -263,7 +263,6 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
             unidade: value.unidade as Unidade,
             qtd: value.qtd,
             rt: value.rt,
-            ghost: value.ghost,
           },
         },
         { onSuccess: () => setCompModal(null) }
@@ -466,7 +465,6 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
         open={compModal !== null}
         comp={compModal?.comp ?? EMPTY_COMP}
         ambNome={compModal ? (tip.ambientes.find((a) => a.blueprintRoomId === compModal.ambId)?.nome ?? "") : ""}
-        defaultOrdem={1}
         onClose={() => setCompModal(null)}
         onSave={saveComp}
         saving={createComp.isPending || updateComp.isPending}

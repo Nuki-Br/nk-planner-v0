@@ -306,6 +306,7 @@ model MaterialKitItem {
   ParentMaterialId     Int
   ChildMaterialId      Int
   Position             Int    @default(0)
+  Unit                 String? // unidade do sub-item (fallback: ChildMaterial.Unit)
   DefaultUsageQuantity Float?
 
   ParentMaterial BaseMaterial       @relation("KitParent", fields: [ParentMaterialId], references: [Id], onDelete: Cascade)

@@ -5,7 +5,7 @@ import React from "react";
 import { Button, Input, Modal, Select } from "@/components/ui";
 import { useCreateComponente } from "@/lib/hooks/useTipologiaMutations";
 import { parseBR } from "@/lib/utils";
-import type { Ambiente, Kit, Material, Unidade } from "@/shared/types/domain";
+import type { Ambiente, Unidade } from "@/shared/types/domain";
 
 const UNIDADE_OPTIONS = [
   { value: "m²", label: "m² — área" },
@@ -18,25 +18,20 @@ interface AddComponenteModalProps {
   onClose: () => void;
   tipologiaId: number;
   ambiente: Ambiente | null;
-  materiais: Material[];
-  kits: Kit[];
 }
 
-/** Modal Adicionar componente (com material padrão opcional do catálogo). */
+/** Modal Adicionar componente (material padrão é definido depois, na etapa de materiais). */
 export function AddComponenteModal({
   open,
   onClose,
   tipologiaId,
   ambiente,
-  materiais,
-  kits,
 }: AddComponenteModalProps) {
   const createComponente = useCreateComponente();
   const [nome, setNome] = React.useState("");
   const [unidade, setUnidade] = React.useState("m²");
   const [qtd, setQtd] = React.useState("");
   const [rt, setRt] = React.useState("15");
-  const [padrao, setPadrao] = React.useState("");
 
   React.useEffect(() => {
     if (!open) return;
@@ -44,13 +39,7 @@ export function AddComponenteModal({
     setUnidade("m²");
     setQtd("");
     setRt("15");
-    setPadrao("");
   }, [open]);
-
-  const padraoOptions = [
-    ...materiais.map((m) => ({ value: String(m.id), label: `${m.nome} — ${m.fabricante}` })),
-    ...kits.map((k) => ({ value: String(k.id), label: `[Kit] ${k.nome} — ${k.itens.length} itens` })),
-  ];
 
   const handleAdd = () => {
     if (!ambiente || nome.trim() === "") return;
@@ -63,7 +52,7 @@ export function AddComponenteModal({
           unidade: unidade as Unidade,
           qtd: parseBR(qtd),
           rt: parseBR(rt),
-          padraoBaseId: padrao ? Number(padrao) : null,
+          padraoBaseId: null,
         },
       },
       { onSuccess: onClose }
@@ -101,19 +90,6 @@ export function AddComponenteModal({
           <Select label="Unidade" options={UNIDADE_OPTIONS} value={unidade} onValueChange={setUnidade} small />
           <Input label="Quantidade" value={qtd} onValueChange={setQtd} type="number" small placeholder="0,00" />
           <Input label="Tolerância RT (%)" value={rt} onValueChange={setRt} type="number" small placeholder="15" />
-        </div>
-        <Select
-          label="Material padrão"
-          placeholder="Selecione do catálogo…"
-          options={padraoOptions}
-          value={padrao}
-          onValueChange={setPadrao}
-        />
-        <div className="rounded-lg bg-neutral-gray-2 px-3.5 py-2.5">
-          <p className="text-xs text-neutral-gray-7">
-            <strong>Material padrão</strong> é entregue sem custo adicional ao cliente. Opções de
-            upgrade são configuradas na etapa de materiais.
-          </p>
         </div>
       </div>
     </Modal>

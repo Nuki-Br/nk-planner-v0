@@ -632,7 +632,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                             </div>
                           </Td>
                           <Td right className={cn(bg, "text-neutral-gray-7")}>
-                            {fmtNum(qtdComRT, 2)} {padMat.unidade}
+                            {fmtNum(qtdComRT, 2)} {comp.unidade}
                           </Td>
                           <Td right className={cn(bg, "text-neutral-gray-7")}>
                             {fmtBRL(valUnit)}
@@ -917,7 +917,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                     Custo base →
                                   </span>
                                 ) : r ? (
-                                  `${fmtNum(r.qtdComRT, 2)} ${upgMat.unidade}`
+                                  `${fmtNum(r.qtdComRT, 2)} ${comp.unidade}`
                                 ) : (
                                   "—"
                                 )}

@@ -29,16 +29,19 @@ import { useTipologia } from "@/lib/hooks/useTipologias";
 import { useSelection } from "@/lib/store/selection";
 import { fmtBRL, fmtNum } from "@/lib/utils";
 import { KitBadge } from "@/features/catalog/components/KitBadge";
-import type { Material } from "@/shared/types/domain";
+import type { Material, Unidade } from "@/shared/types/domain";
 
 import { SelectEntityModal, type SelectionResult } from "./SelectEntityModal";
 
 function SubItemRow({
   mat,
   qty,
+  unidade,
 }: {
   mat: Material;
   qty: number | undefined;
+  /** Unidade do sub-item do kit (KitItem.unidade — o material não tem unidade). */
+  unidade: Unidade;
 }) {
   return (
     <div className="relative flex items-center gap-2.5 py-1.5 pl-3.5">
@@ -49,7 +52,7 @@ function SubItemRow({
         <code className="ml-2 text-[10px] text-neutral-gray-6">{mat.codigo}</code>
         {qty !== undefined && (
           <span className="mt-px block text-[11px] text-primary-7">
-            {fmtNum(qty, 2)} {mat.unidade}
+            {fmtNum(qty, 2)} {unidade}
           </span>
         )}
       </div>
@@ -126,7 +129,8 @@ export function MaterialsConfigScreen({
   const qtdComRT = comp.qtd * (1 + comp.rt / 100);
   const def = comp.options.find((o) => o.isDefault) ?? null;
   const padrao = def ? getOptionEntity(materiais, kits, def) : null;
-  const compCat = padrao?.categoria ?? "Piso";
+  // "" = sem padrão definido → o modal de seleção mostra todas as categorias.
+  const compCat = padrao?.categoria ?? "";
   const kitQtds = comp.kitQtds ?? {};
   const upgrades = comp.options.filter((o) => !o.isDefault);
   const path = {
@@ -259,7 +263,7 @@ export function MaterialsConfigScreen({
               {padrao.itens.map((it) => {
                 const m = getMaterial(materiais, it.materialId);
                 if (!m) return null;
-                return <SubItemRow key={it.id} mat={m} qty={kitQtds[it.id]} />;
+                return <SubItemRow key={it.id} mat={m} qty={kitQtds[it.id]} unidade={it.unidade} />;
               })}
             </div>
           </div>
@@ -368,7 +372,14 @@ export function MaterialsConfigScreen({
                             {ent.itens.map((it) => {
                               const m = getMaterial(materiais, it.materialId);
                               if (!m) return null;
-                              return <SubItemRow key={it.id} mat={m} qty={kitQtds[it.id]} />;
+                              return (
+                                <SubItemRow
+                                  key={it.id}
+                                  mat={m}
+                                  qty={kitQtds[it.id]}
+                                  unidade={it.unidade}
+                                />
+                              );
                             })}
                           </td>
                         </tr>
@@ -439,6 +450,7 @@ export function MaterialsConfigScreen({
         onClose={() => setModal(null)}
         onConfirm={applySelection}
         categoria={compCat}
+        unidade={comp.unidade}
         materiais={materiais}
         kits={kits}
         excludeIds={excludeIds}

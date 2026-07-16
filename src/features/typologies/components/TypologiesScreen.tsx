@@ -16,10 +16,10 @@ import {
   Button,
   Card,
   EmptyState,
-  LoadingState,
   Modal,
   PageHeader,
   ProgressBar,
+  Skeleton,
   StatusBadge,
 } from "@/components/ui";
 import { useKits } from "@/lib/hooks/useKits";
@@ -104,7 +104,7 @@ export function TypologiesScreen() {
   const [addChooser, setAddChooser] = React.useState(false);
   const [linkModal, setLinkModal] = React.useState(false);
   const [addCompAmb, setAddCompAmb] = React.useState<Ambiente | null>(null);
-  const [editComp, setEditComp] = React.useState<{ amb: Ambiente; comp: Componente; ordem: number } | null>(null);
+  const [editComp, setEditComp] = React.useState<{ amb: Ambiente; comp: Componente } | null>(null);
   const [imageTarget, setImageTarget] = React.useState<Material | null>(null);
 
   // Mutations
@@ -120,7 +120,46 @@ export function TypologiesScreen() {
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
-  if (tipsLoading) return <LoadingState label="Carregando tipologias…" />;
+  if (tipsLoading)
+    return (
+      <div aria-hidden aria-busy className="mx-auto max-w-6xl">
+        {/* bg-neutral-gray-4: sobre o fundo cinza da página, o gray-3 padrão some. */}
+        <div className="mb-6 flex flex-col gap-2">
+          <Skeleton className="h-3 w-56 bg-neutral-gray-4" />
+          <Skeleton className="h-7 w-72 bg-neutral-gray-4" />
+          <Skeleton className="h-3.5 w-96 max-w-full bg-neutral-gray-4" />
+        </div>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[260px_1fr]">
+          <div className="flex flex-col gap-2">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="rounded-lg border border-neutral-gray-4 bg-white px-4 py-3.5">
+                <div className="flex flex-col gap-2">
+                  <Skeleton className="h-3.5 w-28" />
+                  <Skeleton className="h-3 w-full" />
+                  <Skeleton className="h-3 w-3/4" />
+                  <Skeleton className="mt-1 h-1.5 w-full rounded-full" />
+                </div>
+              </div>
+            ))}
+            <Skeleton className="h-9 w-full rounded-lg bg-neutral-gray-4" />
+          </div>
+          <Card padding={0} className="min-h-[400px]">
+            <div className="flex items-center justify-between border-b border-neutral-gray-3 px-5 py-4">
+              <div className="flex flex-col gap-1.5">
+                <Skeleton className="h-5 w-40" />
+                <Skeleton className="h-3 w-64" />
+              </div>
+              <Skeleton className="h-8 w-40" />
+            </div>
+            <div className="flex flex-col gap-3 px-5 py-4">
+              {[0, 1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-12 w-full rounded-lg" />
+              ))}
+            </div>
+          </Card>
+        </div>
+      </div>
+    );
   if (!selectedTip)
     return (
       <EmptyState
@@ -366,7 +405,7 @@ export function TypologiesScreen() {
                     }
                     onDeleteAmb={setDeleteAmb}
                     onAddComp={setAddCompAmb}
-                    onEditComp={(a, c, ordem) => setEditComp({ amb: a, comp: c, ordem })}
+                    onEditComp={(a, c) => setEditComp({ amb: a, comp: c })}
                     onConfigComp={(c) =>
                       router.push(`/tipologias/${tip.id}/componente/${c.id}`)
                     }
@@ -483,8 +522,6 @@ export function TypologiesScreen() {
         onClose={() => setAddCompAmb(null)}
         tipologiaId={tip.id}
         ambiente={addCompAmb}
-        materiais={materiais}
-        kits={kits}
       />
 
       <EditComponentModal
@@ -492,7 +529,6 @@ export function TypologiesScreen() {
         open={editComp !== null}
         comp={editComp?.comp ?? null}
         ambNome={editComp?.amb.nome ?? ""}
-        defaultOrdem={editComp?.ordem ?? 1}
         onClose={() => setEditComp(null)}
         onSave={saveComponentEdit}
         saving={updateComponente.isPending}

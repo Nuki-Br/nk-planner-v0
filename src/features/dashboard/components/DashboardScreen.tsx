@@ -10,12 +10,13 @@ import {
   DataTable,
   EmptyState,
   Icon,
-  LoadingState,
   PageHeader,
   ProgressBar,
   Select,
+  Skeleton,
   StatCard,
   StatusBadge,
+  TableSkeleton,
   type DataTableColumn,
 } from "@/components/ui";
 import { useProjects } from "@/lib/hooks/useProjects";
@@ -71,7 +72,9 @@ export function DashboardScreen() {
       render: (r) => (
         <div>
           <span className="font-semibold text-neutral-gray-11">{r.nome}</span>
-          <span className="block text-[11px] text-neutral-gray-7">{r.torre}</span>
+          {r.torre !== "" && (
+            <span className="block text-[11px] text-neutral-gray-7">{r.torre}</span>
+          )}
         </div>
       ),
     },
@@ -134,13 +137,25 @@ export function DashboardScreen() {
 
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
         {stats.map((s) => (
-          <StatCard key={s.label} label={s.label} value={s.value} accent={s.accent} />
+          <StatCard
+            key={s.label}
+            label={s.label}
+            value={s.value}
+            accent={s.accent}
+            isLoading={isLoading}
+          />
         ))}
       </div>
 
       <Card>
         {isLoading ? (
-          <LoadingState label="Carregando empreendimentos…" />
+          <div aria-hidden>
+            <div className="mb-4 flex flex-wrap items-center gap-3">
+              <Skeleton className="h-10 w-[280px] max-w-full" />
+              <Skeleton className="h-10 w-[180px]" />
+            </div>
+            <TableSkeleton rows={5} />
+          </div>
         ) : isError ? (
           <EmptyState
             icon="warning"
@@ -178,12 +193,11 @@ export function DashboardScreen() {
                 onValueChange={setStatusFilter}
                 small
                 className="w-[180px] flex-none"
+                classNames={{
+                  trigger: "h-10 min-h-10 !border-small border-neutral-gray-5 bg-white",
+                  value: "text-[13px]",
+                }}
               />
-              <div className="ml-auto">
-                <Button variant="ghost" icon="filter" size="sm">
-                  Filtros
-                </Button>
-              </div>
             </div>
             <DataTable
               aria-label="Empreendimentos"

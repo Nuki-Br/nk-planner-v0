@@ -7,6 +7,7 @@ import type {
   Ambiente,
   BudgetColumn,
   BudgetVersion,
+  CategoriaCatalogo,
   Comment,
   Componente,
   FillLink,
@@ -15,6 +16,7 @@ import type {
   Project,
   Tipologia,
   TipologiaStatus,
+  Torre,
   Unidade,
   UnitGroup,
   VersionChanges,
@@ -22,11 +24,12 @@ import type {
 
 // ─── Projects ─────────────────────────────────────────────────────────
 
+// `torre` (TowerLabel) não é editável via patch — o rótulo é derivado da
+// lista de torres em updateTorres (escritor único).
 export type ProjectPatch = Partial<
   Pick<
     Project,
     | "nome"
-    | "torre"
     | "status"
     | "enviadoEm"
     | "prazo"
@@ -113,6 +116,33 @@ export async function updateKit(id: number, patch: Partial<KitInput>): Promise<K
 
 export async function deleteKit(id: number): Promise<void> {
   await httpSend<null>(`/api/kits/${id}`, "DELETE");
+}
+
+// ─── Categorias de catálogo (MaterialCategory) ──────────────────────────
+
+export type CategoriaInput = { nome: string; cor: string };
+
+export async function listCategorias(): Promise<CategoriaCatalogo[]> {
+  return httpGet<CategoriaCatalogo[]>("/api/categorias");
+}
+
+export async function createCategoria(input: CategoriaInput): Promise<CategoriaCatalogo> {
+  return httpSend<CategoriaCatalogo, CategoriaInput>("/api/categorias", "POST", input);
+}
+
+export async function updateCategoria(
+  id: number,
+  patch: Partial<CategoriaInput>
+): Promise<CategoriaCatalogo> {
+  return httpSend<CategoriaCatalogo, Partial<CategoriaInput>>(
+    `/api/categorias/${id}`,
+    "PATCH",
+    patch
+  );
+}
+
+export async function deleteCategoria(id: number): Promise<void> {
+  await httpSend<null>(`/api/categorias/${id}`, "DELETE");
 }
 
 // ─── Tipologias (Blueprint) ─────────────────────────────────────────────
@@ -391,8 +421,15 @@ export async function deleteUnitGroup(id: number): Promise<void> {
   await httpSend<null>(`/api/unit-groups/${id}`, "DELETE");
 }
 
-export async function listTorres(): Promise<string[]> {
-  return httpGet<string[]>("/api/torres");
+export type TorreInput = { id: number | null; nome: string };
+
+export async function listTorres(): Promise<Torre[]> {
+  return httpGet<Torre[]>("/api/torres");
+}
+
+/** Reconcilia a lista completa de torres do empreendimento âncora. */
+export async function updateTorres(items: TorreInput[]): Promise<Torre[]> {
+  return httpSend<Torre[], TorreInput[]>("/api/torres", "PUT", items);
 }
 
 // ─── Versions ─────────────────────────────────────────────────────────

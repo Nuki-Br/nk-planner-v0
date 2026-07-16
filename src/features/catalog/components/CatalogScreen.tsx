@@ -1,7 +1,6 @@
 "use client";
 
 import React from "react";
-import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { Input as HeroInput } from "@heroui/react";
 
@@ -11,23 +10,23 @@ import {
   DataTable,
   EmptyState,
   Icon,
-  LoadingState,
   MaterialThumb,
   PageHeader,
+  TableSkeleton,
   type DataTableColumn,
 } from "@/components/ui";
 import type { Entity } from "@/lib/data/entities";
-import { useKits } from "@/lib/hooks/useKits";
-import { useMateriais } from "@/lib/hooks/useMateriais";
+import { useCategorias } from "@/lib/hooks/useCategorias";
+import { useKits, useUpdateKit } from "@/lib/hooks/useKits";
+import { useMateriais, useUpdateMaterial } from "@/lib/hooks/useMateriais";
 import { useProject } from "@/lib/hooks/useProjects";
 import { useTipologias } from "@/lib/hooks/useTipologias";
 import { useSelection } from "@/lib/store/selection";
-import { cn } from "@/lib/utils";
-import { CAT_COLORS, type Categoria } from "@/shared/constants/categorias";
 import type { Kit, Material } from "@/shared/types/domain";
 
 import { getUsageCounts } from "../usage";
 import { AddSplitButton } from "./AddSplitButton";
+import { CategoryCellPicker } from "./CategoryCombobox";
 import { ActiveChip, FilterMenu } from "./FilterMenu";
 import { KitBadge } from "./KitBadge";
 import { KitModal } from "./KitModal";
@@ -44,11 +43,13 @@ type TypeFilter = "" | "Material" | "Kit";
 
 // Tela 6 — Catálogo de materiais e kits (protótipo: MaterialsCatalogScreen).
 export function CatalogScreen() {
-  const router = useRouter();
   const { data: materiais = [], isLoading: matLoading, isError: matError, refetch: refetchMat } =
     useMateriais();
   const { data: kits = [], isLoading: kitLoading } = useKits();
+  const { data: categoriasCatalogo = [] } = useCategorias();
   const { data: tipologias = [] } = useTipologias();
+  const updateMaterial = useUpdateMaterial();
+  const updateKit = useUpdateKit();
   const activeProjectId = useSelection((s) => s.activeProjectId);
   const { data: project } = useProject(activeProjectId);
 
@@ -72,10 +73,6 @@ export function CatalogScreen() {
   );
 
   const usageCounts = React.useMemo(() => getUsageCounts(tipologias), [tipologias]);
-  const categorias = React.useMemo(
-    () => [...new Set(materiais.map((m) => m.categoria))],
-    [materiais]
-  );
 
   const matchTxt = (e: Entity) => {
     const q = search.toLowerCase();
@@ -160,14 +157,13 @@ export function CatalogScreen() {
       label: "Categoria",
       sortValue: (r) => r.categoria,
       render: (r) => (
-        <span
-          className={cn(
-            "rounded-full px-2.5 py-0.5 text-[11px] font-semibold",
-            CAT_COLORS[r.categoria as Categoria] ?? "bg-neutral-gray-3 text-neutral-gray-8"
-          )}
-        >
-          {r.categoria}
-        </span>
+        <CategoryCellPicker
+          value={r.categoria}
+          onChange={(nome) => {
+            if (r.isKit) updateKit.mutate({ id: r.id, patch: { categoria: nome } });
+            else updateMaterial.mutate({ id: r.id, patch: { categoria: nome } });
+          }}
+        />
       ),
     },
     {
@@ -220,9 +216,6 @@ export function CatalogScreen() {
         subtitle={`${materiais.length} materiais · ${kits.length} kits · organizados por categoria`}
         action={
           <>
-            <Button variant="bordered" icon="send" onPress={() => router.push("/enviar")}>
-              Enviar para construtora
-            </Button>
             <Button variant="bordered" icon="upload" onPress={() => setShowCsv(true)}>
               Importar CSV
             </Button>
@@ -234,64 +227,9 @@ export function CatalogScreen() {
         }
       />
 
-      <div className="mb-3 flex flex-wrap items-center gap-2.5">
-        <FilterMenu
-          label="Tipo"
-          icon="tune"
-          options={[
-            { value: "", label: `Todos (${entities.length})` },
-            { value: "Material", label: `Materiais (${materiais.length})` },
-            { value: "Kit", label: `Kits (${kits.length})` },
-          ]}
-          value={typeFilter}
-          onChange={(v) => setTypeFilter(v as TypeFilter)}
-        />
-        <FilterMenu
-          label="Categoria"
-          icon="filter"
-          multi
-          options={categorias.map((c) => ({
-            value: c,
-            label: `${c} (${materiais.filter((m) => m.categoria === c).length})`,
-          }))}
-          value={catFilters}
-          onChange={(v) =>
-            setCatFilters((cs) => (cs.includes(v) ? cs.filter((x) => x !== v) : [...cs, v]))
-          }
-        />
-      </div>
-
-      {(catFilters.length > 0 || typeFilter !== "") && (
-        <div className="mb-4 flex flex-wrap items-center gap-2">
-          {typeFilter !== "" && (
-            <ActiveChip
-              label={typeFilter === "Kit" ? "Apenas kits" : "Apenas materiais"}
-              onRemove={() => setTypeFilter("")}
-            />
-          )}
-          {catFilters.map((c) => (
-            <ActiveChip
-              key={c}
-              label={c}
-              onRemove={() => setCatFilters((cs) => cs.filter((x) => x !== c))}
-            />
-          ))}
-          <button
-            type="button"
-            onClick={() => {
-              setCatFilters([]);
-              setTypeFilter("");
-            }}
-            className="text-xs font-semibold text-neutral-gray-7 underline"
-          >
-            Limpar filtros
-          </button>
-        </div>
-      )}
-
       <Card padding={0}>
         {matLoading || kitLoading ? (
-          <LoadingState label="Carregando catálogo…" />
+          <TableSkeleton rows={6} showToolbar />
         ) : matError ? (
           <EmptyState
             icon="warning"
@@ -305,26 +243,83 @@ export function CatalogScreen() {
           />
         ) : (
           <>
-            <div className="flex items-center gap-3 border-b border-neutral-gray-4 px-4 py-3.5">
-              <HeroInput
-                value={search}
-                onValueChange={setSearch}
-                aria-label="Buscar no catálogo"
-                placeholder="Buscar por nome, código ou fabricante..."
-                variant="bordered"
-                radius="sm"
-                size="sm"
-                startContent={<Icon name="search" size={14} className="text-neutral-gray-6" />}
-                classNames={{
-                  base: "w-80 max-w-full flex-none",
-                  inputWrapper: "!border-small h-10 border-neutral-gray-5 bg-white",
-                  input: "text-[13px]",
-                }}
-              />
-              <span className="text-xs text-neutral-gray-7">
-                {filtered.length} resultado{filtered.length !== 1 ? "s" : ""}
-              </span>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-gray-4 px-4 py-3.5">
+              <div className="flex items-center gap-3">
+                <HeroInput
+                  value={search}
+                  onValueChange={setSearch}
+                  aria-label="Buscar no catálogo"
+                  placeholder="Buscar por nome, código ou fabricante..."
+                  variant="bordered"
+                  radius="sm"
+                  size="sm"
+                  startContent={<Icon name="search" size={14} className="text-neutral-gray-6" />}
+                  classNames={{
+                    base: "w-80 max-w-full flex-none",
+                    inputWrapper: "!border-small h-10 border-neutral-gray-5 bg-white",
+                    input: "text-[13px]",
+                  }}
+                />
+                <span className="text-xs text-neutral-gray-7">
+                  {filtered.length} resultado{filtered.length !== 1 ? "s" : ""}
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2.5">
+                <FilterMenu
+                  label="Tipo"
+                  icon="tune"
+                  options={[
+                    { value: "", label: `Todos (${entities.length})` },
+                    { value: "Material", label: `Materiais (${materiais.length})` },
+                    { value: "Kit", label: `Kits (${kits.length})` },
+                  ]}
+                  value={typeFilter}
+                  onChange={(v) => setTypeFilter(v as TypeFilter)}
+                />
+                <FilterMenu
+                  label="Categoria"
+                  icon="filter"
+                  multi
+                  options={categoriasCatalogo.map((c) => ({
+                    value: c.nome,
+                    label: `${c.nome} (${c.usos} uso${c.usos !== 1 ? "s" : ""})`,
+                  }))}
+                  value={catFilters}
+                  onChange={(v) =>
+                    setCatFilters((cs) =>
+                      cs.includes(v) ? cs.filter((x) => x !== v) : [...cs, v]
+                    )
+                  }
+                />
+              </div>
             </div>
+            {(catFilters.length > 0 || typeFilter !== "") && (
+              <div className="flex flex-wrap items-center gap-2 border-b border-neutral-gray-4 px-4 py-2.5">
+                {typeFilter !== "" && (
+                  <ActiveChip
+                    label={typeFilter === "Kit" ? "Apenas kits" : "Apenas materiais"}
+                    onRemove={() => setTypeFilter("")}
+                  />
+                )}
+                {catFilters.map((c) => (
+                  <ActiveChip
+                    key={c}
+                    label={c}
+                    onRemove={() => setCatFilters((cs) => cs.filter((x) => x !== c))}
+                  />
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCatFilters([]);
+                    setTypeFilter("");
+                  }}
+                  className="text-xs font-semibold text-neutral-gray-7 underline"
+                >
+                  Limpar filtros
+                </button>
+              </div>
+            )}
             <DataTable
               aria-label="Catálogo de materiais e kits"
               columns={columns}

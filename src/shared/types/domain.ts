@@ -5,13 +5,21 @@
 // Kit) e mudam só os SHAPES forçados pela normalização — ids numéricos, opções
 // como linhas (não array polimórfico), quantidade por planta, custo no catálogo.
 // Os mappers do store traduzem DB↔domínio. Custos em BRL (número; 0 = pendente).
-import type { Categoria } from "@/shared/constants/categorias";
 import type { Unidade } from "@/shared/constants/unidades";
 
-export type { Categoria } from "@/shared/constants/categorias";
 export type { Unidade } from "@/shared/constants/unidades";
 
 // ─── Catálogo (BaseMaterial: single | kit) ──────────────────────────────
+
+/** Categoria de material (MaterialCategory) — dinâmica, por Organization. */
+export interface CategoriaCatalogo {
+  id: number;
+  nome: string;
+  /** Chave de cor (CategoryColorKey); string no DTO, validada via toColorKey. */
+  cor: string;
+  /** Quantidade de materiais/kits usando a categoria ("N usos"). */
+  usos: number;
+}
 
 /** Sub-item de um kit (composição de catálogo — MaterialKitItem). */
 export interface KitItem {
@@ -33,8 +41,8 @@ export interface Material {
   codigo: string;
   nome: string;
   fabricante: string;
-  categoria: Categoria;
-  unidade: Unidade;
+  /** Nome da categoria ("" = sem categoria). */
+  categoria: string;
   /** Custo de material (R$/unidade; 0 = pendente = custo NULL no banco). */
   custoMat: number;
   /** Custo de mão de obra (R$/unidade; 0 = pendente). */
@@ -52,7 +60,8 @@ export interface Kit {
   id: number;
   codigo: string;
   nome: string;
-  categoria: Categoria;
+  /** Nome da categoria ("" = sem categoria). */
+  categoria: string;
   /** Sub-itens (composição). */
   itens: KitItem[];
 }
@@ -150,9 +159,16 @@ export interface Tipologia {
   ambientes: Ambiente[];
 }
 
+/** Torre/bloco do empreendimento (Tower) — gerida na config base. */
+export interface Torre {
+  id: number;
+  nome: string;
+}
+
 export interface UnitGroup {
   id: number;
   nome: string;
+  /** Nome da torre ("" = sem torre) — o vínculo real é por FK no banco. */
   torre: string;
   unidades: string[];
 }

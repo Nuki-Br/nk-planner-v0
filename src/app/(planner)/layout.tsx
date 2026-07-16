@@ -1,12 +1,11 @@
 import { redirect } from "next/navigation";
 
-import { Sidebar } from "@/components/layout/Sidebar";
-import { Header } from "@/components/layout/Header";
+import { AppShell } from "@/components/layout/AppShell";
 import { getAuthContext } from "@/lib/auth/session";
 
-// Shell autenticado (sidebar + header). O middleware já barra sem sessão;
-// aqui validamos também o membership (usuário sem organização não entra) e
-// passamos org/usuário reais ao Header.
+// Shell autenticado. O middleware já barra sem sessão; aqui validamos também
+// o membership (usuário sem organização não entra) e passamos org/usuário
+// reais ao AppShell (client), que decide sidebar/offset pela rota.
 export default async function PlannerLayout({
   children,
 }: {
@@ -16,14 +15,8 @@ export default async function PlannerLayout({
   if (!auth) redirect("/login");
 
   return (
-    <div className="min-h-screen bg-background-standard">
-      <Sidebar />
-      <Header orgName={auth.orgName} email={auth.email} />
-      <main style={{ marginLeft: 212, paddingTop: 64 }}>
-        <div className="p-6">
-          {children}
-        </div>
-      </main>
-    </div>
+    <AppShell orgName={auth.orgName} email={auth.email}>
+      {children}
+    </AppShell>
   );
 }

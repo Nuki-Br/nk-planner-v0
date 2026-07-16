@@ -79,12 +79,20 @@ async function main(): Promise<void> {
   await prisma.baseMaterial.deleteMany({ where: { OrganizationId: ORG_ID, Type: "single" } });
   await prisma.materialCategory.deleteMany({ where: { OrganizationId: ORG_ID } });
 
-  // ── Categorias (por org) ──
+  // ── Categorias (por org) — cores espelham o CAT_COLORS do protótipo ──
+  const CAT_SEED_COLORS: Record<string, string> = {
+    Piso: "blue",
+    Revestimento: "purple",
+    Pedra: "pink",
+    Metal: "yellow",
+    "Rodapé": "green",
+    "Cuba/Louça": "cyan",
+  };
   const catNames = new Set<string>([...seed.materiais, ...seed.kits].map((x) => x.categoria));
   const catMap = new Map<string, number>();
   for (const name of catNames) {
     const row = await prisma.materialCategory.create({
-      data: { OrganizationId: ORG_ID, Name: name },
+      data: { OrganizationId: ORG_ID, Name: name, ColorScheme: CAT_SEED_COLORS[name] ?? "gray" },
       select: { Id: true },
     });
     catMap.set(name, row.Id);
@@ -122,6 +130,7 @@ async function main(): Promise<void> {
           create: k.itens.map((it, i) => ({
             ChildMaterialId: catalogMap.get(it.materialId)!,
             Position: i,
+            Unit: it.unidade,
           })),
         },
       },

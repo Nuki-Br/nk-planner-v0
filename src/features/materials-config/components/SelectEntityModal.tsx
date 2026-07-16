@@ -7,7 +7,7 @@ import { Button, Icon, Modal } from "@/components/ui";
 import { getMaterial, type Entity } from "@/lib/data/entities";
 import { cn, fmtBRL, parseBR } from "@/lib/utils";
 import { KitBadge } from "@/features/catalog/components/KitBadge";
-import type { Categoria, Kit, Material } from "@/shared/types/domain";
+import type { Kit, Material, Unidade } from "@/shared/types/domain";
 
 export interface SelectionResult {
   /** Id de catálogo (BaseMaterial) escolhido. */
@@ -21,7 +21,9 @@ interface SelectEntityModalProps {
   mode: "padrao" | "upgrade";
   onClose: () => void;
   onConfirm: (result: SelectionResult) => void;
-  categoria: Categoria;
+  categoria: string;
+  /** Unidade do componente — sufixo dos custos ("R$ X/m²"); o material não tem unidade. */
+  unidade: Unidade;
   materiais: Material[];
   kits: Kit[];
   /** Ids de catálogo excluídos da lista (padrão atual e upgrades já usados). */
@@ -41,6 +43,7 @@ export function SelectEntityModal({
   onClose,
   onConfirm,
   categoria,
+  unidade,
   materiais,
   kits,
   excludeIds,
@@ -62,10 +65,12 @@ export function SelectEntityModal({
     setSearch("");
   }, [open]);
 
+  // categoria "" (componente sem padrão) → sem filtro: mostra o catálogo todo.
+  const matchCat = (c: string) => categoria === "" || c === categoria;
   const candidates: Entity[] = [
-    ...kits.filter((k) => k.categoria === categoria).map((k): Entity => ({ ...k, isKit: true })),
+    ...kits.filter((k) => matchCat(k.categoria)).map((k): Entity => ({ ...k, isKit: true })),
     ...materiais
-      .filter((m) => m.categoria === categoria)
+      .filter((m) => matchCat(m.categoria))
       .map((m): Entity => ({ ...m, isKit: false })),
   ]
     .filter((e) => !excludeIds.has(e.id))
@@ -145,8 +150,14 @@ export function SelectEntityModal({
       {step === 1 && (
         <>
           <p className="mb-3 text-xs text-neutral-gray-7">
-            Materiais e kits da categoria <strong>{categoria}</strong>. Kits aparecem com o selo
-            Kit.
+            {categoria === "" ? (
+              <>Materiais e kits do catálogo. Kits aparecem com o selo Kit.</>
+            ) : (
+              <>
+                Materiais e kits da categoria <strong>{categoria}</strong>. Kits aparecem com o
+                selo Kit.
+              </>
+            )}
           </p>
           <HeroInput
             value={search}
@@ -206,7 +217,7 @@ export function SelectEntityModal({
                     {e.isKit ? (
                       <span className="text-neutral-gray-5">soma dos itens</span>
                     ) : (
-                      `${fmtBRL(e.custoMat)}/${e.unidade}`
+                      `${fmtBRL(e.custoMat)}/${unidade}`
                     )}
                   </span>
                 </button>
@@ -253,7 +264,7 @@ export function SelectEntityModal({
                       placeholder="0,00"
                       className="h-9 w-[90px] rounded-lg border border-neutral-gray-5 px-2.5 text-right text-[13px] text-neutral-gray-11 outline-none focus:border-primary-7"
                     />
-                    <span className="w-7 text-xs text-neutral-gray-7">{m.unidade}</span>
+                    <span className="w-7 text-xs text-neutral-gray-7">{it.unidade}</span>
                   </div>
                 </div>
               );
