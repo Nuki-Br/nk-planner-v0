@@ -371,6 +371,7 @@ model Comment {
   MaterialId   Int
   EnterpriseId Int
   Author       CommentAuthor
+  AuthorName   String? // nome exibível de quem comentou (usuário logado / construtora)
   Text         String
   DateLabel    String // "DD/MM/AAAA HH:mm"
   CreatedAt    DateTime      @default(now()) @db.Timestamptz()

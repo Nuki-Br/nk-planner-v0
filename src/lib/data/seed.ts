@@ -292,13 +292,13 @@ export function createSeed(): SeedData {
   }
   const comments: Record<string, Comment[]> = {
     [String(optIdOf(t2, 0, 0, "piso-002"))]: [
-      { autor: "construtora", texto: "Cotação atualizada com base no pedido mínimo de 1000m². Preço válido por 30 dias.", data: "15/05/2026 14:32" },
-      { autor: "incorporadora", texto: "OK, mas preciso confirmar o prazo de entrega. Pode garantir para Agosto?", data: "16/05/2026 09:18" },
-      { autor: "construtora", texto: "Sim, entrega garantida para 15/08/2026. Confirmo por escrito.", data: "16/05/2026 11:45" },
+      { autor: "construtora", autorNome: "Marcos Lima · Construtora Alfa", texto: "Cotação atualizada com base no pedido mínimo de 1000m². Preço válido por 30 dias.", data: "15/05/2026 14:32" },
+      { autor: "incorporadora", autorNome: "Ana Carvalho", texto: "OK, mas preciso confirmar o prazo de entrega. Pode garantir para Agosto?", data: "16/05/2026 09:18" },
+      { autor: "construtora", autorNome: "Marcos Lima · Construtora Alfa", texto: "Sim, entrega garantida para 15/08/2026. Confirmo por escrito.", data: "16/05/2026 11:45" },
     ],
     [String(optIdOf(t2, 5, 3, "met-003"))]: [
-      { autor: "construtora", texto: "Material importado — preço sujeito à variação cambial. Adicionei buffer de 8%.", data: "14/05/2026 16:20" },
-      { autor: "incorporadora", texto: "Entendido. Vamos manter esse valor mas preciso monitorar.", data: "15/05/2026 08:55" },
+      { autor: "construtora", autorNome: "Marcos Lima · Construtora Alfa", texto: "Material importado — preço sujeito à variação cambial. Adicionei buffer de 8%.", data: "14/05/2026 16:20" },
+      { autor: "incorporadora", autorNome: "Ana Carvalho", texto: "Entendido. Vamos manter esse valor mas preciso monitorar.", data: "15/05/2026 08:55" },
     ],
   };
 

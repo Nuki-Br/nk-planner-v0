@@ -1762,6 +1762,7 @@ export async function restoreVersion(
 
 export interface CommentInput {
   autor: Comment["autor"];
+  autorNome?: string;
   texto: string;
 }
 
@@ -1771,13 +1772,27 @@ function parseRowKey(rowKey: string): number {
   return id;
 }
 
+function toComment(row: {
+  Author: Comment["autor"];
+  AuthorName: string | null;
+  Text: string;
+  DateLabel: string;
+}): Comment {
+  return {
+    autor: row.Author,
+    autorNome: row.AuthorName ?? undefined,
+    texto: row.Text,
+    data: row.DateLabel,
+  };
+}
+
 export async function getComments(organizationId: string, rowKey: string): Promise<Comment[]> {
   const materialId = parseRowKey(rowKey);
   const rows = await prisma.comment.findMany({
     where: { MaterialId: materialId, Enterprise: { OrganizationId: organizationId } },
     orderBy: { CreatedAt: "asc" },
   });
-  return rows.map((r) => ({ autor: r.Author, texto: r.Text, data: r.DateLabel }));
+  return rows.map(toComment);
 }
 
 /** Todas as threads (contadores por linha) — keyed por String(MaterialId). */
@@ -1793,7 +1808,7 @@ export async function listCommentThreads(
   });
   for (const r of rows) {
     const key = String(r.MaterialId);
-    (threads[key] ??= []).push({ autor: r.Author, texto: r.Text, data: r.DateLabel });
+    (threads[key] ??= []).push(toComment(r));
   }
   return threads;
 }
@@ -1814,11 +1829,12 @@ export async function appendComment(
       MaterialId: materialId,
       EnterpriseId: mat.EnterpriseId,
       Author: input.autor,
+      AuthorName: input.autorNome ?? null,
       Text: input.texto,
       DateLabel: nowBR(),
     },
   });
-  return { autor: row.Author, texto: row.Text, data: row.DateLabel };
+  return toComment(row);
 }
 
 // ─── Links de preenchimento + portal do terceiro ──────────────────────
@@ -1932,6 +1948,60 @@ export async function getPortalMaterialIds(
 }
 
 /**
+ * Espelha os comentários deixados pela construtora no portal como comentários
+ * `construtora` nas threads das opções (Material) que usam cada material base.
+ * Assinado com o nome informado no portal. Idempotente: não recria um comentário
+ * de mesmo texto já presente na thread (o link é reeditável).
+ */
+async function syncConstrutoraComments(
+  organizationId: string,
+  enterpriseId: number,
+  scoped: [string, PortalFill][],
+  authorName?: string
+): Promise<void> {
+  const withComments = scoped.filter(([, f]) => (f.comment ?? "").trim() !== "");
+  if (withComments.length === 0) return;
+
+  const baseIds = withComments.map(([baseId]) => Number(baseId));
+  const options = await prisma.material.findMany({
+    where: { BaseMaterialId: { in: baseIds }, EnterpriseId: enterpriseId, Enterprise: { OrganizationId: organizationId } },
+    select: { Id: true, BaseMaterialId: true },
+  });
+  const optionsByBase = new Map<number, number[]>();
+  for (const o of options) {
+    const arr = optionsByBase.get(o.BaseMaterialId) ?? [];
+    arr.push(o.Id);
+    optionsByBase.set(o.BaseMaterialId, arr);
+  }
+
+  const nome = (authorName ?? "").trim();
+  const rows: Prisma.CommentCreateManyInput[] = [];
+  for (const [baseIdStr, f] of withComments) {
+    const text = f.comment.trim();
+    for (const optId of optionsByBase.get(Number(baseIdStr)) ?? []) {
+      rows.push({
+        MaterialId: optId,
+        EnterpriseId: enterpriseId,
+        Author: "construtora",
+        AuthorName: nome || null,
+        Text: text,
+        DateLabel: nowBR(),
+      });
+    }
+  }
+  if (rows.length === 0) return;
+
+  // Dedup contra comentários da construtora já gravados (mesma opção + texto).
+  const existing = await prisma.comment.findMany({
+    where: { EnterpriseId: enterpriseId, Author: "construtora", MaterialId: { in: rows.map((r) => r.MaterialId) } },
+    select: { MaterialId: true, Text: true },
+  });
+  const seen = new Set(existing.map((e) => `${e.MaterialId}::${e.Text}`));
+  const toCreate = rows.filter((r) => !seen.has(`${r.MaterialId}::${r.Text}`));
+  if (toCreate.length > 0) await prisma.comment.createMany({ data: toCreate });
+}
+
+/**
  * "Enviar preenchimento" do portal: grava os fills, aplica os custos ao catálogo
  * (BaseMaterial) e move o empreendimento ativo para "em_revisao". A pendência
  * some por construção (custo deixa de ser NULL). Retorna quantos foram aplicados.
@@ -1939,7 +2009,8 @@ export async function getPortalMaterialIds(
 export async function submitPortalFills(
   organizationId: string,
   fills: Record<string, PortalFill>,
-  allowedBaseMaterialIds: Set<number>
+  allowedBaseMaterialIds: Set<number>,
+  authorName?: string
 ): Promise<number> {
   const enterpriseId = await activeEnterpriseId(organizationId);
 
@@ -1958,6 +2029,10 @@ export async function submitPortalFills(
       })),
     }),
   ]);
+
+  // Comentários da construtora → threads das opções que usam o material base.
+  // (o portal coleta por BaseMaterialId; a thread é por opção/Material.Id).
+  await syncConstrutoraComments(organizationId, enterpriseId, scoped, authorName);
 
   // Aplica os custos preenchidos (> 0) ao catálogo, em paralelo.
   const paraAplicar = scoped.filter(([, f]) => parseFloat(f.mat) > 0);

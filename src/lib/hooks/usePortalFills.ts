@@ -32,11 +32,11 @@ export function usePortalData(token: string, senha: string | null) {
 export function useSubmitPortalFills(token: string, senha: string | null) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (fills: Record<string, PortalFill>) =>
-      httpSend<number, { fills: Record<string, PortalFill>; senha?: string }>(
+    mutationFn: ({ fills, nome }: { fills: Record<string, PortalFill>; nome: string }) =>
+      httpSend<number, { fills: Record<string, PortalFill>; senha?: string; nome: string }>(
         `/api/portal/${token}/fills`,
         "POST",
-        senha === null ? { fills } : { fills, senha }
+        senha === null ? { fills, nome } : { fills, senha, nome }
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["portal", token] });

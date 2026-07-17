@@ -311,6 +311,7 @@ async function main(): Promise<void> {
       MaterialId: materialId,
       EnterpriseId: activeId,
       Author: c.autor,
+      AuthorName: c.autorNome ?? null,
       Text: c.texto,
       DateLabel: c.data,
       CreatedAt: new Date(cbase + i * 1000),

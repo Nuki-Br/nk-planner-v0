@@ -7,6 +7,8 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 export interface AuthContext {
   userId: string;
   email: string;
+  /** Nome exibível do usuário (metadata do Supabase; cai para o email). */
+  userName: string;
   organizationId: string;
   orgName: string;
   orgRole: string;
@@ -47,9 +49,21 @@ async function resolveAuthContext(
   });
   if (!membership) return null;
 
+  const email = user.email ?? membership.email;
+  const meta = user.user_metadata ?? {};
+  const metaName =
+    typeof meta.full_name === "string"
+      ? meta.full_name
+      : typeof meta.name === "string"
+        ? meta.name
+        : typeof meta.display_name === "string"
+          ? meta.display_name
+          : "";
+
   return {
     userId: user.id,
-    email: user.email ?? membership.email,
+    email,
+    userName: metaName.trim() || email,
     organizationId: membership.organizationId,
     orgName: membership.organization.name,
     orgRole: membership.role,

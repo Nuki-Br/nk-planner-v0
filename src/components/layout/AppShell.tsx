@@ -11,19 +11,21 @@ import {
   CONTENT_LEFT_OFFSET_PX,
   Sidebar,
 } from "@/components/layout/Sidebar";
+import { CurrentUserProvider } from "@/lib/hooks/useCurrentUser";
 import { useSelection } from "@/lib/store/selection";
 import { DASHBOARD_MODE_ROUTES } from "@/shared/constants/navigation";
 
 interface AppShellProps {
   orgName: string;
   email: string;
+  userName: string;
   children: React.ReactNode;
 }
 
 // Shell client do planner: decide sidebar/offset pela rota (determinístico no
 // SSR — sem pulo de margem na hidratação) e monta o modal de boas-vindas e o
 // botão de feedback em todas as telas autenticadas.
-export function AppShell({ orgName, email, children }: AppShellProps) {
+export function AppShell({ orgName, email, userName, children }: AppShellProps) {
   const pathname = usePathname();
   const clearSelection = useSelection((s) => s.clearSelection);
 
@@ -54,7 +56,8 @@ export function AppShell({ orgName, email, children }: AppShellProps) {
       : CONTENT_LEFT_OFFSET_PX;
 
   return (
-    <div className="min-h-screen bg-background-standard">
+    <CurrentUserProvider value={{ name: userName, email, orgName }}>
+      <div className="min-h-screen bg-background-standard">
       <Header orgName={orgName} email={email} inProject={!isDashboardMode} />
       {!isDashboardMode && !isCanvas && (
         <Sidebar
@@ -70,6 +73,7 @@ export function AppShell({ orgName, email, children }: AppShellProps) {
       </main>
       <IntroModal />
       <FeedbackFab />
-    </div>
+      </div>
+    </CurrentUserProvider>
   );
 }

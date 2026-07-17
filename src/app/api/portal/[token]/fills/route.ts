@@ -11,14 +11,15 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
   if (!resolved) return fail("Link inválido ou expirado.", 404);
 
   const { link, organizationId } = resolved;
-  const { fills, senha } = (await req.json()) as {
+  const { fills, senha, nome } = (await req.json()) as {
     fills: Record<string, PortalFill>;
     senha?: string;
+    nome?: string;
   };
   if (link.senha !== null && senha !== link.senha) {
     return fail("Senha incorreta.", 401);
   }
   // Escopo do link: só materiais das tipologias liberadas podem ser preenchidos.
   const allowed = await getPortalMaterialIds(organizationId, link.tipologiaIds);
-  return publicRoute(() => submitPortalFills(organizationId, fills, allowed));
+  return publicRoute(() => submitPortalFills(organizationId, fills, allowed, nome));
 }

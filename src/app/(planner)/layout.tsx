@@ -15,7 +15,7 @@ export default async function PlannerLayout({
   if (!auth) redirect("/login");
 
   return (
-    <AppShell orgName={auth.orgName} email={auth.email}>
+    <AppShell orgName={auth.orgName} email={auth.email} userName={auth.userName}>
       {children}
     </AppShell>
   );

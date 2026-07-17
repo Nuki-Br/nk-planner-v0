@@ -187,6 +187,8 @@ export interface BudgetColumn {
 
 export interface Comment {
   autor: "construtora" | "incorporadora";
+  /** Nome exibível de quem comentou (usuário logado ou construtora); ausente em dados antigos. */
+  autorNome?: string;
   texto: string;
   /** "DD/MM/AAAA HH:mm". */
   data: string;

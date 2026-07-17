@@ -30,11 +30,14 @@ export function FormulaCellEditor({
   canReset,
 }: FormulaCellEditorProps) {
   const [val, setVal] = React.useState(initial);
+  const [shown, setShown] = React.useState(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
     inputRef.current?.focus();
     inputRef.current?.select();
+    const id = requestAnimationFrame(() => setShown(true));
+    return () => cancelAnimationFrame(id);
   }, []);
 
   const trimmed = val.trim();
@@ -56,7 +59,12 @@ export function FormulaCellEditor({
   };
 
   return (
-    <div className="relative flex w-[184px] flex-col gap-1 text-left">
+    <div
+      className={cn(
+        "relative flex w-[184px] flex-col gap-1 text-left origin-top-right transition-all duration-150 ease-out",
+        shown ? "scale-100 opacity-100" : "scale-95 opacity-0"
+      )}
+    >
       <input
         ref={inputRef}
         value={val}

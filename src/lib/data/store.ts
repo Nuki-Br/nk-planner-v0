@@ -457,6 +457,7 @@ export async function restoreVersion(id: number): Promise<BudgetVersion> {
 
 export interface CommentInput {
   autor: Comment["autor"];
+  autorNome?: string;
   texto: string;
 }
 

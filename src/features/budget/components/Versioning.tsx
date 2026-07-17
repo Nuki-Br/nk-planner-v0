@@ -118,9 +118,11 @@ function VersionCard({
       </div>
       {expanded && (
         <div className="border-t border-neutral-gray-4 px-3.5 pb-3.5 pt-3">
-          {CHANGE_SECTIONS.map((s) => (
-            <ChangeSection key={s.key} label={s.label} items={v.changes[s.key]} />
-          ))}
+          <div className="max-h-[280px] overflow-y-auto pr-1">
+            {CHANGE_SECTIONS.map((s) => (
+              <ChangeSection key={s.key} label={s.label} items={v.changes[s.key]} />
+            ))}
+          </div>
           {!v.isCurrent && (
             <div className="mt-1">
               <Button variant="bordered" size="sm" onPress={() => onRestore(v)}>
@@ -149,9 +151,19 @@ export function VersionDrawer({
 }) {
   const current = versions.find((v) => v.isCurrent) ?? versions[0];
   const [expanded, setExpanded] = React.useState<Set<number>>(new Set());
+  // Entrada suave: monta fora da tela e desliza para dentro no frame seguinte.
+  const [shown, setShown] = React.useState(false);
   React.useEffect(() => {
     if (open) setExpanded(new Set(current ? [current.id] : []));
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+  React.useEffect(() => {
+    if (!open) {
+      setShown(false);
+      return;
+    }
+    const id = requestAnimationFrame(() => setShown(true));
+    return () => cancelAnimationFrame(id);
   }, [open]);
   React.useEffect(() => {
     if (!open) return;
@@ -171,12 +183,21 @@ export function VersionDrawer({
     });
   return (
     <FocusScope contain restoreFocus autoFocus>
-      <div onClick={onClose} className="fixed inset-0 z-[900] bg-black/25" />
+      <div
+        onClick={onClose}
+        className={cn(
+          "fixed inset-0 z-[900] bg-black/25 transition-opacity duration-200",
+          shown ? "opacity-100" : "opacity-0"
+        )}
+      />
       <aside
         role="dialog"
         aria-modal="true"
         aria-labelledby="version-drawer-title"
-        className="fixed right-0 top-0 z-[901] flex h-screen w-[400px] max-w-[92vw] flex-col bg-white shadow-[-8px_0_32px_rgba(0,0,0,0.14)]"
+        className={cn(
+          "fixed right-0 top-0 z-[901] flex h-screen w-[400px] max-w-[92vw] flex-col bg-white shadow-[-8px_0_32px_rgba(0,0,0,0.14)] transition-transform duration-200 ease-out",
+          shown ? "translate-x-0" : "translate-x-full"
+        )}
       >
         <div className="flex items-start gap-3 border-b border-neutral-gray-3 px-5 py-[18px]">
           <div className="flex-1">

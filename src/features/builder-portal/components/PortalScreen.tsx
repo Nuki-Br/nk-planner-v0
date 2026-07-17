@@ -54,6 +54,7 @@ export function PortalScreen({ token }: { token: string }) {
   const [costs, setCosts] = React.useState<Fills | null>(null);
   const [submitted, setSubmitted] = React.useState(false);
   const [openComment, setOpenComment] = React.useState<string | null>(null);
+  const [nome, setNome] = React.useState("");
   const submitFills = useSubmitPortalFills(token, senha);
 
   // Senha errada: o servidor rejeita o GET — volta ao gate com o aviso.
@@ -157,10 +158,14 @@ export function PortalScreen({ token }: { token: string }) {
       setActiveTipId={setActiveTipId}
       openComment={openComment}
       setOpenComment={setOpenComment}
+      nome={nome}
+      setNome={setNome}
       submitted={submitted}
       setSubmitted={setSubmitted}
       isSubmitting={submitFills.isPending}
-      onSubmit={(fills) => submitFills.mutate(fills, { onSuccess: () => setSubmitted(true) })}
+      onSubmit={(fills) =>
+        submitFills.mutate({ fills, nome: nome.trim() }, { onSuccess: () => setSubmitted(true) })
+      }
       onBackToPlatform={() => router.push("/revisao-custos")}
     />
   );
@@ -174,6 +179,8 @@ function PortalContent({
   setActiveTipId,
   openComment,
   setOpenComment,
+  nome,
+  setNome,
   submitted,
   setSubmitted,
   isSubmitting,
@@ -187,6 +194,8 @@ function PortalContent({
   setActiveTipId: (id: number) => void;
   openComment: string | null;
   setOpenComment: (id: string | null) => void;
+  nome: string;
+  setNome: (v: string) => void;
   submitted: boolean;
   setSubmitted: (v: boolean) => void;
   isSubmitting: boolean;
@@ -220,7 +229,8 @@ function PortalContent({
   const allFilled = scopeMats.filter((m) => isFilled(costs[String(m.id)])).length;
   const tipMats = tipMateriais(tip, materiais);
   const filled = tipMats.filter((m) => isFilled(costs[String(m.id)])).length;
-  const canSubmit = allFilled >= scopeMats.length * 0.5;
+  const hasNome = nome.trim() !== "";
+  const canSubmit = allFilled >= scopeMats.length * 0.5 && hasNome;
 
   // ── Estado de sucesso ──
   if (submitted) {
@@ -280,6 +290,31 @@ function PortalContent({
       </div>
 
       <div className="mx-auto max-w-[1100px] p-6">
+        {/* Identificação de quem está preenchendo (assina os comentários) */}
+        <div
+          className={cn(
+            "mb-5 flex flex-col gap-1.5 rounded-xl border px-4 py-3.5 sm:flex-row sm:items-center sm:gap-4",
+            hasNome ? "border-neutral-gray-4 bg-white" : "border-primary-7/40 bg-primary-1"
+          )}
+        >
+          <div className="flex items-center gap-2">
+            <Icon name="person" size={16} className="text-primary-7" />
+            <label htmlFor="portal-nome" className="text-[13px] font-semibold text-neutral-gray-11">
+              Seu nome <span className="text-functional-error">*</span>
+            </label>
+          </div>
+          <input
+            id="portal-nome"
+            value={nome}
+            onChange={(e) => setNome(e.target.value)}
+            placeholder="Ex: Marcos Lima · Construtora Alfa"
+            className="h-10 flex-1 rounded-lg border border-neutral-gray-5 px-3 text-[13px] outline-none focus:border-primary-7"
+          />
+          <span className="text-[11px] text-neutral-gray-6">
+            Usado para identificar suas respostas e comentários para a incorporadora.
+          </span>
+        </div>
+
         {/* Abas de tipologia (só as incluídas no link) */}
         <div className="mb-5 flex border-b-2 border-neutral-gray-4">
           {scopeTips.map((t) => (

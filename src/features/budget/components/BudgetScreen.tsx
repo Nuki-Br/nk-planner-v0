@@ -3,12 +3,13 @@
 import React from "react";
 import { useRouter } from "next/navigation";
 
-import { Button, Icon, LoadingState, Modal, PageHeader, Textarea } from "@/components/ui";
+import { Button, Icon, Modal, PageHeader, Textarea } from "@/components/ui";
 import { rowKey } from "@/lib/budget";
 import { getKit, getMaterial } from "@/lib/data/entities";
 import { useActiveProjectId } from "@/lib/hooks/useActiveProject";
 import { useBudgetColumns, useUpdateBudgetColumns } from "@/lib/hooks/useBudgetColumns";
 import { useCommentThreads } from "@/lib/hooks/useComments";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { useKits } from "@/lib/hooks/useKits";
 import { useMateriais, useUpdateMaterial } from "@/lib/hooks/useMateriais";
 import { useProject } from "@/lib/hooks/useProjects";
@@ -29,9 +30,11 @@ import {
   type CellOverrides,
 } from "../calc";
 import { AddColumnTh, ColHeaderCell } from "./ColHeaderCell";
+import { BudgetScreenSkeleton } from "./BudgetScreenSkeleton";
 import { CostBaseView } from "./CostBaseView";
 import { FormulaCellEditor } from "./FormulaCellEditor";
-import { HistoryGlyph, SaveGlyph, VersionDrawer, VersionToast } from "./Versioning";
+import { PublishSplitButton } from "./PublishSplitButton";
+import { VersionDrawer, VersionToast } from "./Versioning";
 
 type PendingFillMode = "inline" | "expandRow";
 
@@ -93,6 +96,47 @@ function Td({
   );
 }
 
+// Célula da coluna "Comentários" (extremidade direita, espelha a Visão Custos base).
+function CommentTd({
+  count,
+  onOpen,
+  className,
+}: {
+  count?: number;
+  onOpen?: () => void;
+  className?: string;
+}) {
+  return (
+    <td
+      className={cn(
+        "w-11 border-b border-neutral-gray-4 px-2 py-[7px] text-center align-middle",
+        className
+      )}
+    >
+      {onOpen && (
+        <button
+          type="button"
+          onClick={onOpen}
+          title="Comentários"
+          className={cn(
+            "inline-flex items-center gap-[3px] rounded px-1.5 py-1",
+            (count ?? 0) > 0 && "bg-functional-warning-light"
+          )}
+        >
+          <Icon
+            name="chat"
+            size={14}
+            className={(count ?? 0) > 0 ? "text-functional-warning" : "text-neutral-gray-5"}
+          />
+          {(count ?? 0) > 0 && (
+            <span className="text-[10px] font-bold text-functional-warning">{count}</span>
+          )}
+        </button>
+      )}
+    </td>
+  );
+}
+
 function FillInput({
   value,
   onChange,
@@ -138,6 +182,7 @@ function FillInput({
 // (snapshot real por versão fica adiado — §12).
 export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: PendingFillMode }) {
   const router = useRouter();
+  const currentUser = useCurrentUser();
   const projectId = useActiveProjectId();
   const { data: project } = useProject(projectId);
   const { data: tipologias = [], isLoading: tipsLoading } = useTipologias();
@@ -165,8 +210,8 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   const [collapsedKits, setCollapsedKits] = React.useState<Set<string>>(new Set());
   const [showDrawer, setShowDrawer] = React.useState(false);
   const [showLinkModal, setShowLinkModal] = React.useState(false);
-  const [showSaveModal, setShowSaveModal] = React.useState(false);
-  const [saveSummary, setSaveSummary] = React.useState("");
+  const [showPublishModal, setShowPublishModal] = React.useState(false);
+  const [publishSummary, setPublishSummary] = React.useState("");
   const [restoreTarget, setRestoreTarget] = React.useState<BudgetVersion | null>(null);
   const [toastMsg, setToastMsg] = React.useState("");
   const toastTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -191,9 +236,11 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
     [materiais, kits, cols, overrides, baseCosts]
   );
 
-  if (!projectId || tipsLoading) return <LoadingState label="Carregando orçamento…" />;
+  if (!projectId || tipsLoading) return <BudgetScreenSkeleton />;
   if (!tip) return null;
-  const colCount = 7 + cols.length;
+  // Colunas: Especificação, Qtd, Valor un., Déb/Créd, Custo troca, N livres,
+  // (+ coluna), Total final, Comentários (extremidade direita).
+  const colCount = 8 + cols.length;
   // Total por ambiente calculado UMA vez e reusado no cabeçalho de cada ambiente
   // e no grand-total (antes o motor rodava 2× por ambiente a cada render).
   const ambTotals = tip.ambientes.map((amb) => ambTotal(deps, amb));
@@ -292,20 +339,22 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
     });
 
   // ── versões ──
-  const handleSaveVersion = () => {
-    const summary = saveSummary.trim();
+  // Publicar salva uma versão do estado atual e segue para a publicação — os
+  // dois passos foram unificados (não há mais "Salvar versão" separado).
+  const handlePublish = () => {
+    const summary = publishSummary.trim();
     if (!summary) return;
     createVersion.mutate(
       {
         summary,
-        createdBy: "Ana Carvalho",
+        createdBy: currentUser.name,
         changes: { materiais: [], custos: [], taxas: [], tipologias: [] },
       },
       {
-        onSuccess: (v) => {
-          setShowSaveModal(false);
-          setSaveSummary("");
-          fireToast(`Versão ${v.label} salva`);
+        onSuccess: () => {
+          setShowPublishModal(false);
+          setPublishSummary("");
+          router.push("/publicacao");
         },
       }
     );
@@ -456,17 +505,11 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
             <Button variant="bordered" icon="share" onPress={() => setShowLinkModal(true)}>
               Gerar link de preenchimento
             </Button>
-            <Button variant="bordered" onPress={() => setShowDrawer(true)}>
-              <HistoryGlyph />
-              Versões ({currentVersion?.label ?? "—"})
-            </Button>
-            <Button variant="bordered" onPress={() => setShowSaveModal(true)}>
-              <SaveGlyph />
-              Salvar versão
-            </Button>
-            <Button icon="upload" onPress={() => router.push("/publicacao")}>
-              Publicar orçamento →
-            </Button>
+            <PublishSplitButton
+              onPublish={() => setShowPublishModal(true)}
+              onOpenVersions={() => setShowDrawer(true)}
+              versionLabel={currentVersion?.label ?? "—"}
+            />
           </>
         }
       />
@@ -589,6 +632,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                 ))}
                 <AddColumnTh showAdd={showAdd} setShowAdd={(fn) => setShowAdd(fn)} onAdd={addColumn} />
                 <Th right teal>Total final</Th>
+                <Th />
               </tr>
             </thead>
             <tbody>
@@ -762,6 +806,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                     "—"
                                   )}
                                 </Td>
+                                <CommentTd className={kitBg} />
                               </tr>
                               {expanded &&
                                 r?.subItems.map((s, si) => (
@@ -878,37 +923,6 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                   {pending && (
                                     <Icon name="warning" size={13} className="text-tint-orange-fg" />
                                   )}
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setOpenThread({
-                                        key: rk,
-                                        especificacao: upgMat.nome,
-                                        ambiente: amb.nome,
-                                        componente: comp.nome,
-                                      })
-                                    }
-                                    title="Comentários"
-                                    className={cn(
-                                      "inline-flex shrink-0 items-center gap-[3px] rounded px-[5px] py-[3px]",
-                                      cmts.length > 0 && "bg-functional-warning-light"
-                                    )}
-                                  >
-                                    <Icon
-                                      name="chat"
-                                      size={14}
-                                      className={
-                                        cmts.length > 0
-                                          ? "text-functional-warning"
-                                          : "text-neutral-gray-5"
-                                      }
-                                    />
-                                    {cmts.length > 0 && (
-                                      <span className="text-[10px] font-bold text-functional-warning">
-                                        {cmts.length}
-                                      </span>
-                                    )}
-                                  </button>
                                 </div>
                               </Td>
                               <Td right className={cn(fillCell, "text-neutral-gray-7")}>
@@ -1008,6 +1022,18 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                   "—"
                                 )}
                               </Td>
+                              <CommentTd
+                                count={cmts.length}
+                                onOpen={() =>
+                                  setOpenThread({
+                                    key: rk,
+                                    especificacao: upgMat.nome,
+                                    ambiente: amb.nome,
+                                    componente: comp.nome,
+                                  })
+                                }
+                                className={rowBg}
+                              />
                             </tr>
                             {pending && filling && pendingFill === "expandRow" && (
                               <tr>
@@ -1124,34 +1150,36 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
         onRestore={setRestoreTarget}
       />
 
-      {/* Salvar versão */}
+      {/* Publicar orçamento (salva versão + publica) */}
       <Modal
-        open={showSaveModal}
-        onClose={() => setShowSaveModal(false)}
-        title="Salvar versão"
+        open={showPublishModal}
+        onClose={() => setShowPublishModal(false)}
+        title="Publicar orçamento"
         actions={
           <>
-            <Button variant="bordered" onPress={() => setShowSaveModal(false)}>
+            <Button variant="bordered" onPress={() => setShowPublishModal(false)}>
               Cancelar
             </Button>
             <Button
-              onPress={handleSaveVersion}
-              isDisabled={saveSummary.trim() === ""}
+              icon="upload"
+              onPress={handlePublish}
+              isDisabled={publishSummary.trim() === ""}
               isLoading={createVersion.isPending}
             >
-              Salvar versão
+              Publicar orçamento
             </Button>
           </>
         }
       >
         <div className="flex flex-col gap-3.5">
           <p className="text-[13px] text-neutral-gray-7">
-            Salva o estado atual do orçamento como ponto de restauração.
+            Publicar salva uma nova versão do estado atual (ponto de restauração) e segue para a
+            publicação.
           </p>
           <Textarea
             label="Resumo das alterações *"
-            value={saveSummary}
-            onValueChange={setSaveSummary}
+            value={publishSummary}
+            onValueChange={setPublishSummary}
             placeholder="Ex: revisão de custos após retorno da construtora, novas opções de piso adicionadas…"
           />
         </div>
@@ -1190,12 +1218,23 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
 
       {/* Thread de comentários */}
       {openThread && (
-        <>
-          <div onClick={() => setOpenThread(null)} className="fixed inset-0 z-[880]" />
-          <div className="fixed right-0 top-16 z-[881] h-[calc(100vh-64px)] w-[380px] max-w-[90vw] overflow-y-auto border-l border-neutral-gray-4 bg-neutral-gray-2 p-4 shadow-[-8px_0_28px_rgba(0,0,0,0.12)]">
-            <CommentThreadPanel row={openThread} onClose={() => setOpenThread(null)} />
-          </div>
-        </>
+        <Modal
+          open
+          onClose={() => setOpenThread(null)}
+          width={560}
+          title={
+            <div className="min-w-0 pr-6">
+              <p className="truncate text-medium font-bold text-neutral-gray-11">
+                {openThread.especificacao}
+              </p>
+              <p className="mt-0.5 text-[11px] font-normal text-neutral-gray-6">
+                {openThread.ambiente} · {openThread.componente}
+              </p>
+            </div>
+          }
+        >
+          <CommentThreadPanel embedded row={openThread} onClose={() => setOpenThread(null)} />
+        </Modal>
       )}
 
       <LinkFillModal open={showLinkModal} onClose={() => setShowLinkModal(false)} />
