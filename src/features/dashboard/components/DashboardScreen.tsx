@@ -167,6 +167,17 @@ export function DashboardScreen() {
               </Button>
             }
           />
+        ) : projects.length === 0 ? (
+          <EmptyState
+            icon="building"
+            title="Nenhum empreendimento ainda"
+            subtitle="Crie seu primeiro empreendimento para começar o planejamento e o orçamento."
+            action={
+              <Button variant="teal" icon="plus" onPress={() => router.push("/config-base")}>
+                Novo empreendimento
+              </Button>
+            }
+          />
         ) : (
           <>
             <div className="mb-4 flex flex-wrap items-center gap-3">

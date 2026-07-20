@@ -17,7 +17,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
-import { Button, Icon, MaterialThumb } from "@/components/ui";
+import { Button, EmptyState, Icon, MaterialThumb } from "@/components/ui";
 import { getOptionEntity } from "@/lib/data/entities";
 import { cn, fmtNum } from "@/lib/utils";
 import type { Ambiente, Componente, Kit, Material } from "@/shared/types/domain";
@@ -295,33 +295,50 @@ export function AmbienteAccordion({
 
       {open && (
         <div>
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={handleCompDragEnd}
-          >
-            <SortableContext
-              items={amb.componentes.map((c) => c.id)}
-              strategy={verticalListSortingStrategy}
-            >
-              {amb.componentes.map((comp) => (
-                <ComponenteRow
-                  key={comp.id}
-                  comp={comp}
-                  materiais={materiais}
-                  kits={kits}
-                  onEdit={(c) => onEditComp(amb, c)}
-                  onConfig={onConfigComp}
-                  onEditImage={onEditImage}
-                />
-              ))}
-            </SortableContext>
-          </DndContext>
-          <div className="border-t border-neutral-gray-4 bg-neutral-gray-2 px-3.5 py-2">
-            <Button variant="ghost" size="sm" icon="plus" onPress={() => onAddComp(amb)}>
-              Adicionar componente
-            </Button>
-          </div>
+          {amb.componentes.length === 0 ? (
+            <div className="border-t border-neutral-gray-4">
+              <EmptyState
+                icon="box"
+                title="Nenhum componente ainda"
+                subtitle="Adicione componentes para configurar as opções de personalização deste ambiente."
+                action={
+                  <Button variant="teal" size="sm" icon="plus" onPress={() => onAddComp(amb)}>
+                    Adicionar componente
+                  </Button>
+                }
+              />
+            </div>
+          ) : (
+            <>
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleCompDragEnd}
+              >
+                <SortableContext
+                  items={amb.componentes.map((c) => c.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {amb.componentes.map((comp) => (
+                    <ComponenteRow
+                      key={comp.id}
+                      comp={comp}
+                      materiais={materiais}
+                      kits={kits}
+                      onEdit={(c) => onEditComp(amb, c)}
+                      onConfig={onConfigComp}
+                      onEditImage={onEditImage}
+                    />
+                  ))}
+                </SortableContext>
+              </DndContext>
+              <div className="border-t border-neutral-gray-4 bg-neutral-gray-2 px-3.5 py-2">
+                <Button variant="ghost" size="sm" icon="plus" onPress={() => onAddComp(amb)}>
+                  Adicionar componente
+                </Button>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

@@ -3,7 +3,16 @@
 import React from "react";
 import { useRouter } from "next/navigation";
 
-import { Button, Card, Icon, LoadingState, Modal, PageHeader, StatusBadge } from "@/components/ui";
+import {
+  Button,
+  Card,
+  EmptyState,
+  Icon,
+  LoadingState,
+  Modal,
+  PageHeader,
+  StatusBadge,
+} from "@/components/ui";
 import { calcBudgetRow } from "@/lib/budget";
 import { getMaterial } from "@/lib/data/entities";
 import { useActiveProjectId } from "@/lib/hooks/useActiveProject";
@@ -178,6 +187,34 @@ export function PublishScreen() {
             </a>
           </p>
         </div>
+      </div>
+    );
+  }
+
+  if (tipologias.length === 0) {
+    return (
+      <div className="mx-auto max-w-[900px]">
+        <PageHeader
+          breadcrumb={[
+            { label: "Empreendimentos", href: "/dashboard" },
+            { label: project.nome },
+            { label: "Publicação" },
+          ]}
+          title="Publicação do orçamento"
+          subtitle="Revise e conclua o planejamento do empreendimento"
+        />
+        <Card>
+          <EmptyState
+            icon="layers"
+            title="Nenhuma tipologia para publicar"
+            subtitle="Configure as tipologias e o orçamento antes de concluir o planejamento do empreendimento."
+            action={
+              <Button variant="teal" icon="layers" onPress={() => router.push("/tipologias")}>
+                Ir para tipologias
+              </Button>
+            }
+          />
+        </Card>
       </div>
     );
   }

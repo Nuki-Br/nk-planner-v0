@@ -162,16 +162,23 @@ export function TypologiesScreen() {
     );
   if (!selectedTip)
     return (
-      <EmptyState
-        icon="layers"
-        title="Nenhuma tipologia ainda"
-        subtitle="Crie um empreendimento para começar o planejamento das tipologias."
-        action={
-          <Button variant="teal" icon="plus" onPress={() => router.push("/config-base")}>
-            Novo empreendimento
-          </Button>
-        }
-      />
+      <>
+        <EmptyState
+          icon="layers"
+          title="Nenhuma tipologia ainda"
+          subtitle="Crie a primeira tipologia para começar o planejamento dos ambientes e componentes."
+          action={
+            <Button variant="teal" icon="plus" onPress={() => setShowAddTip(true)}>
+              Nova tipologia
+            </Button>
+          }
+        />
+        <NewTipologiaModal
+          open={showAddTip}
+          onClose={() => setShowAddTip(false)}
+          onCreated={(t) => setSelectedId(t.id)}
+        />
+      </>
     );
   const tip = selectedTip;
 
@@ -381,51 +388,66 @@ export function TypologiesScreen() {
           </div>
 
           <div className="px-5 py-3">
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              onDragEnd={handleAmbDragEnd}
-            >
-              <SortableContext
-                items={tip.ambientes.map((a) => a.blueprintRoomId)}
-                strategy={verticalListSortingStrategy}
-              >
-                {tip.ambientes.map((amb) => (
-                  <AmbienteAccordion
-                    key={amb.id}
-                    amb={amb}
-                    open={expandedRooms.includes(amb.id)}
-                    shared={sharedInfoFor(amb.id)}
-                    materiais={materiais}
-                    kits={kits}
-                    onToggle={() => toggleRoom(amb.id)}
-                    onEditAmb={(a) => setAmbModal({ mode: "edit", amb: a })}
-                    onCloneAmb={(a) =>
-                      cloneAmbiente.mutate({ tipologiaId: tip.id, ambienteId: a.blueprintRoomId })
-                    }
-                    onDeleteAmb={setDeleteAmb}
-                    onAddComp={setAddCompAmb}
-                    onEditComp={(a, c) => setEditComp({ amb: a, comp: c })}
-                    onConfigComp={(c) =>
-                      router.push(`/tipologias/${tip.id}/componente/${c.id}`)
-                    }
-                    onEditImage={setImageTarget}
-                    onReorderComps={(a, orderedIds) =>
-                      reorderComponentes.mutate({
-                        tipologiaId: tip.id,
-                        ambienteId: a.blueprintRoomId,
-                        orderedIds,
-                      })
-                    }
-                  />
-                ))}
-              </SortableContext>
-            </DndContext>
-            <div className="mt-2">
-              <Button variant="ghost" size="sm" icon="plus" onPress={() => setAddChooser(true)}>
-                Adicionar ambiente
-              </Button>
-            </div>
+            {tip.ambientes.length === 0 ? (
+              <EmptyState
+                icon="home"
+                title="Nenhum ambiente ainda"
+                subtitle="Adicione ambientes para definir os pontos de personalização desta tipologia."
+                action={
+                  <Button variant="teal" icon="plus" onPress={() => setAddChooser(true)}>
+                    Adicionar ambiente
+                  </Button>
+                }
+              />
+            ) : (
+              <>
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={handleAmbDragEnd}
+                >
+                  <SortableContext
+                    items={tip.ambientes.map((a) => a.blueprintRoomId)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    {tip.ambientes.map((amb) => (
+                      <AmbienteAccordion
+                        key={amb.id}
+                        amb={amb}
+                        open={expandedRooms.includes(amb.id)}
+                        shared={sharedInfoFor(amb.id)}
+                        materiais={materiais}
+                        kits={kits}
+                        onToggle={() => toggleRoom(amb.id)}
+                        onEditAmb={(a) => setAmbModal({ mode: "edit", amb: a })}
+                        onCloneAmb={(a) =>
+                          cloneAmbiente.mutate({ tipologiaId: tip.id, ambienteId: a.blueprintRoomId })
+                        }
+                        onDeleteAmb={setDeleteAmb}
+                        onAddComp={setAddCompAmb}
+                        onEditComp={(a, c) => setEditComp({ amb: a, comp: c })}
+                        onConfigComp={(c) =>
+                          router.push(`/tipologias/${tip.id}/componente/${c.id}`)
+                        }
+                        onEditImage={setImageTarget}
+                        onReorderComps={(a, orderedIds) =>
+                          reorderComponentes.mutate({
+                            tipologiaId: tip.id,
+                            ambienteId: a.blueprintRoomId,
+                            orderedIds,
+                          })
+                        }
+                      />
+                    ))}
+                  </SortableContext>
+                </DndContext>
+                <div className="mt-2">
+                  <Button variant="ghost" size="sm" icon="plus" onPress={() => setAddChooser(true)}>
+                    Adicionar ambiente
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         </Card>
       </div>

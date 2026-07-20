@@ -3,7 +3,7 @@
 import React from "react";
 import { useRouter } from "next/navigation";
 
-import { Button, Icon, Modal, PageHeader, Textarea } from "@/components/ui";
+import { Button, EmptyState, Icon, Modal, PageHeader, Textarea } from "@/components/ui";
 import { rowKey } from "@/lib/budget";
 import { getKit, getMaterial } from "@/lib/data/entities";
 import { useActiveProjectId } from "@/lib/hooks/useActiveProject";
@@ -237,7 +237,21 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   );
 
   if (!projectId || tipsLoading) return <BudgetScreenSkeleton />;
-  if (!tip) return null;
+  if (!tip)
+    return (
+      <div className="mx-auto max-w-6xl">
+        <EmptyState
+          icon="layers"
+          title="Nenhuma tipologia para orçar"
+          subtitle="Cadastre as tipologias e seus componentes antes de montar o construtor de preço."
+          action={
+            <Button variant="teal" icon="layers" onPress={() => router.push("/tipologias")}>
+              Ir para tipologias
+            </Button>
+          }
+        />
+      </div>
+    );
   // Colunas: Especificação, Qtd, Valor un., Déb/Créd, Custo troca, N livres,
   // (+ coluna), Total final, Comentários (extremidade direita).
   const colCount = 8 + cols.length;

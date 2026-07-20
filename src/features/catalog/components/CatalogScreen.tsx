@@ -102,7 +102,7 @@ export function CatalogScreen() {
       sortValue: (r) => r.codigo,
       render: (r) => (
         <code className="rounded bg-neutral-gray-3 px-1.5 py-px font-mono text-[11px] text-neutral-gray-7">
-          {r.codigo}
+          {!r.codigo || r.codigo === '' ? '-' : r.codigo}
         </code>
       ),
     },
@@ -239,6 +239,23 @@ export function CatalogScreen() {
               <Button variant="bordered" onPress={() => void refetchMat()}>
                 Tentar novamente
               </Button>
+            }
+          />
+        ) : entities.length === 0 ? (
+          <EmptyState
+            icon="box"
+            title="Catálogo vazio"
+            subtitle="Cadastre materiais e kits ou importe um CSV para montar o catálogo do empreendimento."
+            action={
+              <div className="flex items-center gap-2.5">
+                <Button variant="bordered" icon="upload" onPress={() => setShowCsv(true)}>
+                  Importar CSV
+                </Button>
+                <AddSplitButton
+                  onAddMaterial={() => setMaterialModal({ open: true, material: null })}
+                  onCreateKit={() => setKitModal({ open: true, kit: null })}
+                />
+              </div>
             }
           />
         ) : (
