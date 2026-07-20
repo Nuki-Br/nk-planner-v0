@@ -45,6 +45,7 @@ interface ComponenteRowProps {
   materiais: Material[];
   kits: Kit[];
   onEdit: (comp: Componente) => void;
+  onDelete: (comp: Componente) => void;
   onConfig: (comp: Componente) => void;
   onEditImage: (mat: Material) => void;
 }
@@ -54,6 +55,7 @@ function ComponenteRow({
   materiais,
   kits,
   onEdit,
+  onDelete,
   onConfig,
   onEditImage,
 }: ComponenteRowProps) {
@@ -137,6 +139,15 @@ function ComponenteRow({
             onEdit(comp);
           }}
         />
+        <RowIconBtn
+          icon="trash"
+          title="Excluir componente"
+          danger
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(comp);
+          }}
+        />
         <Button variant="ghost" size="sm" onPress={() => onConfig(comp)}>
           {upgradeCount > 0 ? `${upgradeCount + 1} mat.` : "Configurar"} →
         </Button>
@@ -157,6 +168,7 @@ interface AmbienteAccordionProps {
   onDeleteAmb: (amb: Ambiente) => void;
   onAddComp: (amb: Ambiente) => void;
   onEditComp: (amb: Ambiente, comp: Componente) => void;
+  onDeleteComp: (amb: Ambiente, comp: Componente) => void;
   onConfigComp: (comp: Componente) => void;
   onReorderComps: (amb: Ambiente, orderedIds: number[]) => void;
   onEditImage: (mat: Material) => void;
@@ -175,6 +187,7 @@ export function AmbienteAccordion({
   onDeleteAmb,
   onAddComp,
   onEditComp,
+  onDeleteComp,
   onConfigComp,
   onReorderComps,
   onEditImage,
@@ -326,6 +339,7 @@ export function AmbienteAccordion({
                       materiais={materiais}
                       kits={kits}
                       onEdit={(c) => onEditComp(amb, c)}
+                      onDelete={(c) => onDeleteComp(amb, c)}
                       onConfig={onConfigComp}
                       onEditImage={onEditImage}
                     />

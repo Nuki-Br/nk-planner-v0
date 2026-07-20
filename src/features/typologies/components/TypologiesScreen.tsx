@@ -29,6 +29,7 @@ import {
   useCloneAmbiente,
   useCreateAmbiente,
   useDeleteAmbiente,
+  useDeleteComponente,
   useDuplicateTipologia,
   useLinkAmbiente,
   useReorderAmbientes,
@@ -105,6 +106,9 @@ export function TypologiesScreen() {
   const [linkModal, setLinkModal] = React.useState(false);
   const [addCompAmb, setAddCompAmb] = React.useState<Ambiente | null>(null);
   const [editComp, setEditComp] = React.useState<{ amb: Ambiente; comp: Componente } | null>(null);
+  const [deleteComp, setDeleteComp] = React.useState<{ amb: Ambiente; comp: Componente } | null>(
+    null
+  );
   const [imageTarget, setImageTarget] = React.useState<Material | null>(null);
 
   // Mutations
@@ -116,6 +120,7 @@ export function TypologiesScreen() {
   const reorderAmbientes = useReorderAmbientes();
   const reorderComponentes = useReorderComponentes();
   const updateComponente = useUpdateComponente();
+  const deleteComponente = useDeleteComponente();
   const linkAmbiente = useLinkAmbiente();
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
@@ -426,6 +431,7 @@ export function TypologiesScreen() {
                         onDeleteAmb={setDeleteAmb}
                         onAddComp={setAddCompAmb}
                         onEditComp={(a, c) => setEditComp({ amb: a, comp: c })}
+                        onDeleteComp={(a, c) => setDeleteComp({ amb: a, comp: c })}
                         onConfigComp={(c) =>
                           router.push(`/tipologias/${tip.id}/componente/${c.id}`)
                         }
@@ -555,6 +561,44 @@ export function TypologiesScreen() {
         onSave={saveComponentEdit}
         saving={updateComponente.isPending}
       />
+
+      <Modal
+        open={deleteComp !== null}
+        onClose={() => setDeleteComp(null)}
+        title="Excluir componente"
+        width={420}
+        actions={
+          <>
+            <Button variant="bordered" onPress={() => setDeleteComp(null)}>
+              Cancelar
+            </Button>
+            <Button
+              variant="danger"
+              isLoading={deleteComponente.isPending}
+              onPress={() => {
+                if (!deleteComp) return;
+                deleteComponente.mutate(
+                  {
+                    tipologiaId: tip.id,
+                    ambienteId: deleteComp.amb.blueprintRoomId,
+                    componenteId: deleteComp.comp.id,
+                  },
+                  { onSuccess: () => setDeleteComp(null) }
+                );
+              }}
+            >
+              Excluir
+            </Button>
+          </>
+        }
+      >
+        <p className="text-[13px] leading-relaxed text-neutral-gray-9">
+          Tem certeza que deseja excluir o componente <strong>{deleteComp?.comp.nome}</strong> do
+          ambiente <strong>{deleteComp?.amb.nome}</strong>? O material padrão e as{" "}
+          {deleteComp?.comp.options.filter((o) => !o.isDefault).length ?? 0} opção(ões) de upgrade
+          configuradas também serão removidas. Esta ação não pode ser desfeita.
+        </p>
+      </Modal>
 
       <UnitGroupsDrawer
         open={showUnitGroups}

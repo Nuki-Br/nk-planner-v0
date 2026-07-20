@@ -85,6 +85,7 @@ export function MaterialsConfigScreen({
   const [modal, setModal] = React.useState<"padrao" | "upgrade" | null>(null);
   const [expandedUpg, setExpandedUpg] = React.useState<Set<number>>(new Set());
   const [removeTarget, setRemoveTarget] = React.useState<number | null>(null);
+  const [clearPadrao, setClearPadrao] = React.useState(false);
   const [imageTarget, setImageTarget] = React.useState<Material | null>(null);
   const seededExpandRef = React.useRef(false);
 
@@ -218,9 +219,20 @@ export function MaterialsConfigScreen({
               Entregue sem custo adicional. Gera crédito se o cliente optar por upgrade.
             </p>
           </div>
-          <Button variant="ghost" size="sm" icon="edit" onPress={() => setModal("padrao")}>
-            Trocar padrão
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="sm" icon="edit" onPress={() => setModal("padrao")}>
+              {padrao ? "Trocar padrão" : "Definir padrão"}
+            </Button>
+            {padrao && (
+              <Button
+                variant="ghost"
+                size="sm"
+                icon="trash"
+                aria-label="Remover material padrão"
+                onPress={() => setClearPadrao(true)}
+              />
+            )}
+          </div>
         </div>
         {padrao && !padrao.isKit && (
           <div className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-4 rounded-lg border border-primary-7 bg-primary-1 px-4 py-3">
@@ -492,6 +504,38 @@ export function MaterialsConfigScreen({
             {removeEnt?.nome ?? (removeTarget !== null ? String(removeTarget) : "")}
           </strong>{" "}
           das opções de upgrade deste componente?
+        </p>
+      </Modal>
+
+      <Modal
+        open={clearPadrao}
+        onClose={() => setClearPadrao(false)}
+        title="Remover material padrão"
+        width={420}
+        actions={
+          <>
+            <Button variant="bordered" onPress={() => setClearPadrao(false)}>
+              Cancelar
+            </Button>
+            <Button
+              variant="danger"
+              isLoading={setPadraoMut.isPending}
+              onPress={() =>
+                setPadraoMut.mutate(
+                  { ...path, padraoBaseId: null },
+                  { onSuccess: () => setClearPadrao(false) }
+                )
+              }
+            >
+              Remover
+            </Button>
+          </>
+        }
+      >
+        <p className="text-[13px] leading-relaxed text-neutral-gray-9">
+          Remover <strong>{padrao?.nome}</strong> como material padrão de{" "}
+          <strong>{comp.nome}</strong>? O componente ficará sem padrão e as opções de upgrade
+          deixarão de gerar crédito até que um novo padrão seja definido.
         </p>
       </Modal>
 
