@@ -4,13 +4,8 @@ import React from "react";
 
 import { Button, Input, Modal, Select } from "@/components/ui";
 import { parseBR } from "@/lib/utils";
+import { UNIDADE_OPTIONS } from "@/shared/constants/unidades";
 import type { Componente, Unidade } from "@/shared/types/domain";
-
-const UNIDADE_OPTIONS = [
-  { value: "m²", label: "m² — área" },
-  { value: "ml", label: "ml — linear" },
-  { value: "und", label: "und — peça" },
-];
 
 export interface ComponentEditValue {
   nome: string;
@@ -47,7 +42,7 @@ export function EditComponentModal({
     setNome(comp.nome);
     setUnidade(comp.unidade);
     setQtd(String(comp.qtd));
-    setRt(String(comp.rt));
+    setRt(comp.rt ? String(comp.rt) : "");
   }, [open, comp]);
 
   const handleSave = () => {
@@ -88,7 +83,7 @@ export function EditComponentModal({
           onValueChange={setNome}
           placeholder="Ex: Piso, Rodapé, Revestimento…"
         />
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <Select
             label="Unidade de medida"
             options={UNIDADE_OPTIONS}
@@ -97,8 +92,8 @@ export function EditComponentModal({
             small
           />
           <Input label="Quantidade" value={qtd} onValueChange={setQtd} type="number" small placeholder="0,00" />
-          <Input label="Tolerância RT (%)" value={rt} onValueChange={setRt} type="number" small placeholder="15" />
         </div>
+        <Input label="Tolerância RT (%)" value={rt} onValueChange={setRt} type="number" small placeholder="15" />
       </div>
     </Modal>
   );

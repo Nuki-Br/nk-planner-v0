@@ -4,7 +4,7 @@ import React from "react";
 
 import { Button, Icon, Input, Modal, Select } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { UNIDADES } from "@/shared/constants/unidades";
+import { UNIDADE_OPTIONS } from "@/shared/constants/unidades";
 import type {
   CostComponent,
   CostComponentKind,
@@ -206,10 +206,10 @@ export function CostItemModal({
 
         <div className="grid grid-cols-2 gap-3">
           <Select
-            label="Unidade"
+            label="Unidade de medida"
             value={unidade}
             onValueChange={(v) => setUnidade(v as Unidade)}
-            options={UNIDADES.map((u) => ({ value: u, label: u }))}
+            options={UNIDADE_OPTIONS}
           />
           <Input
             label="Quantidade"

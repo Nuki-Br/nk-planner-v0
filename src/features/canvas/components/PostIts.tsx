@@ -225,23 +225,3 @@ export function PostIt({
     </div>
   );
 }
-
-export function PresenceStack() {
-  return (
-    <div className="flex items-center gap-2">
-      <div className="flex">
-        {CV_PRESENCE.map((u, i) => (
-          <div
-            key={u.initials}
-            title={`${u.name} está visualizando`}
-            style={{ background: u.color, marginLeft: i === 0 ? 0 : -8, zIndex: 10 - i }}
-            className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white text-[10px] font-bold text-white"
-          >
-            {u.initials}
-          </div>
-        ))}
-      </div>
-      <span className="text-[11px] text-neutral-gray-7">editando agora</span>
-    </div>
-  );
-}

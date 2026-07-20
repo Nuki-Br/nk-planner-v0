@@ -2,7 +2,7 @@
 
 import React from "react";
 
-import { Icon, StatusBadge } from "@/components/ui";
+import { EmptyState, Icon, StatusBadge } from "@/components/ui";
 import { getMaterial } from "@/lib/data/entities";
 
 import { enumerateCostRefs } from "../enumerate";
@@ -96,6 +96,18 @@ export function CostBaseView({
       {children}
     </th>
   );
+
+  if (tip.ambientes.length === 0) {
+    return (
+      <div className="mb-6 rounded-b-lg border border-t-0 border-neutral-gray-4 bg-white">
+        <EmptyState
+          icon="layers"
+          title="Nenhum ambiente nesta tipologia"
+          subtitle="Cadastre os ambientes e seus componentes para preencher os custos base."
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="mb-6 overflow-x-auto rounded-b-lg border border-t-0 border-neutral-gray-4 bg-white">

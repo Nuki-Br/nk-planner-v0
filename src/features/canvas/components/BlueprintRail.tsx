@@ -14,6 +14,10 @@ interface BlueprintRailProps {
   onEdit: (tip: Tipologia) => void;
   onDuplicate: (tip: Tipologia) => void;
   onDelete: (tip: Tipologia) => void;
+  /** Id da tipologia sendo duplicada (mutação em andamento). */
+  duplicatingId?: number | null;
+  /** Id da tipologia sendo excluída (mutação em andamento). */
+  deletingId?: number | null;
 }
 
 const comps = (t: Tipologia) => t.ambientes.reduce((a, b) => a + b.componentes.length, 0);
@@ -32,6 +36,8 @@ export function BlueprintRail({
   onEdit,
   onDuplicate,
   onDelete,
+  duplicatingId = null,
+  deletingId = null,
 }: BlueprintRailProps) {
   return (
     <div className="flex h-full w-[244px] min-w-[244px] flex-col border-r border-neutral-gray-3 bg-white">
@@ -82,10 +88,27 @@ export function BlueprintRail({
                 </span>
               </div>
               <ProgressBar value={cfg} max={tot || 1} />
-              <div className="absolute right-2 top-2 flex gap-0.5 rounded-[7px] border border-neutral-gray-4 bg-white p-0.5 opacity-0 shadow-[0_2px_8px_rgba(0,0,0,0.12)] transition-opacity group-hover:opacity-100">
+              <div
+                className={cn(
+                  "absolute right-2 top-2 flex gap-0.5 rounded-[7px] border border-neutral-gray-4 bg-white p-0.5 shadow-[0_2px_8px_rgba(0,0,0,0.12)] transition-opacity group-hover:opacity-100",
+                  // Mantém a barra visível enquanto o spinner da ação roda.
+                  duplicatingId === tip.id || deletingId === tip.id ? "opacity-100" : "opacity-0"
+                )}
+              >
                 <ActBtn icon="edit" title="Editar" onClick={() => onEdit(tip)} />
-                <ActBtn icon="copy" title="Duplicar" onClick={() => onDuplicate(tip)} />
-                <ActBtn icon="trash" title="Excluir" danger onClick={() => onDelete(tip)} />
+                <ActBtn
+                  icon="copy"
+                  title="Duplicar"
+                  onClick={() => onDuplicate(tip)}
+                  loading={duplicatingId === tip.id}
+                />
+                <ActBtn
+                  icon="trash"
+                  title="Excluir"
+                  danger
+                  onClick={() => onDelete(tip)}
+                  loading={deletingId === tip.id}
+                />
               </div>
             </div>
           );

@@ -39,8 +39,17 @@ import { useCanvasView } from "../useCanvasView";
 import { BlueprintRail } from "./BlueprintRail";
 import { EdgesSvg } from "./EdgesSvg";
 import { MaterialPicker } from "./MaterialPicker";
-import { AddNode, AmbienteNode, ComponenteNode, OptionNode, SubItemNode, type CanvasActions } from "./nodes";
-import { PostIt, PresenceStack, usePostIts } from "./PostIts";
+import {
+  AddNode,
+  AmbienteNode,
+  cloneAmbBusyKey,
+  ComponenteNode,
+  optionBusyKey,
+  OptionNode,
+  SubItemNode,
+  type CanvasActions,
+} from "./nodes";
+import { PostIt, usePostIts } from "./PostIts";
 import { TipFormModal, type TipFormValue } from "./TipFormModal";
 import { Viewport } from "./Viewport";
 
@@ -69,7 +78,7 @@ const EMPTY_COMP: Componente = {
   unidade: "m²",
   instanceId: 0,
   qtd: 0,
-  rt: 15,
+  rt: 0,
   padrao: null,
   options: [],
   ghost: false,
@@ -85,8 +94,8 @@ const EMPTY_COMP: Componente = {
 export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
   const router = useRouter();
   const { data: tipologias = [], isLoading: tipsLoading } = useTipologias();
-  const { data: materiais = [] } = useMateriais();
-  const { data: kits = [] } = useKits();
+  const { data: materiais = [], isLoading: matsLoading } = useMateriais();
+  const { data: kits = [], isLoading: kitsLoading } = useKits();
 
   const tipParam = Number(tipologiaId);
   const tip = tipologias.find((t) => t.id === tipParam) ?? tipologias[0] ?? null;
@@ -101,6 +110,12 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
   const [tipModal, setTipModal] = React.useState<{ mode: "add" | "edit"; tip: Tipologia | null } | null>(null);
   const [confirm, setConfirm] = React.useState<ConfirmState | null>(null);
   const [imageTarget, setImageTarget] = React.useState<Material | null>(null);
+  // Ação de nó em andamento (clonar ambiente / excluir opção): os nós usam esta
+  // chave para trocar o ícone do gatilho por spinner e bloquear cliques repetidos.
+  const [busyKey, setBusyKey] = React.useState<string | null>(null);
+  // Só o fluxo do picker; separado do setPadrao usado para LIMPAR o padrão,
+  // que não deve girar o botão Confirmar.
+  const [pickerBusy, setPickerBusy] = React.useState(false);
 
   // Mutations (Fase 5 + replaceUpgrade)
   const createTip = useCreateTipologia();
@@ -138,9 +153,12 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
     fitRef.current(layoutHeightRef.current);
   }, [tip?.id, tip]);
 
-  if (tipsLoading) return <LoadingState label="Carregando canvas…" />;
+  if (tipsLoading || matsLoading || kitsLoading)
+    return <LoadingState label="Carregando canvas…" />;
   if (!tip || !layout) return null;
   const tipId = tip.id;
+
+  const deleting = deleteAmb.isPending || deleteComp.isPending || deleteTip.isPending;
 
   const iconFor = (amb: Ambiente) => amb.icon ?? guessAmbIcon(amb.nome);
   const toggleKit = (key: string) =>
@@ -153,10 +171,17 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
 
   // ── Ações dos nós ──
   const act: CanvasActions = {
+    busyKey,
     editImage: (mat) => setImageTarget(mat),
     editAmb: (amb) => setAmbModal({ mode: "edit", amb }),
     addAmb: () => setAmbModal({ mode: "add", amb: null }),
-    cloneAmb: (amb) => cloneAmb.mutate({ tipologiaId: tipId, ambienteId: amb.blueprintRoomId }),
+    cloneAmb: (amb) => {
+      setBusyKey(cloneAmbBusyKey(amb.blueprintRoomId));
+      cloneAmb.mutate(
+        { tipologiaId: tipId, ambienteId: amb.blueprintRoomId },
+        { onSettled: () => setBusyKey(null) }
+      );
+    },
     deleteAmb: (amb) =>
       setConfirm({
         title: "Excluir ambiente",
@@ -166,7 +191,11 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
             componente(s)? Esta ação não pode ser desfeita.
           </>
         ),
-        onYes: () => deleteAmb.mutate({ tipologiaId: tipId, ambienteId: amb.blueprintRoomId }),
+        onYes: () =>
+          deleteAmb.mutate(
+            { tipologiaId: tipId, ambienteId: amb.blueprintRoomId },
+            { onSuccess: () => setConfirm(null) }
+          ),
       }),
 
     editComp: (ambId, comp) => setCompModal({ mode: "edit", ambId, comp }),
@@ -180,7 +209,10 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
           </>
         ),
         onYes: () =>
-          deleteComp.mutate({ tipologiaId: tipId, ambienteId: ambId, componenteId: comp.id }),
+          deleteComp.mutate(
+            { tipologiaId: tipId, ambienteId: ambId, componenteId: comp.id },
+            { onSuccess: () => setConfirm(null) }
+          ),
       }),
 
     changeOption: (ambId, comp, optId, isPadrao) => {
@@ -207,8 +239,10 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
       }),
     deleteOption: (ambId, comp, optId, isPadrao) => {
       const path = { tipologiaId: tipId, ambienteId: ambId, componenteId: comp.id };
-      if (isPadrao) setPadrao.mutate({ ...path, padraoBaseId: null });
-      else removeUpgrade.mutate({ ...path, optionId: optId });
+      const settle = { onSettled: () => setBusyKey(null) };
+      setBusyKey(optionBusyKey(comp.id, isPadrao ? null : optId));
+      if (isPadrao) setPadrao.mutate({ ...path, padraoBaseId: null }, settle);
+      else removeUpgrade.mutate({ ...path, optionId: optId }, settle);
     },
   };
 
@@ -219,7 +253,11 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
       ambienteId: matPicker.ambId,
       componenteId: matPicker.compId,
     };
-    const close = { onSuccess: () => setMatPicker(null) };
+    const close = {
+      onSuccess: () => setMatPicker(null),
+      onSettled: () => setPickerBusy(false),
+    };
+    setPickerBusy(true);
     if (matPicker.isPadrao) setPadrao.mutate({ ...path, padraoBaseId: matId }, close);
     else if (matPicker.which === null) addUpgrade.mutate({ ...path, baseId: matId }, close);
     else replaceUpgrade.mutate({ ...path, optionId: matPicker.which, newBaseId: matId }, close);
@@ -301,6 +339,7 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
       onYes: () =>
         deleteTip.mutate(t.id, {
           onSuccess: () => {
+            setConfirm(null);
             if (t.id === tipId) {
               const next = tipologias.find((x) => x.id !== t.id);
               if (next) router.replace(`/tipologias/${next.id}/canvas`);
@@ -338,8 +377,6 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
           </div>
         </div>
         <div className="flex items-center gap-4">
-          <PresenceStack />
-          <div className="h-7 w-px bg-neutral-gray-4" />
           <div className="flex gap-0.5 rounded-lg bg-neutral-gray-3 p-[3px]">
             {([["Compacto", false], ["Detalhado", true]] as const).map(([lbl, val]) => {
               const on = detailed === val;
@@ -358,10 +395,6 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
               );
             })}
           </div>
-          <div className="h-7 w-px bg-neutral-gray-4" />
-          <Button variant="bordered" size="sm" icon="edit" onPress={() => setTipModal({ mode: "edit", tip })}>
-            Editar tipologia
-          </Button>
           <Button size="sm" icon="plus" onPress={handleAddNote}>
             Post-it
           </Button>
@@ -380,6 +413,8 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
           onEdit={(t) => setTipModal({ mode: "edit", tip: t })}
           onDuplicate={onTipDuplicate}
           onDelete={onTipDelete}
+          duplicatingId={duplicateTip.isPending ? (duplicateTip.variables ?? null) : null}
+          deletingId={deleteTip.isPending ? (deleteTip.variables ?? null) : null}
         />
 
         <Viewport view={view} planeHeight={layout.height} materiais={materiais}>
@@ -443,7 +478,7 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
         kits={kits}
         onClose={() => setMatPicker(null)}
         onConfirm={confirmMatPicker}
-        confirming={setPadrao.isPending || addUpgrade.isPending || replaceUpgrade.isPending}
+        confirming={pickerBusy}
       />
 
       <AmbienteModal
@@ -488,16 +523,12 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
         width={420}
         actions={
           <>
-            <Button variant="bordered" onPress={() => setConfirm(null)}>
+            <Button variant="bordered" isDisabled={deleting} onPress={() => setConfirm(null)}>
               Cancelar
             </Button>
-            <Button
-              variant="danger"
-              onPress={() => {
-                confirm?.onYes();
-                setConfirm(null);
-              }}
-            >
+            {/* O modal só fecha no onSuccess de cada mutation: num erro ele
+                permanece aberto (o toast global explica) e o usuário retenta. */}
+            <Button variant="danger" isLoading={deleting} onPress={() => confirm?.onYes()}>
               Excluir
             </Button>
           </>

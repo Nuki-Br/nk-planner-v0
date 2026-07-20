@@ -94,6 +94,30 @@ function AddCostItemBtn({ onClick }: { onClick: () => void }) {
   );
 }
 
+/**
+ * Estado vazio de uma SEÇÃO da tabela (padrão/upgrade de um ambiente). O
+ * EmptyState cheio tem padding de tela; aqui a densidade é de linha, então a
+ * mensagem vai direto na célula que atravessa todas as colunas.
+ */
+function EmptySectionRow({
+  colSpan,
+  title,
+  subtitle,
+}: {
+  colSpan: number;
+  title: string;
+  subtitle: string;
+}) {
+  return (
+    <tr>
+      <td colSpan={colSpan} className="bg-white px-3.5 py-5 text-center">
+        <p className="text-[12.5px] font-semibold text-neutral-gray-9">{title}</p>
+        <p className="mt-0.5 text-[11.5px] text-neutral-gray-6">{subtitle}</p>
+      </td>
+    </tr>
+  );
+}
+
 function Th({
   children,
   right = false,
@@ -763,7 +787,22 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
         />
       )}
 
-      {view === "preco" && (
+      {view === "preco" && tip.ambientes.length === 0 && (
+        <div className="mb-6 rounded-b-lg border border-t-0 border-neutral-gray-4 bg-white">
+          <EmptyState
+            icon="layers"
+            title="Nenhum ambiente nesta tipologia"
+            subtitle="Cadastre os ambientes e seus componentes para montar o preço."
+            action={
+              <Button variant="teal" icon="plus" onPress={() => router.push("/tipologias")}>
+                Adicionar ambiente
+              </Button>
+            }
+          />
+        </div>
+      )}
+
+      {view === "preco" && tip.ambientes.length > 0 && (
         <div className="mb-6 overflow-x-auto rounded-b-lg border border-t-0 border-neutral-gray-4 bg-white">
           <table className="w-full border-collapse">
             <thead>
@@ -797,6 +836,16 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
             <tbody>
               {tip.ambientes.map((amb, ambIdx) => {
                 const total = ambTotals[ambIdx];
+                // Mesmas condições dos dois maps abaixo: um componente só
+                // aparece na seção padrão se tiver material padrão resolvido, e
+                // na de upgrade se tiver ao menos uma opção não-padrão.
+                const hasPadrao = amb.componentes.some((c) => {
+                  const d = c.options.find((o) => o.id === c.padrao);
+                  return Boolean(d && !d.isKit && getMaterial(materiais, d.baseId));
+                });
+                const hasUpgrade = amb.componentes.some((c) =>
+                  c.options.some((o) => !o.isDefault)
+                );
                 return (
                   <React.Fragment key={amb.id}>
                     <tr>
@@ -816,6 +865,13 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                         Acabamentos padrão — crédito incluído no preço
                       </td>
                     </tr>
+                    {!hasPadrao && (
+                      <EmptySectionRow
+                        colSpan={colCount}
+                        title="Nenhum material padrão definido"
+                        subtitle="Defina o material padrão dos componentes deste ambiente para gerar o crédito."
+                      />
+                    )}
                     {amb.componentes.map((comp) => {
                       const def = comp.options.find((o) => o.id === comp.padrao);
                       const padMat =
@@ -907,6 +963,13 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                         Acabamentos personalizados — débito cobrado do cliente
                       </td>
                     </tr>
+                    {!hasUpgrade && (
+                      <EmptySectionRow
+                        colSpan={colCount}
+                        title="Nenhum upgrade cadastrado"
+                        subtitle="Adicione opções de upgrade aos componentes deste ambiente para cobrar do cliente."
+                      />
+                    )}
                     {amb.componentes.map((comp) =>
                       comp.options.map((opt) => {
                         if (opt.isDefault) return null;

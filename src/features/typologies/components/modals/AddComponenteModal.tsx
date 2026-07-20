@@ -5,13 +5,8 @@ import React from "react";
 import { Button, Input, Modal, Select } from "@/components/ui";
 import { useCreateComponente } from "@/lib/hooks/useTipologiaMutations";
 import { parseBR } from "@/lib/utils";
+import { UNIDADE_OPTIONS } from "@/shared/constants/unidades";
 import type { Ambiente, Unidade } from "@/shared/types/domain";
-
-const UNIDADE_OPTIONS = [
-  { value: "m²", label: "m² — área" },
-  { value: "ml", label: "ml — linear" },
-  { value: "und", label: "und — peça" },
-];
 
 interface AddComponenteModalProps {
   open: boolean;
@@ -31,14 +26,14 @@ export function AddComponenteModal({
   const [nome, setNome] = React.useState("");
   const [unidade, setUnidade] = React.useState("m²");
   const [qtd, setQtd] = React.useState("");
-  const [rt, setRt] = React.useState("15");
+  const [rt, setRt] = React.useState("");
 
   React.useEffect(() => {
     if (!open) return;
     setNome("");
     setUnidade("m²");
     setQtd("");
-    setRt("15");
+    setRt("");
   }, [open]);
 
   const handleAdd = () => {
@@ -86,11 +81,17 @@ export function AddComponenteModal({
           onValueChange={setNome}
           placeholder="Ex: Piso, Rodapé, Revestimento de parede, Cuba…"
         />
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          <Select label="Unidade" options={UNIDADE_OPTIONS} value={unidade} onValueChange={setUnidade} small />
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <Select
+            label="Unidade de medida"
+            options={UNIDADE_OPTIONS}
+            value={unidade}
+            onValueChange={setUnidade}
+            small
+          />
           <Input label="Quantidade" value={qtd} onValueChange={setQtd} type="number" small placeholder="0,00" />
-          <Input label="Tolerância RT (%)" value={rt} onValueChange={setRt} type="number" small placeholder="15" />
         </div>
+        <Input label="Tolerância RT (%)" value={rt} onValueChange={setRt} type="number" small placeholder="15" />
       </div>
     </Modal>
   );

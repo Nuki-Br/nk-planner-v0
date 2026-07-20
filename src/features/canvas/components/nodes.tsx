@@ -13,8 +13,16 @@ import { optionPending, subitemPending } from "../pending";
 import { MaterialSwatch } from "./MaterialSwatch";
 import { AddPill, CvIcon, Flyout, MenuRow, VMenu } from "./primitives";
 
+// Uma única mutação de nó roda por vez, então o CanvasScreen publica só a
+// chave da ação em andamento e cada nó compara com a sua para se desabilitar.
+export const cloneAmbBusyKey = (ambId: number) => `clone-amb:${ambId}`;
+export const optionBusyKey = (compId: number, optId: number | null) =>
+  `del-opt:${compId}:${optId ?? "padrao"}`;
+
 /** Ações disparadas pelos nós (implementadas no CanvasScreen com as mutations da Fase 5). */
 export interface CanvasActions {
+  /** Chave da mutação de nó em andamento (ver *BusyKey acima); null = nenhuma. */
+  busyKey: string | null;
   editAmb: (amb: Ambiente) => void;
   cloneAmb: (amb: Ambiente) => void;
   deleteAmb: (amb: Ambiente) => void;
@@ -74,7 +82,12 @@ export function AmbienteNode({
         <VMenu
           items={[
             { icon: "edit", label: "Editar ambiente", onClick: () => act.editAmb(amb) },
-            { icon: "copy", label: "Clonar ambiente", onClick: () => act.cloneAmb(amb) },
+            {
+              icon: "copy",
+              label: "Clonar ambiente",
+              onClick: () => act.cloneAmb(amb),
+              loading: act.busyKey === cloneAmbBusyKey(amb.blueprintRoomId),
+            },
             { divider: true },
             { icon: "trash", label: "Excluir ambiente", danger: true, onClick: () => act.deleteAmb(amb) },
           ]}
@@ -222,6 +235,7 @@ export function ComponenteNode({
                 name={ent?.nome ?? "—"}
                 onClick={() => act.changeOption(node.ambId, comp, opt.id, false)}
                 onDel={() => act.deleteOption(node.ambId, comp, opt.id, false)}
+                deleting={act.busyKey === optionBusyKey(comp.id, opt.id)}
               />
             );
           })}
@@ -345,7 +359,13 @@ export function OptionNode({
               ? [{ icon: "library" as const, label: "Editar imagem", onClick: () => act.editImage(mat) }]
               : []),
             { divider: true },
-            { icon: "trash", label: "Excluir opção", danger: true, onClick: () => act.deleteOption(node.ambId, comp, optId, isPadrao) },
+            {
+              icon: "trash",
+              label: "Excluir opção",
+              danger: true,
+              onClick: () => act.deleteOption(node.ambId, comp, optId, isPadrao),
+              loading: act.busyKey === optionBusyKey(comp.id, isPadrao ? null : optId),
+            },
           ]}
         />
       </Flyout>

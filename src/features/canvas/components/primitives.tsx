@@ -2,7 +2,7 @@
 
 import React from "react";
 
-import { Icon, type IconName } from "@/components/ui";
+import { Icon, Spinner, type IconName } from "@/components/ui";
 import { getMaterial } from "@/lib/data/entities";
 import { cn } from "@/lib/utils";
 import type { Material } from "@/shared/types/domain";
@@ -87,6 +87,8 @@ export interface VMenuEntry {
   onClick?: () => void;
   danger?: boolean;
   divider?: boolean;
+  /** Mutação em andamento: troca o ícone por spinner e bloqueia o clique. */
+  loading?: boolean;
 }
 
 /** Menu vertical de ações (linhas ícone + label, divisor e variante danger). */
@@ -100,19 +102,26 @@ export function VMenu({ items }: { items: VMenuEntry[] }) {
           <button
             key={it.label}
             type="button"
+            disabled={it.loading}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
+              if (it.loading) return;
               it.onClick?.();
             }}
             className={cn(
               "flex w-full items-center gap-[11px] rounded-lg px-2.5 py-2 text-left text-[13px] font-medium transition-colors",
               it.danger
                 ? "text-functional-error hover:bg-functional-error-light"
-                : "text-neutral-gray-9 hover:bg-neutral-gray-2"
+                : "text-neutral-gray-9 hover:bg-neutral-gray-2",
+              it.loading && "cursor-default opacity-60 hover:bg-transparent"
             )}
           >
-            {it.icon && <Icon name={it.icon} size={17} />}
+            {it.loading ? (
+              <Spinner size={17} className="text-current" />
+            ) : (
+              it.icon && <Icon name={it.icon} size={17} />
+            )}
             {it.label}
           </button>
         )
@@ -145,29 +154,35 @@ export function ActBtn({
   title,
   onClick,
   danger = false,
+  loading = false,
 }: {
   icon: IconName;
   title: string;
   onClick: () => void;
   danger?: boolean;
+  /** Mutação em andamento: troca o ícone por spinner e bloqueia o clique. */
+  loading?: boolean;
 }) {
   return (
     <button
       type="button"
       title={title}
+      disabled={loading}
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => {
         e.stopPropagation();
+        if (loading) return;
         onClick();
       }}
       className={cn(
         "flex h-[26px] w-[26px] items-center justify-center rounded-md transition-colors",
         danger
           ? "text-functional-error hover:bg-functional-error-light"
-          : "text-neutral-gray-8 hover:bg-neutral-gray-3 hover:text-primary-7"
+          : "text-neutral-gray-8 hover:bg-neutral-gray-3 hover:text-primary-7",
+        loading && "cursor-default opacity-60 hover:bg-transparent"
       )}
     >
-      <Icon name={icon} size={15} />
+      {loading ? <Spinner size={13} className="text-current" /> : <Icon name={icon} size={15} />}
     </button>
   );
 }
@@ -181,6 +196,7 @@ export function MenuRow({
   name,
   onClick,
   onDel,
+  deleting = false,
   add = false,
 }: {
   materiais: Material[];
@@ -190,6 +206,8 @@ export function MenuRow({
   name?: string;
   onClick: () => void;
   onDel?: () => void;
+  /** Exclusão desta opção em andamento. */
+  deleting?: boolean;
   add?: boolean;
 }) {
   const [h, setH] = React.useState(false);
@@ -237,18 +255,27 @@ export function MenuRow({
           </>
         )}
       </span>
-      {onDel && h && (
+      {onDel && (h || deleting) && (
         <button
           type="button"
           title="Excluir opção"
+          disabled={deleting}
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
+            if (deleting) return;
             onDel();
           }}
-          className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-md bg-functional-error-light text-functional-error"
+          className={cn(
+            "flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-md bg-functional-error-light text-functional-error",
+            deleting && "cursor-default opacity-60"
+          )}
         >
-          <Icon name="trash" size={12} />
+          {deleting ? (
+            <Spinner size={12} className="text-current" />
+          ) : (
+            <Icon name="trash" size={12} />
+          )}
         </button>
       )}
     </div>

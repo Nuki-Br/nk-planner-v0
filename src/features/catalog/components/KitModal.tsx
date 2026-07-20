@@ -7,7 +7,7 @@ import { Button, Icon, Input, Modal, Select } from "@/components/ui";
 import { getMaterial } from "@/lib/data/entities";
 import { useCategorias } from "@/lib/hooks/useCategorias";
 import { useCreateKit, useUpdateKit } from "@/lib/hooks/useKits";
-import { UNIDADES, type Unidade } from "@/shared/constants/unidades";
+import { UNIDADE_OPTIONS, type Unidade } from "@/shared/constants/unidades";
 import type { Kit, KitItem, Material } from "@/shared/types/domain";
 
 import { CategoryChip } from "./CategoryChip";
@@ -20,8 +20,6 @@ interface KitModalProps {
   kit: Kit | null;
   materiais: Material[];
 }
-
-const UNIDADE_OPTIONS = UNIDADES.map((u) => ({ value: u, label: u }));
 
 /** Código automático do kit: "KIT-" + iniciais do nome (mock). */
 function kitCodigo(nome: string): string {
@@ -183,7 +181,7 @@ export function KitModal({ open, onClose, kit, materiais }: KitModalProps) {
                         if (v !== "") setItemUnidade(it.materialId, v as Unidade);
                       }}
                       small
-                      className="w-[76px] shrink-0"
+                      className="w-[132px] shrink-0"
                       classNames={{ trigger: "h-8 min-h-8 bg-white" }}
                     />
                     <button
