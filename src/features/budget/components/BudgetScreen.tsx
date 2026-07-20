@@ -4,7 +4,7 @@ import React from "react";
 import { useRouter } from "next/navigation";
 
 import { Button, EmptyState, Icon, Modal, PageHeader, Textarea } from "@/components/ui";
-import { rowKey } from "@/lib/budget";
+import { columnsAffectedByExtendedConvention, rowKey } from "@/lib/budget";
 import { getKit, getMaterial } from "@/lib/data/entities";
 import { useActiveProjectId } from "@/lib/hooks/useActiveProject";
 import { useBudgetColumns, useUpdateBudgetColumns } from "@/lib/hooks/useBudgetColumns";
@@ -14,26 +14,44 @@ import { useKits } from "@/lib/hooks/useKits";
 import { useMateriais, useUpdateMaterial } from "@/lib/hooks/useMateriais";
 import { useProject } from "@/lib/hooks/useProjects";
 import { useTipologias } from "@/lib/hooks/useTipologias";
+import {
+  useAddCostComponent,
+  useRemoveCostComponent,
+  useSetCostQtds,
+  useUpdateCostComponent,
+} from "@/lib/hooks/useTipologiaMutations";
 import { useCreateVersion, useRestoreVersion, useVersions } from "@/lib/hooks/useVersions";
 import { cn, fmtBRL, fmtNum } from "@/lib/utils";
 import { CommentThreadPanel, type ThreadRow } from "@/features/construtor-shared/CommentThreadPanel";
 import { LinkFillModal } from "@/features/construtor-shared/LinkFillModal";
-import type { BudgetColumn, BudgetVersion, ColumnKind } from "@/shared/types/domain";
+import type {
+  Ambiente,
+  BudgetColumn,
+  BudgetVersion,
+  ColumnKind,
+  Componente,
+  CostComponent,
+  CostComponentSide,
+} from "@/shared/types/domain";
 
 import {
   ambTotal,
   buildScopeRefs,
   calcAnyRow,
   isOptionPending,
+  padraoSatellites,
   type BaseCosts,
   type BudgetDeps,
   type CellOverrides,
 } from "../calc";
+import { kitSubRow, satelliteRowsFor, satelliteSubRow } from "../subRows";
 import { AddColumnTh, ColHeaderCell } from "./ColHeaderCell";
 import { BudgetScreenSkeleton } from "./BudgetScreenSkeleton";
 import { CostBaseView } from "./CostBaseView";
 import { FormulaCellEditor } from "./FormulaCellEditor";
 import { PublishSplitButton } from "./PublishSplitButton";
+import { CostItemModal, type CostItemValue } from "./CostItemModal";
+import { SubRow } from "./SubRow";
 import { VersionDrawer, VersionToast } from "./Versioning";
 
 type PendingFillMode = "inline" | "expandRow";
@@ -41,6 +59,39 @@ type PendingFillMode = "inline" | "expandRow";
 interface EditingCell {
   rowKey: string;
   colId: number;
+}
+
+/**
+ * Alvo do modal de item de custo. O `lado` vem da SEÇÃO da linha clicada
+ * (padrão → crédito, personalizado → débito), então o usuário não precisa
+ * escolher — era um dos atritos de criar isso na config de tipologias.
+ */
+interface CostItemTarget {
+  amb: Ambiente;
+  comp: Componente;
+  lado: CostComponentSide;
+  /** null = criando. */
+  editing: CostComponent | null;
+}
+
+interface CostRemoveTarget {
+  amb: Ambiente;
+  comp: Componente;
+  item: CostComponent;
+}
+
+/** Botão "+ Item de custo" das linhas mestre da tabela. */
+function AddCostItemBtn({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Adicionar item de custo (soleira, rodapé, reserva técnica…)"
+      className="shrink-0 rounded p-1 text-neutral-gray-5 opacity-0 transition-opacity hover:bg-neutral-gray-3 hover:text-primary-7 group-hover/row:opacity-100 focus:opacity-100"
+    >
+      <Icon name="plus" size={13} />
+    </button>
+  );
 }
 
 function Th({
@@ -195,6 +246,10 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   const updateMaterial = useUpdateMaterial();
   const createVersion = useCreateVersion();
   const restoreVersion = useRestoreVersion();
+  const addCostMut = useAddCostComponent();
+  const updateCostMut = useUpdateCostComponent();
+  const removeCostMut = useRemoveCostComponent();
+  const setCostQtdsMut = useSetCostQtds();
 
   const [activeTipId, setActiveTipId] = React.useState<number | null>(null);
   const [view, setView] = React.useState<"preco" | "custos">("preco");
@@ -207,13 +262,16 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   const [showAdd, setShowAdd] = React.useState(false);
   const [dragId, setDragId] = React.useState<number | null>(null);
   const [dragTarget, setDragTarget] = React.useState<number | null>(null);
-  const [collapsedKits, setCollapsedKits] = React.useState<Set<string>>(new Set());
+  const [collapsedRows, setCollapsedRows] = React.useState<Set<string>>(new Set());
   const [showDrawer, setShowDrawer] = React.useState(false);
   const [showLinkModal, setShowLinkModal] = React.useState(false);
   const [showPublishModal, setShowPublishModal] = React.useState(false);
   const [publishSummary, setPublishSummary] = React.useState("");
   const [restoreTarget, setRestoreTarget] = React.useState<BudgetVersion | null>(null);
   const [toastMsg, setToastMsg] = React.useState("");
+  const [convWarnDismissed, setConvWarnDismissed] = React.useState(false);
+  const [costTarget, setCostTarget] = React.useState<CostItemTarget | null>(null);
+  const [costRemove, setCostRemove] = React.useState<CostRemoveTarget | null>(null);
   const toastTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fireToast = (m: string) => {
@@ -235,6 +293,64 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
     () => ({ materiais, kits, cols, overrides, baseCosts }),
     [materiais, kits, cols, overrides, baseCosts]
   );
+
+  const affectedCols = React.useMemo(
+    () => columnsAffectedByExtendedConvention(cols),
+    [cols]
+  );
+
+  // Item de custo: a definição vai numa mutação, a quantidade em outra — só a
+  // quantidade é local à tipologia.
+  const saveCostItem = (v: CostItemValue) => {
+    if (!costTarget || !tip) return;
+    const path = {
+      tipologiaId: tip.id,
+      ambienteId: costTarget.amb.blueprintRoomId,
+      componenteId: costTarget.comp.id,
+    };
+    const close = () => setCostTarget(null);
+    const editing = costTarget.editing;
+    if (editing) {
+      updateCostMut.mutate(
+        {
+          ...path,
+          costItemId: editing.id,
+          patch: { nome: v.nome, tipo: v.tipo, baseId: v.baseId, unidade: v.unidade, lado: v.lado },
+        },
+        {
+          onSuccess: () =>
+            setCostQtdsMut.mutate({ ...path, qtds: { [editing.id]: v.qtd } }, { onSuccess: close }),
+        }
+      );
+    } else {
+      addCostMut.mutate({ ...path, input: v }, { onSuccess: close });
+    }
+  };
+
+  const confirmRemoveCostItem = () => {
+    if (!costRemove || !tip) return;
+    removeCostMut.mutate(
+      {
+        tipologiaId: tip.id,
+        ambienteId: costRemove.amb.blueprintRoomId,
+        componenteId: costRemove.comp.id,
+        costItemId: costRemove.item.id,
+      },
+      { onSuccess: () => setCostRemove(null) }
+    );
+  };
+
+  /** Handlers de edição/remoção passados às sub-linhas de item de custo. */
+  const costRowHandlers = (amb: Ambiente, comp: Componente, lado: CostComponentSide) => ({
+    onEdit: (costItemId: number) => {
+      const item = comp.custoComponentes.find((c) => c.id === costItemId);
+      if (item) setCostTarget({ amb, comp, lado, editing: item });
+    },
+    onRemove: (costItemId: number) => {
+      const item = comp.custoComponentes.find((c) => c.id === costItemId);
+      if (item) setCostRemove({ amb, comp, item });
+    },
+  });
 
   if (!projectId || tipsLoading) return <BudgetScreenSkeleton />;
   if (!tip)
@@ -344,8 +460,11 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
     persistBaseCost(baseId, d.mat, d.mo);
   };
 
-  const toggleKit = (key: string) =>
-    setCollapsedKits((prev) => {
+  // Guarda os COLAPSADOS (não os expandidos) para que o default seja expandido.
+  // Três namespaces de chave: rowKey(opção) para kit e material, `pad-<compId>`
+  // para a linha de padrão.
+  const toggleRow = (key: string) =>
+    setCollapsedRows((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -393,7 +512,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
         if (opt.isKit) {
           const r = calcAnyRow(deps, comp, opt);
           if (r?.kind === "kit" && r.result.anyPending) excludedCount++;
-        } else if (isOptionPending(deps, opt)) {
+        } else if (isOptionPending(deps, comp, opt)) {
           excludedCount++;
         }
       }
@@ -573,11 +692,37 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
             Como preencher
           </span>
           <span className="text-xs text-neutral-gray-8">
-            Digite um número (<code className="font-mono text-primary-8">150</code>) para valor
-            fixo, ou comece com <code className="mx-1 font-mono text-primary-8">=</code> para
-            fórmula — ex. <code className="mx-1 font-mono text-primary-8">=custo_troca * 10%</code>{" "}
-            ou <code className="ml-1 font-mono text-primary-8">=valor_unitario * 0,25</code>.
+            Digite um número (<code className="font-mono text-primary-8">150</code>) para valor fixo
+            da linha inteira, ou comece com{" "}
+            <code className="mx-1 font-mono text-primary-8">=</code> para fórmula — ex.{" "}
+            <code className="mx-1 font-mono text-primary-8">=custo_troca * 10%</code> ou{" "}
+            <code className="ml-1 font-mono text-primary-8">=valor_unitario * 0,25</code>.
           </span>
+        </div>
+      )}
+
+      {/* Aviso único da mudança de convenção: valores fixos deixaram de ser por
+          unidade e passaram a valer pela linha. Só colunas com literal aditivo
+          mudam de resultado — as percentuais são invariantes. */}
+      {view === "preco" && !convWarnDismissed && affectedCols.length > 0 && (
+        <div className="mb-3.5 flex items-start gap-2.5 rounded-lg border border-[#fde68a] bg-functional-warning-light px-3.5 py-2.5">
+          <Icon name="warning" size={14} className="mt-0.5 shrink-0 text-tint-orange-fg" />
+          <div className="flex-1 text-xs text-neutral-gray-9">
+            <strong className="font-bold">
+              {affectedCols.length}{" "}
+              {affectedCols.length === 1 ? "coluna usa valor fixo" : "colunas usam valores fixos"}
+            </strong>{" "}
+            — o valor digitado agora vale para a linha inteira, não por unidade. Confira:{" "}
+            {affectedCols.map((c) => c.nome).join(", ")}.
+          </div>
+          <button
+            type="button"
+            onClick={() => setConvWarnDismissed(true)}
+            title="Dispensar aviso"
+            className="shrink-0 text-[11px] font-semibold text-neutral-gray-7"
+          >
+            Dispensar
+          </button>
         </div>
       )}
 
@@ -676,40 +821,81 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                       const padMat =
                         def && !def.isKit ? getMaterial(materiais, def.baseId) : undefined;
                       if (!padMat) return null;
-                      const qtdComRT = comp.qtd * (1 + comp.rt / 100);
+                      // O crédito é o material que a construtora deixaria de
+                      // instalar, na quantidade LÍQUIDA: a reserva técnica é
+                      // perda extra do upgrade, não do padrão.
                       const valUnit = padMat.custoMat + padMat.custoMO;
                       const bg = "bg-[#f4fffe]";
+                      // Crédito do GRUPO: o padrão mais seus componentes de
+                      // custo do lado padrão (H41 = SUM(G41:G44) da planilha).
+                      const padSats = padraoSatellites(deps, comp, valUnit);
+                      const padChildren = padSats.map(satelliteSubRow);
+                      const creditoGrupo =
+                        valUnit * comp.qtd + padSats.reduce((a, s) => a + s.line, 0);
+                      const padKey = `pad-${comp.id}`;
+                      const padExpanded = !collapsedRows.has(padKey);
                       return (
-                        <tr key={`pad-${comp.id}`}>
-                          <Td sticky className={bg}>
-                            <div className="text-xs font-semibold text-neutral-gray-9">
-                              {padMat.nome}
-                            </div>
-                            <div className="mt-px text-[11px] text-neutral-gray-6">
-                              {comp.nome} · {padMat.fabricante}
-                            </div>
-                          </Td>
-                          <Td right className={cn(bg, "text-neutral-gray-7")}>
-                            {fmtNum(qtdComRT, 2)} {comp.unidade}
-                          </Td>
-                          <Td right className={cn(bg, "text-neutral-gray-7")}>
-                            {fmtBRL(valUnit)}
-                          </Td>
-                          <Td right className={bg}>
-                            <span className="font-semibold text-functional-success">
-                              Créd. {fmtBRL(valUnit * qtdComRT)}
-                            </span>
-                          </Td>
-                          <Td right className={cn(bg, "text-neutral-gray-5")}>—</Td>
-                          {cols.map((col) => (
-                            <Td key={col.id} right className={cn(bg, "text-neutral-gray-5")}>
-                              —
+                        <React.Fragment key={padKey}>
+                          <tr className="group/row">
+                            <Td sticky className={bg}>
+                              <div className="flex items-start gap-1.5">
+                                {padChildren.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleRow(padKey)}
+                                    title={padExpanded ? "Recolher itens de custo" : "Expandir itens de custo"}
+                                    className="mt-px text-neutral-gray-7"
+                                  >
+                                    <Icon name={padExpanded ? "chevD" : "chevR"} size={15} />
+                                  </button>
+                                )}
+                                <div className="flex-1">
+                                  <div className="text-xs font-semibold text-neutral-gray-9">
+                                    {padMat.nome}
+                                  </div>
+                                  <div className="mt-px text-[11px] text-neutral-gray-6">
+                                    {comp.nome} · {padMat.fabricante}
+                                  </div>
+                                </div>
+                                <AddCostItemBtn
+                                  onClick={() =>
+                                    setCostTarget({ amb, comp, lado: "padrao", editing: null })
+                                  }
+                                />
+                              </div>
                             </Td>
-                          ))}
-                          <Td className={bg} />
-                          <Td right className={cn(bg, "text-neutral-gray-5")}>—</Td>
-                          <Td right className={cn(bg, "text-neutral-gray-5")}>—</Td>
-                        </tr>
+                            <Td right className={cn(bg, "text-neutral-gray-7")}>
+                              {fmtNum(comp.qtd, 2)} {comp.unidade}
+                            </Td>
+                            <Td right className={cn(bg, "text-neutral-gray-7")}>
+                              {fmtBRL(valUnit)}
+                            </Td>
+                            <Td right className={bg}>
+                              <span className="font-semibold text-functional-success">
+                                Créd. {fmtBRL(creditoGrupo)}
+                              </span>
+                            </Td>
+                            <Td right className={cn(bg, "text-neutral-gray-5")}>—</Td>
+                            {cols.map((col) => (
+                              <Td key={col.id} right className={cn(bg, "text-neutral-gray-5")}>
+                                —
+                              </Td>
+                            ))}
+                            <Td className={bg} />
+                            <Td right className={cn(bg, "text-neutral-gray-5")}>—</Td>
+                            <Td right className={cn(bg, "text-neutral-gray-5")}>—</Td>
+                          </tr>
+                          {padExpanded &&
+                            padChildren.map((c, ci) => (
+                              <SubRow
+                                key={`${padKey}-${c.key}`}
+                                cells={c}
+                                isLast={ci === padChildren.length - 1}
+                                cols={cols}
+                                {...costRowHandlers(amb, comp, "padrao")}
+                              />
+                            ))}
+                        </React.Fragment>
                       );
                     })}
 
@@ -733,16 +919,22 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                           const rr = calcAnyRow(deps, comp, opt);
                           const r = rr?.kind === "kit" ? rr.result : null;
                           const pending = r ? r.anyPending : true;
-                          const expanded = !collapsedKits.has(rk);
+                          const expanded = !collapsedRows.has(rk);
                           const kitBg = pending ? "bg-functional-warning-light" : "bg-[#fbf6ff]";
+                          // Sub-itens do kit e componentes de custo são irmãos:
+                          // o isLast do conector corre sobre a concatenação.
+                          const kitChildren = [
+                            ...(r?.subItems ?? []).map(kitSubRow),
+                            ...satelliteRowsFor(r?.satellites ?? [], "upgrade"),
+                          ];
                           return (
                             <React.Fragment key={rk}>
-                              <tr>
+                              <tr className="group/row">
                                 <Td sticky className={kitBg}>
                                   <div className="flex items-start gap-1.5">
                                     <button
                                       type="button"
-                                      onClick={() => toggleKit(rk)}
+                                      onClick={() => toggleRow(rk)}
                                       title={expanded ? "Recolher kit" : "Expandir kit"}
                                       className="flex pt-px text-neutral-gray-7"
                                     >
@@ -779,33 +971,45 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                     {pending && (
                                       <Icon name="warning" size={13} className="text-tint-orange-fg" />
                                     )}
+                                    <AddCostItemBtn
+                                      onClick={() =>
+                                        setCostTarget({ amb, comp, lado: "upgrade", editing: null })
+                                      }
+                                    />
                                   </div>
                                 </Td>
                                 <Td right className={cn(kitBg, "text-neutral-gray-7")}>
                                   {kit.itens.length} itens
                                 </Td>
+                                {/* Kit não tem valor unitário: é um conjunto. O
+                                    total do kit é o próprio débito, na coluna ao lado. */}
                                 <Td right className={cn(kitBg, "text-neutral-gray-7")}>
-                                  {r && !pending ? fmtBRL(r.kitMaterialTotal) : "—"}
+                                  —
                                 </Td>
                                 <Td right className={kitBg}>
                                   {r && !pending ? (
-                                    <span
-                                      className={cn(
-                                        "font-semibold",
-                                        r.custoDeTroca >= 0
-                                          ? "text-[#c2410c]"
-                                          : "text-functional-success"
-                                      )}
-                                    >
-                                      {r.custoDeTroca >= 0 ? "Déb. " : "Créd. "}
-                                      {fmtBRL(Math.abs(r.custoDeTroca))}
+                                    <span className="font-semibold text-[#c2410c]">
+                                      Déb. {fmtBRL(r.debitoExt)}
                                     </span>
                                   ) : (
                                     "—"
                                   )}
                                 </Td>
                                 <Td right className={cn(kitBg, "text-neutral-gray-8")}>
-                                  {r && !pending ? fmtBRL(r.custoDeTroca) : "—"}
+                                  {r && !pending ? (
+                                    <span
+                                      className={cn(
+                                        "font-semibold",
+                                        r.custoDeTroca >= 0
+                                          ? "text-neutral-gray-8"
+                                          : "text-functional-success"
+                                      )}
+                                    >
+                                      {fmtBRL(r.custoDeTroca)}
+                                    </span>
+                                  ) : (
+                                    "—"
+                                  )}
                                 </Td>
                                 {cols.map((col, colIdx) =>
                                   renderConfigCell(col, colIdx, pending ? null : rr, rk, kitBg)
@@ -823,62 +1027,14 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                 <CommentTd className={kitBg} />
                               </tr>
                               {expanded &&
-                                r?.subItems.map((s, si) => (
-                                  <tr key={`${rk}-${s.item.id}`}>
-                                    <Td sticky className="bg-white !pl-0">
-                                      <div className="flex items-stretch">
-                                        <span className="relative w-[26px] shrink-0">
-                                          <span
-                                            className="absolute left-[17px] w-px bg-neutral-gray-5"
-                                            style={{
-                                              top: -2,
-                                              bottom: si === r.subItems.length - 1 ? "50%" : -2,
-                                            }}
-                                          />
-                                          <span className="absolute left-[17px] top-1/2 h-px w-[7px] bg-neutral-gray-5" />
-                                        </span>
-                                        <div className="pt-px">
-                                          <div
-                                            className={cn(
-                                              "text-xs",
-                                              s.pending ? "text-tint-amber-fg" : "text-neutral-gray-9"
-                                            )}
-                                          >
-                                            <span className="mr-1 text-neutral-gray-5">·</span>
-                                            {s.item.nome}
-                                          </div>
-                                          <code className="text-[10px] text-neutral-gray-6">
-                                            {s.item.fabricante}
-                                            {s.pending && (
-                                              <span className="ml-1.5 font-bold text-tint-orange-fg">
-                                                aguardando
-                                              </span>
-                                            )}
-                                          </code>
-                                        </div>
-                                      </div>
-                                    </Td>
-                                    <Td right className="bg-white text-neutral-gray-7">
-                                      {fmtNum(s.subQtd, 2)} {s.item.unidade}
-                                    </Td>
-                                    <Td right className="bg-white text-neutral-gray-7">
-                                      {fmtBRL(s.valUn)}
-                                    </Td>
-                                    <Td right className="bg-white">
-                                      <span className="font-semibold text-[#c2410c]">
-                                        Déb. {fmtBRL(s.line)}
-                                      </span>
-                                    </Td>
-                                    <Td right className="bg-white text-neutral-gray-5">—</Td>
-                                    {cols.map((col) => (
-                                      <Td key={col.id} right className="bg-white text-neutral-gray-5">
-                                        —
-                                      </Td>
-                                    ))}
-                                    <Td className="bg-white" />
-                                    <Td right className="bg-white text-neutral-gray-5">—</Td>
-                                    <Td right className="bg-white text-neutral-gray-5">—</Td>
-                                  </tr>
+                                kitChildren.map((c, ci) => (
+                                  <SubRow
+                                    key={`${rk}-${c.key}`}
+                                    cells={c}
+                                    isLast={ci === kitChildren.length - 1}
+                                    cols={cols}
+                                    {...costRowHandlers(amb, comp, "upgrade")}
+                                  />
                                 ))}
                             </React.Fragment>
                           );
@@ -887,7 +1043,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                         // ── MATERIAL: linha + preenchimento de custo base ──
                         const upgMat = getMaterial(materiais, opt.baseId);
                         if (!upgMat) return null;
-                        const pending = isOptionPending(deps, opt);
+                        const pending = isOptionPending(deps, comp, opt);
                         const rr = pending ? null : calcAnyRow(deps, comp, opt);
                         const r = rr?.kind === "material" ? rr.result : null;
                         const rowBg = pending ? "bg-functional-warning-light" : "bg-white";
@@ -896,12 +1052,26 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                         const inlineFill = pending && filling && pendingFill === "inline";
                         const draft = fillDraft[opt.baseId] ?? { mat: "", mo: "" };
                         const fillCell = inlineFill ? "bg-primary-1" : rowBg;
+                        // Componentes de custo do lado upgrade: entram no débito
+                        // desta opção e aparecem indentados abaixo dela.
+                        const matChildren = satelliteRowsFor(r?.satellites ?? [], "upgrade");
+                        const matExpanded = !collapsedRows.has(rk);
 
                         return (
                           <React.Fragment key={rk}>
-                            <tr>
+                            <tr className="group/row">
                               <Td sticky className={rowBg}>
                                 <div className="flex items-start gap-1.5">
+                                  {matChildren.length > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleRow(rk)}
+                                      title={matExpanded ? "Recolher itens de custo" : "Expandir itens de custo"}
+                                      className="mt-px text-neutral-gray-7"
+                                    >
+                                      <Icon name={matExpanded ? "chevD" : "chevR"} size={15} />
+                                    </button>
+                                  )}
                                   <div className="flex-1">
                                     <div
                                       className={cn(
@@ -937,6 +1107,11 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                   {pending && (
                                     <Icon name="warning" size={13} className="text-tint-orange-fg" />
                                   )}
+                                  <AddCostItemBtn
+                                    onClick={() =>
+                                      setCostTarget({ amb, comp, lado: "upgrade", editing: null })
+                                    }
+                                  />
                                 </div>
                               </Td>
                               <Td right className={cn(fillCell, "text-neutral-gray-7")}>
@@ -984,14 +1159,8 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                     />
                                   </div>
                                 ) : r ? (
-                                  <span
-                                    className={cn(
-                                      "font-semibold",
-                                      r.custoDeTroca >= 0 ? "text-[#c2410c]" : "text-functional-success"
-                                    )}
-                                  >
-                                    {r.custoDeTroca >= 0 ? "Déb. " : "Créd. "}
-                                    {fmtBRL(Math.abs(r.custoDeTroca))}
+                                  <span className="font-semibold text-[#c2410c]">
+                                    Déb. {fmtBRL(r.debitoExt)}
                                   </span>
                                 ) : (
                                   "—"
@@ -1018,7 +1187,18 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                     </button>
                                   </div>
                                 ) : r ? (
-                                  fmtBRL(r.custoDeTroca * r.qtdComRT)
+                                  // custoDeTroca já é estendido — multiplicar de
+                                  // novo por qtdComRT duplicaria a extensão.
+                                  <span
+                                    className={cn(
+                                      "font-semibold",
+                                      r.custoDeTroca >= 0
+                                        ? "text-neutral-gray-8"
+                                        : "text-functional-success"
+                                    )}
+                                  >
+                                    {fmtBRL(r.custoDeTroca)}
+                                  </span>
                                 ) : (
                                   "—"
                                 )}
@@ -1049,6 +1229,16 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                 className={rowBg}
                               />
                             </tr>
+                            {matExpanded &&
+                              matChildren.map((c, ci) => (
+                                <SubRow
+                                  key={`${rk}-${c.key}`}
+                                  cells={c}
+                                  isLast={ci === matChildren.length - 1}
+                                  cols={cols}
+                                  {...costRowHandlers(amb, comp, "upgrade")}
+                                />
+                              ))}
                             {pending && filling && pendingFill === "expandRow" && (
                               <tr>
                                 <td
@@ -1252,6 +1442,46 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
       )}
 
       <LinkFillModal open={showLinkModal} onClose={() => setShowLinkModal(false)} />
+
+      <CostItemModal
+        open={costTarget !== null}
+        editing={costTarget?.editing ?? null}
+        lado={costTarget?.lado ?? "upgrade"}
+        compNome={costTarget?.comp.nome ?? ""}
+        ambNome={costTarget?.amb.nome ?? ""}
+        nOpcoes={costTarget?.comp.options.filter((o) => !o.isDefault).length ?? 0}
+        qtdInicial={
+          costTarget?.editing
+            ? costTarget.comp.custoQtds[costTarget.editing.id] ?? 0
+            : 1
+        }
+        materiais={materiais}
+        saving={addCostMut.isPending || updateCostMut.isPending || setCostQtdsMut.isPending}
+        onClose={() => setCostTarget(null)}
+        onSave={saveCostItem}
+      />
+
+      <Modal
+        open={costRemove !== null}
+        onClose={() => setCostRemove(null)}
+        title="Remover item de custo"
+        actions={
+          <>
+            <Button variant="bordered" onPress={() => setCostRemove(null)}>
+              Cancelar
+            </Button>
+            <Button variant="danger" isLoading={removeCostMut.isPending} onPress={confirmRemoveCostItem}>
+              Remover
+            </Button>
+          </>
+        }
+      >
+        <p className="text-[13px] leading-relaxed text-neutral-gray-9">
+          Remover <strong>{costRemove?.item.nome}</strong> do custo de{" "}
+          <strong>{costRemove?.comp.nome}</strong>? Vale para todas as tipologias que usam &ldquo;
+          {costRemove?.amb.nome}&rdquo;.
+        </p>
+      </Modal>
 
       <VersionToast msg={toastMsg} />
     </div>

@@ -10,6 +10,8 @@ import type {
   CategoriaCatalogo,
   Comment,
   Componente,
+  CostComponentKind,
+  CostComponentSide,
   FillLink,
   Kit,
   Material,
@@ -364,6 +366,86 @@ export async function setKitQtds(
   qtds: Record<number, number>
 ): Promise<Componente> {
   return opcao(tipologiaId, ambienteId, componenteId, { op: "setKitQtds", qtds });
+}
+
+// ─── Componentes de custo (satélites) ────────────────────────────────
+
+/** Dados de um componente de custo novo (definição + quantitativo desta planta). */
+export interface CostComponentInput {
+  nome: string;
+  tipo: CostComponentKind;
+  baseId: number | null;
+  unidade: Unidade;
+  lado: CostComponentSide;
+  qtd: number;
+}
+
+type CustoBody =
+  | ({ op: "add" } & CostComponentInput)
+  | { op: "update"; costItemId: number; patch: Partial<Omit<CostComponentInput, "qtd">> }
+  | { op: "remove"; costItemId: number }
+  | { op: "setQtds"; qtds: Record<number, number> }
+  | { op: "reorder"; orderedIds: number[] };
+
+function custoComponente(
+  tipologiaId: number,
+  ambienteId: number,
+  componenteId: number,
+  body: CustoBody
+): Promise<Componente> {
+  return httpSend<Componente, CustoBody>(
+    `/api/tipologias/${tipologiaId}/ambientes/${ambienteId}/componentes/${componenteId}/componentes-custo`,
+    "POST",
+    body
+  );
+}
+
+export async function addCostComponent(
+  tipologiaId: number,
+  ambienteId: number,
+  componenteId: number,
+  input: CostComponentInput
+): Promise<Componente> {
+  return custoComponente(tipologiaId, ambienteId, componenteId, { op: "add", ...input });
+}
+
+/** Edita a DEFINIÇÃO — vale para todas as tipologias que usam o ambiente. */
+export async function updateCostComponent(
+  tipologiaId: number,
+  ambienteId: number,
+  componenteId: number,
+  costItemId: number,
+  patch: Partial<Omit<CostComponentInput, "qtd">>
+): Promise<Componente> {
+  return custoComponente(tipologiaId, ambienteId, componenteId, { op: "update", costItemId, patch });
+}
+
+export async function removeCostComponent(
+  tipologiaId: number,
+  ambienteId: number,
+  componenteId: number,
+  costItemId: number
+): Promise<Componente> {
+  return custoComponente(tipologiaId, ambienteId, componenteId, { op: "remove", costItemId });
+}
+
+/** Quantitativos desta planta (keyed por id de componente de custo). */
+export async function setCostQtds(
+  tipologiaId: number,
+  ambienteId: number,
+  componenteId: number,
+  qtds: Record<number, number>
+): Promise<Componente> {
+  return custoComponente(tipologiaId, ambienteId, componenteId, { op: "setQtds", qtds });
+}
+
+export async function reorderCostComponents(
+  tipologiaId: number,
+  ambienteId: number,
+  componenteId: number,
+  orderedIds: number[]
+): Promise<Componente> {
+  return custoComponente(tipologiaId, ambienteId, componenteId, { op: "reorder", orderedIds });
 }
 
 // ─── Compartilhamento de ambientes entre tipologias ──────────────────

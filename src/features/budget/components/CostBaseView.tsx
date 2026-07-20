@@ -3,8 +3,9 @@
 import React from "react";
 
 import { Icon, StatusBadge } from "@/components/ui";
-import { rowKey } from "@/lib/budget";
 import { getMaterial } from "@/lib/data/entities";
+
+import { enumerateCostRefs } from "../enumerate";
 import { cn, fmtBRL } from "@/lib/utils";
 import type { ThreadRow } from "@/features/construtor-shared/CommentThreadPanel";
 import type { Comment, Material, Tipologia } from "@/shared/types/domain";
@@ -126,15 +127,12 @@ export function CostBaseView({
                   {amb.nome}
                 </td>
               </tr>
-              {amb.componentes.map((comp) =>
-                comp.options
-                  .filter((opt) => !opt.isKit && !opt.isDefault)
-                  .map((opt) => {
-                    const m = getMaterial(materiais, opt.baseId);
+              {enumerateCostRefs(amb).map((ref) => {
+                    const m = getMaterial(materiais, ref.baseId);
                     if (!m) return null;
-                    const rk = rowKey(opt.id);
-                    const matV = valOf(opt.baseId, m, "mat");
-                    const moV = valOf(opt.baseId, m, "mo");
+                    const rk = ref.key;
+                    const matV = valOf(ref.baseId, m, "mat");
+                    const moV = valOf(ref.baseId, m, "mo");
                     const matN = parseFloat(matV) || 0;
                     const moN = parseFloat(moV) || 0;
                     const isPending = m.custoMat <= 0 && !(matN > 0);
@@ -166,7 +164,12 @@ export function CostBaseView({
                               isPending ? "text-[#b45309]" : "text-neutral-gray-6"
                             )}
                           >
-                            {comp.nome} · {m.fabricante}
+                            {ref.compNome} · {m.fabricante}
+                            {ref.origem === "componente-custo" && (
+                              <span className="ml-1.5 rounded bg-neutral-gray-3 px-1 py-px text-[9px] font-bold uppercase tracking-wide text-neutral-gray-7">
+                                Item de custo
+                              </span>
+                            )}
                             {isPending && (
                               <span className="ml-1.5 font-bold text-tint-orange-fg">
                                 · Aguardando custo
@@ -178,16 +181,16 @@ export function CostBaseView({
                           <CostField
                             value={matV}
                             isPending={isPending}
-                            onChange={(v) => setField(opt.baseId, "mat", v)}
-                            onCommit={(v) => onPersist(opt.baseId, v, moV)}
+                            onChange={(v) => setField(ref.baseId, "mat", v)}
+                            onCommit={(v) => onPersist(ref.baseId, v, moV)}
                           />
                         </td>
                         <td className="px-3 py-[5px] text-right">
                           <CostField
                             value={moV}
                             isPending={isPending}
-                            onChange={(v) => setField(opt.baseId, "mo", v)}
-                            onCommit={(v) => onPersist(opt.baseId, matV, v)}
+                            onChange={(v) => setField(ref.baseId, "mo", v)}
+                            onCommit={(v) => onPersist(ref.baseId, matV, v)}
                           />
                         </td>
                         <td
@@ -202,39 +205,42 @@ export function CostBaseView({
                           <StatusBadge status={isPending ? "pendente" : "preenchido"} />
                         </td>
                         <td className="px-2 py-2 text-center">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              onOpenThread({
-                                key: rk,
-                                especificacao: m.nome,
-                                ambiente: amb.nome,
-                                componente: comp.nome,
-                              })
-                            }
-                            className={cn(
-                              "inline-flex items-center gap-[3px] rounded px-1.5 py-1",
-                              cmts.length > 0 ? "bg-functional-warning-light" : ""
-                            )}
-                          >
-                            <Icon
-                              name="chat"
-                              size={14}
-                              className={
-                                cmts.length > 0 ? "text-functional-warning" : "text-neutral-gray-5"
+                          {/* Componente de custo não tem linha Material, logo
+                              não tem thread — só opções comentam. */}
+                          {ref.origem === "opcao" && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onOpenThread({
+                                  key: rk,
+                                  especificacao: m.nome,
+                                  ambiente: amb.nome,
+                                  componente: ref.compNome,
+                                })
                               }
-                            />
-                            {cmts.length > 0 && (
-                              <span className="text-[10px] font-bold text-functional-warning">
-                                {cmts.length}
-                              </span>
-                            )}
-                          </button>
+                              className={cn(
+                                "inline-flex items-center gap-[3px] rounded px-1.5 py-1",
+                                cmts.length > 0 ? "bg-functional-warning-light" : ""
+                              )}
+                            >
+                              <Icon
+                                name="chat"
+                                size={14}
+                                className={
+                                  cmts.length > 0 ? "text-functional-warning" : "text-neutral-gray-5"
+                                }
+                              />
+                              {cmts.length > 0 && (
+                                <span className="text-[10px] font-bold text-functional-warning">
+                                  {cmts.length}
+                                </span>
+                              )}
+                            </button>
+                          )}
                         </td>
                       </tr>
                     );
-                  })
-              )}
+                  })}
             </React.Fragment>
           ))}
         </tbody>

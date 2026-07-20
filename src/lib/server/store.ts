@@ -31,6 +31,9 @@ import type {
   CategoriaCatalogo,
   Comment,
   Componente,
+  CostComponent,
+  CostComponentKind,
+  CostComponentSide,
   FillLink,
   FillLinkCampos,
   Kit,
@@ -341,15 +344,26 @@ function toKit(row: KitRow): Kit {
 /** Include do Room reusado por todos os caminhos que montam um Ambiente. */
 const ROOM_INCLUDE = {
   RoomComponents: {
-    include: { Options: { include: { BaseMaterial: true } } },
+    include: { Options: { include: { BaseMaterial: true } }, CostItems: true },
   },
 } satisfies Prisma.RoomInclude;
+
+/**
+ * Include da instância por planta. Constante compartilhada de propósito: cada
+ * `{ KitUsages: true }` solto que esquecesse CostUsages devolveria um Componente
+ * sem quantitativos de satélite, sem erro nenhum — o custo de troca simplesmente
+ * sairia errado. Aqui o compilador cobra.
+ */
+const BRC_INCLUDE = {
+  KitUsages: true,
+  CostUsages: true,
+} satisfies Prisma.BlueprintRoomComponentInclude;
 
 const BLUEPRINT_INCLUDE = {
   BlueprintRooms: {
     include: {
       Room: { include: ROOM_INCLUDE },
-      Components: { include: { KitUsages: true } },
+      Components: { include: BRC_INCLUDE },
     },
   },
 } satisfies Prisma.BlueprintInclude;
@@ -357,6 +371,7 @@ type BlueprintRow = Prisma.BlueprintGetPayload<{ include: typeof BLUEPRINT_INCLU
 type BlueprintRoomRow = BlueprintRow["BlueprintRooms"][number];
 type RoomComponentRow = BlueprintRoomRow["Room"]["RoomComponents"][number];
 type OptionRow = RoomComponentRow["Options"][number];
+type CostItemRow = RoomComponentRow["CostItems"][number];
 type BrcRow = BlueprintRoomRow["Components"][number];
 
 function toMaterialOption(m: OptionRow, defaultMaterialId: number | null): MaterialOption {
@@ -369,12 +384,29 @@ function toMaterialOption(m: OptionRow, defaultMaterialId: number | null): Mater
   };
 }
 
+function toCostComponent(ci: CostItemRow): CostComponent {
+  return {
+    id: ci.Id,
+    nome: ci.Name,
+    tipo: ci.Kind,
+    baseId: ci.BaseMaterialId,
+    unidade: ci.Unit as Unidade,
+    lado: ci.Side,
+    ordem: ci.Position,
+  };
+}
+
 function toComponente(rc: RoomComponentRow, brc: BrcRow | undefined): Componente {
   const options = [...rc.Options]
     .sort((a, b) => a.Position - b.Position)
     .map((m) => toMaterialOption(m, rc.DefaultMaterialId));
+  const custoComponentes = [...rc.CostItems]
+    .sort((a, b) => a.Position - b.Position)
+    .map(toCostComponent);
   const kitQtds: Record<number, number> = {};
   if (brc) for (const ku of brc.KitUsages) kitQtds[ku.KitItemId] = ku.UsageQuantity;
+  const custoQtds: Record<number, number> = {};
+  if (brc) for (const cu of brc.CostUsages) custoQtds[cu.CostItemId] = cu.UsageQuantity;
   return {
     id: rc.Id,
     nome: rc.Name,
@@ -387,6 +419,8 @@ function toComponente(rc: RoomComponentRow, brc: BrcRow | undefined): Componente
     ghost: rc.IsGhost,
     ordem: rc.Position,
     kitQtds,
+    custoComponentes,
+    custoQtds,
   };
 }
 
@@ -504,12 +538,12 @@ async function reloadComponente(
 ): Promise<Componente> {
   const rc = await prisma.roomComponent.findFirst({
     where: { Id: roomComponentId, Room: { Enterprise: { OrganizationId: organizationId } } },
-    include: { Options: { include: { BaseMaterial: true } } },
+    include: ROOM_INCLUDE.RoomComponents.include,
   });
   if (!rc) throw new Error("Componente não encontrado.");
   const brc = await prisma.blueprintRoomComponent.findUnique({
     where: { BlueprintRoomId_RoomComponentId: { BlueprintRoomId: blueprintRoomId, RoomComponentId: roomComponentId } },
-    include: { KitUsages: true },
+    include: BRC_INCLUDE,
   });
   return toComponente(rc, brc ?? undefined);
 }
@@ -941,9 +975,10 @@ export async function duplicateTipologia(organizationId: string, id: number): Pr
 }
 
 /**
- * Clona um BlueprintRoom (Room + componentes + opções + BRC/kitUsage) para uma
- * planta destino como cópia independente. Resolve a FK circular em 2 passos
- * (componente sem default → opções → seta DefaultMaterialId).
+ * Clona um BlueprintRoom (Room + componentes + opções + componentes de custo +
+ * BRC/kitUsage/costUsage) para uma planta destino como cópia independente.
+ * Resolve a FK circular em 2 passos (componente sem default → opções → seta
+ * DefaultMaterialId).
  */
 async function cloneBlueprintRoomInto(
   targetBlueprintId: number,
@@ -1002,6 +1037,24 @@ async function cloneBlueprintRoomInto(
     if (newDefaultId != null) {
       await prisma.roomComponent.update({ where: { Id: newRc.Id }, data: { DefaultMaterialId: newDefaultId } });
     }
+    // Componentes de custo: a definição é clonada junto e os ids novos entram
+    // no mapa para reapontar os quantitativos (CostItemUsage) abaixo.
+    const costIdMap = new Map<number, number>();
+    for (const ci of [...rc.CostItems].sort((a, b) => a.Position - b.Position)) {
+      const created = await prisma.roomComponentCostItem.create({
+        data: {
+          RoomComponentId: newRc.Id,
+          Name: ci.Name,
+          Kind: ci.Kind,
+          Side: ci.Side,
+          BaseMaterialId: ci.BaseMaterialId,
+          Unit: ci.Unit,
+          Position: ci.Position,
+        },
+        select: { Id: true },
+      });
+      costIdMap.set(ci.Id, created.Id);
+    }
     const srcBrc = brcByRc.get(rc.Id);
     if (srcBrc) {
       const newBrc = await prisma.blueprintRoomComponent.create({
@@ -1021,6 +1074,19 @@ async function cloneBlueprintRoomInto(
             UsageQuantity: ku.UsageQuantity,
           })),
         });
+      }
+      const costUsages = srcBrc.CostUsages.flatMap((cu) => {
+        const newId = costIdMap.get(cu.CostItemId);
+        return newId == null
+          ? []
+          : [{
+              BlueprintRoomComponentId: newBrc.Id,
+              CostItemId: newId,
+              UsageQuantity: cu.UsageQuantity,
+            }];
+      });
+      if (costUsages.length > 0) {
+        await prisma.costItemUsage.createMany({ data: costUsages });
       }
     }
   }
@@ -1057,7 +1123,7 @@ export async function createAmbiente(
     },
     include: {
       Room: { include: ROOM_INCLUDE },
-      Components: { include: { KitUsages: true } },
+      Components: { include: BRC_INCLUDE },
     },
   });
   return toAmbiente(br);
@@ -1087,7 +1153,7 @@ export async function updateAmbiente(
     where: { Id: blueprintRoomId },
     include: {
       Room: { include: ROOM_INCLUDE },
-      Components: { include: { KitUsages: true } },
+      Components: { include: BRC_INCLUDE },
     },
   });
   return toAmbiente(br);
@@ -1116,7 +1182,7 @@ export async function cloneAmbiente(
     where: { Id: blueprintRoomId },
     include: {
       Room: { include: ROOM_INCLUDE },
-      Components: { include: { KitUsages: true } },
+      Components: { include: BRC_INCLUDE },
     },
   });
   const enterpriseId = src.Room.EnterpriseId;
@@ -1133,7 +1199,7 @@ export async function cloneAmbiente(
     orderBy: { Id: "desc" },
     include: {
       Room: { include: ROOM_INCLUDE },
-      Components: { include: { KitUsages: true } },
+      Components: { include: BRC_INCLUDE },
     },
   });
   if (!created) throw new Error("Falha ao clonar ambiente.");
@@ -1434,6 +1500,163 @@ export async function setKitQtds(
   return reloadComponente(organizationId, blueprintRoomId, componenteId);
 }
 
+// ─── Componentes de custo (satélites) ───────────────────────────────────
+//
+// A DEFINIÇÃO é compartilhada (RoomComponentCostItem, vale para todas as
+// plantas que usam o ambiente); o QUANTITATIVO é por planta (CostItemUsage).
+// Mesmo split de options ⇄ kitQtds.
+
+export interface CostComponentInput {
+  nome: string;
+  tipo: CostComponentKind;
+  baseId: number | null;
+  unidade: Unidade;
+  lado: CostComponentSide;
+  /** Quantitativo NESTA planta (grava o CostItemUsage já na criação). */
+  qtd: number;
+}
+
+/** Um satélite "fixo" sem material zeraria o custo em silêncio — barra aqui. */
+function assertCostItemMaterial(tipo: CostComponentKind, baseId: number | null): void {
+  if (tipo === "fixo" && baseId == null) {
+    throw new Error("Item de custo fixo exige um material do catálogo.");
+  }
+}
+
+export async function addCostComponent(
+  organizationId: string,
+  tipologiaId: number,
+  blueprintRoomId: number,
+  componenteId: number,
+  input: CostComponentInput
+): Promise<Componente> {
+  assertCostItemMaterial(input.tipo, input.baseId);
+  const ctx = await findBlueprintRoomCtx(organizationId, tipologiaId, blueprintRoomId);
+  await assertComponentInRoom(componenteId, ctx.roomId);
+  const agg = await prisma.roomComponentCostItem.aggregate({
+    where: { RoomComponentId: componenteId },
+    _max: { Position: true },
+  });
+  const item = await prisma.roomComponentCostItem.create({
+    data: {
+      RoomComponentId: componenteId,
+      Name: input.nome,
+      Kind: input.tipo,
+      Side: input.lado,
+      BaseMaterialId: input.tipo === "fixo" ? input.baseId : null,
+      Unit: input.unidade,
+      Position: await nextPosition(agg._max.Position),
+    },
+    select: { Id: true },
+  });
+  const brcId = await ensureBrc(ctx, componenteId);
+  await prisma.costItemUsage.create({
+    data: { BlueprintRoomComponentId: brcId, CostItemId: item.Id, UsageQuantity: input.qtd },
+  });
+  return reloadComponente(organizationId, blueprintRoomId, componenteId);
+}
+
+export async function updateCostComponent(
+  organizationId: string,
+  tipologiaId: number,
+  blueprintRoomId: number,
+  componenteId: number,
+  costItemId: number,
+  patch: Partial<Omit<CostComponentInput, "qtd">>
+): Promise<Componente> {
+  const ctx = await findBlueprintRoomCtx(organizationId, tipologiaId, blueprintRoomId);
+  await assertComponentInRoom(componenteId, ctx.roomId);
+  const current = await prisma.roomComponentCostItem.findFirst({
+    where: { Id: costItemId, RoomComponentId: componenteId },
+    select: { Kind: true, BaseMaterialId: true },
+  });
+  if (!current) throw new Error("Componente de custo não encontrado.");
+  const tipo = patch.tipo ?? current.Kind;
+  const baseId = patch.baseId !== undefined ? patch.baseId : current.BaseMaterialId;
+  assertCostItemMaterial(tipo, baseId);
+  await prisma.roomComponentCostItem.update({
+    where: { Id: costItemId },
+    data: {
+      ...(patch.nome !== undefined && { Name: patch.nome }),
+      ...(patch.tipo !== undefined && { Kind: patch.tipo }),
+      ...(patch.lado !== undefined && { Side: patch.lado }),
+      ...(patch.unidade !== undefined && { Unit: patch.unidade }),
+      // "espelho" não guarda material: segue a opção escolhida.
+      BaseMaterialId: tipo === "fixo" ? baseId : null,
+    },
+  });
+  return reloadComponente(organizationId, blueprintRoomId, componenteId);
+}
+
+export async function removeCostComponent(
+  organizationId: string,
+  tipologiaId: number,
+  blueprintRoomId: number,
+  componenteId: number,
+  costItemId: number
+): Promise<Componente> {
+  const ctx = await findBlueprintRoomCtx(organizationId, tipologiaId, blueprintRoomId);
+  await assertComponentInRoom(componenteId, ctx.roomId);
+  await prisma.roomComponentCostItem.deleteMany({
+    where: { Id: costItemId, RoomComponentId: componenteId },
+  });
+  return reloadComponente(organizationId, blueprintRoomId, componenteId);
+}
+
+export async function setCostQtds(
+  organizationId: string,
+  tipologiaId: number,
+  blueprintRoomId: number,
+  componenteId: number,
+  qtds: Record<number, number>
+): Promise<Componente> {
+  const ctx = await findBlueprintRoomCtx(organizationId, tipologiaId, blueprintRoomId);
+  await assertComponentInRoom(componenteId, ctx.roomId);
+  const brcId = await ensureBrc(ctx, componenteId);
+  const entries = Object.entries(qtds);
+  if (entries.length > 0) {
+    await prisma.$transaction(
+      entries.map(([costItemId, q]) =>
+        prisma.costItemUsage.upsert({
+          where: {
+            BlueprintRoomComponentId_CostItemId: {
+              BlueprintRoomComponentId: brcId,
+              CostItemId: Number(costItemId),
+            },
+          },
+          update: { UsageQuantity: q },
+          create: {
+            BlueprintRoomComponentId: brcId,
+            CostItemId: Number(costItemId),
+            UsageQuantity: q,
+          },
+        })
+      )
+    );
+  }
+  return reloadComponente(organizationId, blueprintRoomId, componenteId);
+}
+
+export async function reorderCostComponents(
+  organizationId: string,
+  tipologiaId: number,
+  blueprintRoomId: number,
+  componenteId: number,
+  orderedIds: number[]
+): Promise<Componente> {
+  const ctx = await findBlueprintRoomCtx(organizationId, tipologiaId, blueprintRoomId);
+  await assertComponentInRoom(componenteId, ctx.roomId);
+  await prisma.$transaction(
+    orderedIds.map((id, i) =>
+      prisma.roomComponentCostItem.updateMany({
+        where: { Id: id, RoomComponentId: componenteId },
+        data: { Position: i },
+      })
+    )
+  );
+  return reloadComponente(organizationId, blueprintRoomId, componenteId);
+}
+
 // ─── Compartilhamento de ambientes (derivado de BlueprintRoom) ──────────
 
 export interface SharedInfo {
@@ -1476,7 +1699,7 @@ export async function linkAmbiente(
     where: { Id: srcBlueprintRoomId, Blueprint: { Enterprise: { OrganizationId: organizationId } } },
     include: {
       Room: { select: { Id: true, RoomComponents: { select: { Id: true } } } },
-      Components: { include: { KitUsages: true } },
+      Components: { include: BRC_INCLUDE },
     },
   });
   if (!src) throw new Error("Ambiente de origem não encontrado.");
@@ -1521,12 +1744,23 @@ export async function linkAmbiente(
         })),
       });
     }
+    // O Room é COMPARTILHADO: a definição dos componentes de custo já vale para
+    // a nova planta. Só o quantitativo é por planta — copia o da origem.
+    if (srcBrc && srcBrc.CostUsages.length > 0) {
+      await prisma.costItemUsage.createMany({
+        data: srcBrc.CostUsages.map((cu) => ({
+          BlueprintRoomComponentId: newBrc.Id,
+          CostItemId: cu.CostItemId,
+          UsageQuantity: cu.UsageQuantity,
+        })),
+      });
+    }
   }
   const created = await prisma.blueprintRoom.findUniqueOrThrow({
     where: { Id: newBr.Id },
     include: {
       Room: { include: ROOM_INCLUDE },
-      Components: { include: { KitUsages: true } },
+      Components: { include: BRC_INCLUDE },
     },
   });
   return toAmbiente(created);
@@ -1922,6 +2156,9 @@ export async function getPortalMaterialIds(
                       },
                     },
                   },
+                  // Satélites "fixo" também precisam de custo do terceiro —
+                  // deve casar com tipMateriais no PortalScreen.
+                  CostItems: { select: { BaseMaterialId: true } },
                 },
               },
             },
@@ -1941,6 +2178,9 @@ export async function getPortalMaterialIds(
             ids.add(opt.BaseMaterialId);
           }
         }
+        for (const ci of rc.CostItems) {
+          if (ci.BaseMaterialId != null) ids.add(ci.BaseMaterialId);
+        }
       }
     }
   }
@@ -1959,6 +2199,11 @@ async function syncConstrutoraComments(
   scoped: [string, PortalFill][],
   authorName?: string
 ): Promise<void> {
+  // GAP CONHECIDO: a thread é indexada pelo id da linha Material (opção). Um
+  // material que só existe como componente de custo "fixo" não tem linha
+  // Material, então seu comentário não tem onde ser espelhado e é descartado
+  // aqui — de propósito. Pendurá-lo numa opção não relacionada seria pior que
+  // perdê-lo. Se virar requisito, o caminho é dar thread própria ao satélite.
   const withComments = scoped.filter(([, f]) => (f.comment ?? "").trim() !== "");
   if (withComments.length === 0) return;
 

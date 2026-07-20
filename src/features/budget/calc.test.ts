@@ -47,11 +47,11 @@ describe("effMaterial / isOptionPending", () => {
     expect(eff.custoMO).toBe(50);
 
     const optPiso004 = optByCodigo(salaPisoT1, "MC-NAT-CA");
-    expect(isOptionPending(deps(), optPiso004)).toBe(true); // custoMat 0 no catálogo
-    expect(isOptionPending(deps({ baseCosts: base }), optPiso004)).toBe(false); // custo base cobre
+    expect(isOptionPending(deps(), salaPisoT1, optPiso004)).toBe(true); // custoMat 0 no catálogo
+    expect(isOptionPending(deps({ baseCosts: base }), salaPisoT1, optPiso004)).toBe(false); // custo base cobre
 
     const optPiso002 = optByCodigo(salaPisoT1, "PP-6060-BI");
-    expect(isOptionPending(deps(), optPiso002)).toBe(false); // material precificado
+    expect(isOptionPending(deps(), salaPisoT1, optPiso002)).toBe(false); // material precificado
   });
 });
 
@@ -60,7 +60,7 @@ describe("calcAnyRow", () => {
     const opt = optByCodigo(salaPisoT1, "PP-6060-BI"); // upgrade piso-002
     const r = calcAnyRow(deps(), salaPisoT1, opt);
     expect(r?.kind).toBe("material");
-    if (r?.kind === "material") expect(r.result.total).toBeCloseTo(1407.4574, 4);
+    if (r?.kind === "material") expect(r.result.total).toBeCloseTo(1670.996, 4);
   });
 
   it("kit → KitRowResult com pendência de sub-item", () => {
@@ -69,7 +69,7 @@ describe("calcAnyRow", () => {
     expect(r?.kind).toBe("kit");
     if (r?.kind === "kit") {
       // 208*36.8 + 115*3 + 0*3.68 (rt-bcn pendente)
-      expect(r.result.kitMaterialTotal).toBeCloseTo(7999.4, 10);
+      expect(r.result.debitoExt).toBeCloseTo(7999.4, 10);
       expect(r.result.anyPending).toBe(true);
     }
   });
@@ -78,8 +78,8 @@ describe("calcAnyRow", () => {
 describe("ambTotal", () => {
   it("soma só os upgrades não pendentes do ambiente (Sala t1)", () => {
     // Sala t1: Piso (piso-002 ok; piso-003/004 e kit pendentes) + Rodapé (rod-002 ok)
-    // piso-002 total = 1407.4574 ; rod-002 total = 449.82
-    expect(ambTotal(deps(), t1.ambientes[0]!)).toBeCloseTo(1407.4574 + 449.82, 4);
+    // piso-002 total = 1670.996 ; rod-002 total = 478.296
+    expect(ambTotal(deps(), t1.ambientes[0]!)).toBeCloseTo(1670.996 + 478.296, 4);
   });
 
   it("linha pendente fica fora do total e volta ao preencher custo base", () => {
@@ -99,14 +99,18 @@ describe("buildScopeRefs", () => {
     const r = calcAnyRow(deps(), salaPisoT1, opt);
     if (r?.kind !== "material") throw new Error("esperava material");
     const { scope, refs } = buildScopeRefs(TAX_COLUMNS_DEFAULT, r.result, 2);
-    expect(scope.custo_troca).toBe(35.5);
-    expect(scope.taxa_construtora).toBeCloseTo(2.84, 10);
-    expect(scope.contingencia_incc).toBeCloseTo(1.775, 10);
+    expect(scope.custo_troca).toBeCloseTo(984.4, 10);
+    expect(scope.valor_unitario).toBeCloseTo(2539.2, 10); // = débito estendido
+    expect(scope.credito).toBeCloseTo(1554.8, 10);
+    expect(scope.taxa_construtora).toBeCloseTo(78.752, 10);
+    expect(scope.contingencia_incc).toBeCloseTo(49.22, 10);
     expect(scope.taxa_incorporadora).toBeUndefined(); // coluna do próprio índice não entra
     expect(refs.map((x) => x.token)).toEqual([
       "custo_troca",
       "valor_unitario",
       "quantitativo",
+      "debito",
+      "credito",
       "taxa_construtora",
       "contingencia_incc",
     ]);

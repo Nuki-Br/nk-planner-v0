@@ -28,7 +28,7 @@ describe("buildLayout — contagens e posições (seed t1)", () => {
   const { comps, opts } = walk(t1);
 
   it("conta nós por coluna", () => {
-    expect(layout.ambNodes).toHaveLength(5);
+    expect(layout.ambNodes).toHaveLength(6);
     expect(layout.compNodes).toHaveLength(comps); // 1 por componente
     expect(layout.optNodes).toHaveLength(opts); // 1 por opção (padrão + upgrades)
     expect(layout.subNodes).toHaveLength(0); // nada expandido

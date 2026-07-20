@@ -73,6 +73,40 @@ export type CatalogEntity =
 
 // ─── Estrutura: Componente / Ambiente / Tipologia (por planta) ──────────
 
+/** Como um componente de custo resolve seu preço unitário. */
+export type CostComponentKind = "espelho" | "fixo";
+/** Lado do cálculo: crédito (padrão) ou débito (toda opção de upgrade). */
+export type CostComponentSide = "padrao" | "upgrade";
+
+/**
+ * Componente de custo ("satélite"): linha somada ao custo do componente que
+ * NUNCA é ofertada ao cliente na personalização — SOLEIRA, RODAPÉ, RESERVA
+ * TÉCNICA. Reproduz o agrupamento da planilha do cliente:
+ *
+ *   H51 = SUM(G51 + G52 + $G$57) − $H$41
+ *          mestre  espelho  fixo    crédito do grupo
+ *
+ *  - "espelho": preço unitário = o da opção do SEU lado (a de upgrade, no lado
+ *    upgrade; a padrão, no lado padrão). Quantidade e unidade próprias.
+ *    Ex.: SOLEIRA acompanha o porcelanato escolhido.
+ *  - "fixo": preço unitário = um BaseMaterial específico, igual para todas as
+ *    opções — a referência ABSOLUTA da planilha. Ex.: RODAPÉ.
+ *
+ * Definição COMPARTILHADA (RoomComponentCostItem); a quantidade por planta vive
+ * em Componente.custoQtds — mesmo split de options ⇄ kitQtds.
+ */
+export interface CostComponent {
+  /** RoomComponentCostItem id. */
+  id: number;
+  nome: string;
+  tipo: CostComponentKind;
+  /** BaseMaterial quando tipo = "fixo"; null quando "espelho". */
+  baseId: number | null;
+  unidade: Unidade;
+  lado: CostComponentSide;
+  ordem: number;
+}
+
 /** Opção de material de um componente (linha Material; era item de upgrades[]). */
 export interface MaterialOption {
   /** Material id (linha de opção). */
@@ -110,6 +144,10 @@ export interface Componente {
   ordem: number;
   /** kitItemId → quantitativo do sub-item, nesta planta (era kitQtds). */
   kitQtds: Record<number, number>;
+  /** Componentes de custo (satélites) — definição compartilhada. */
+  custoComponentes: CostComponent[];
+  /** costComponentId → quantitativo do satélite, nesta planta. */
+  custoQtds: Record<number, number>;
 }
 
 /** Posição de um ambiente na planta (rect/poly). */

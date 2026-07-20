@@ -12,13 +12,23 @@ import type { Material, PortalFill, Tipologia } from "@/shared/types/domain";
 
 type Fills = Record<string, PortalFill>;
 
-/** Materiais (sem kits) referenciados pela tipologia: opções não-kit. */
+/**
+ * Materiais (sem kits) que o terceiro precisa precificar: opções não-kit e os
+ * materiais dos componentes de custo "fixo" — sem estes, o custo de troca de
+ * todas as opções do componente fica pendente.
+ *
+ * Precisa andar junto com getPortalMaterialIds no servidor: se só um dos lados
+ * mudar, ou o campo não aparece ou o preenchimento é rejeitado.
+ */
 function tipMateriais(tip: Tipologia, materiais: readonly Material[]): Material[] {
   const ids = new Set<number>();
   for (const amb of tip.ambientes) {
     for (const comp of amb.componentes) {
       for (const opt of comp.options) {
         if (!opt.isKit) ids.add(opt.baseId);
+      }
+      for (const cc of comp.custoComponentes ?? []) {
+        if (cc.tipo === "fixo" && cc.baseId != null) ids.add(cc.baseId);
       }
     }
   }

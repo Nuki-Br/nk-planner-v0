@@ -22,7 +22,7 @@ import { useProject, usePublishProject } from "@/lib/hooks/useProjects";
 import { useTipologias } from "@/lib/hooks/useTipologias";
 import { cn, fmtBRL } from "@/lib/utils";
 import { NUKI_EMAIL, nukiWhatsAppUrl } from "@/shared/constants/contact";
-import type { Material, Tipologia } from "@/shared/types/domain";
+import type { Componente, Material, Tipologia } from "@/shared/types/domain";
 
 /** Item do checklist: ok (verde) ou pendência (âmbar — não há estado de erro). */
 interface ChecklistItem {
@@ -79,6 +79,17 @@ export function PublishScreen() {
 
   const resolve = (id: number): Material | undefined => getMaterial(materiais, id);
 
+  /** Materiais dos componentes de custo "fixo" — entram no débito de cada opção. */
+  const satMats = (comp: Componente): Map<number, Material> => {
+    const out = new Map<number, Material>();
+    for (const cc of comp.custoComponentes ?? []) {
+      if (cc.tipo !== "fixo" || cc.baseId == null) continue;
+      const m = resolve(cc.baseId);
+      if (m) out.set(cc.baseId, m);
+    }
+    return out;
+  };
+
   // Preço mín./máx. por tipologia sobre os upgrades com custo (kits ficam de
   // fora, como no protótipo — o preço deles depende dos quantitativos). O padrão
   // (crédito) é a opção default do componente, resolvida como material.
@@ -93,7 +104,7 @@ export function PublishScreen() {
           const upgMat = resolve(opt.baseId);
           if (!upgMat) continue;
           if (upgMat.custoMat <= 0) continue; // pendência: fora do mín./máx.
-          const r = calcBudgetRow(upgMat, padMat, comp.qtd, comp.rt, cols, {});
+          const r = calcBudgetRow(upgMat, padMat, comp, satMats(comp), cols, {});
           if (r) totals.push(r.total);
         }
       }

@@ -6,7 +6,7 @@ describe("createSeed", () => {
   const seed = createSeed();
 
   it("contagens fiéis ao protótipo", () => {
-    expect(seed.materiais).toHaveLength(25);
+    expect(seed.materiais).toHaveLength(32);
     expect(seed.kits).toHaveLength(2);
     expect(seed.tipologias).toHaveLength(3);
     expect(seed.torres).toHaveLength(3);
@@ -27,7 +27,7 @@ describe("createSeed", () => {
   it("estrutura das tipologias bate com o protótipo", () => {
     const t1 = seed.tipologias[0];
     expect(t1?.nome).toBe("Planta A — 86m²");
-    expect(t1?.ambientes).toHaveLength(5);
+    expect(t1?.ambientes).toHaveLength(6);
 
     const piso = t1?.ambientes[0]?.componentes[0];
     expect(piso?.nome).toBe("Piso");
@@ -77,7 +77,7 @@ describe("createSeed", () => {
     a.materiais.push({ ...a.materiais[0]!, id: 999999 });
     const c = a.tipologias[0]?.ambientes[0]?.componentes[0];
     if (c) c.qtd = 999;
-    expect(b.materiais).toHaveLength(25);
+    expect(b.materiais).toHaveLength(32);
     expect(b.tipologias[0]?.ambientes[0]?.componentes[0]?.qtd).toBe(18.4);
   });
 });

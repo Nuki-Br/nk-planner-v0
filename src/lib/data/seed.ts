@@ -12,6 +12,9 @@ import type {
   BudgetVersion,
   Comment,
   Componente,
+  CostComponent,
+  CostComponentKind,
+  CostComponentSide,
   Kit,
   KitItem,
   Material,
@@ -102,6 +105,15 @@ export function createSeed(): SeedData {
     mat("piso-bcn", "PB-9090-AC", "Porcelanato Barcelona Acetinado 90×90", "Portinari", "Piso", "m²", 180.0, 28.0),
     mat("sol-bcn", "SL-GR-BCN", "Soleira Granito Barcelona Polida", "Minaspedras", "Piso", "und", 95.0, 20.0),
     mat("rt-bcn", "RT-9090-AC", "Reserva Técnica Porcelanato Barcelona", "Portinari", "Piso", "m²", 0, 0), // pendente
+    // Hall — valores verbatim da planilha do cliente (Maison Diogo, 166m²).
+    // Servem de fixture para os componentes de custo: ver o teste do Hall.
+    mat("hall-piso-pad", "MC-5959-EL", "Porcelanato Munari Cimento AC 59x59", "Eliane", "Piso", "m²", 157.83, 0),
+    mat("hall-rod-pad", "MC-RS-EL", "Porcelanato Munari Cimento AC RS 9,5x59", "Eliane", "Rodapé", "ml", 56.6, 0),
+    mat("hall-ped-pad", "GB-SIE-SOL", "Soleira Granito Branco Siena Polido", "Minaspedras", "Pedra", "und", 94.05, 0),
+    mat("hall-piso-bcn", "MS-BCN-120", "Porcelanato MS Barcelona Cristal 120x120 NAT", "Portobello", "Piso", "m²", 327.768, 0),
+    mat("hall-piso-avo", "AE-AVO-120", "Porcelanato Aeterna Avorio 120x120 NAT", "Portobello", "Piso", "m²", 382.188, 0),
+    mat("hall-piso-brc", "BR-MAN-120", "Porcelanato Breccia Mandorla da Milano ST 120x120 NAT", "Portobello", "Piso", "m²", 362.868, 0),
+    mat("hall-rod-pol", "RDP-466-SL", "Rodapé de poliestireno 466 branco 30mm", "Santa Luzia", "Rodapé", "ml", 75.324, 0),
   ];
 
   // ── Catálogo: kits (key → Kit) ──
@@ -143,13 +155,24 @@ export function createSeed(): SeedData {
     options: MaterialOption[];
     ghost: boolean;
     ordem: number;
+    custoComponentes: CostComponent[];
+  }
+  /** Descrição de um componente de custo no seed (baseKey resolve p/ baseId). */
+  interface CostTpl {
+    nome: string;
+    tipo: CostComponentKind;
+    /** Chave de catálogo — só para tipo "fixo". */
+    baseKey: string | null;
+    unidade: Unidade;
+    lado: CostComponentSide;
   }
   function comp(
     nome: string,
     unidade: Unidade,
     padraoKey: string | null,
     upgradeKeys: string[],
-    ordem: number
+    ordem: number,
+    costItems: CostTpl[] = []
   ): CompTpl {
     const rcId = nid();
     const optionKeys = padraoKey ? [padraoKey, ...upgradeKeys] : upgradeKeys;
@@ -158,7 +181,16 @@ export function createSeed(): SeedData {
       return { id: nid(), baseId: r.baseId, isKit: r.isKit, isDefault: k === padraoKey, ordem: i };
     });
     const padrao = options.find((o) => o.isDefault)?.id ?? null;
-    return { id: rcId, nome, unidade, padrao, options, ghost: false, ordem };
+    const custoComponentes: CostComponent[] = costItems.map((c, i) => ({
+      id: nid(),
+      nome: c.nome,
+      tipo: c.tipo,
+      baseId: c.baseKey ? ref(c.baseKey).baseId : null,
+      unidade: c.unidade,
+      lado: c.lado,
+      ordem: i,
+    }));
+    return { id: rcId, nome, unidade, padrao, options, ghost: false, ordem, custoComponentes };
   }
 
   interface RoomTpl {
@@ -180,10 +212,21 @@ export function createSeed(): SeedData {
     return out;
   }
 
+  /** Quantitativos dos componentes de custo desta planta, na ordem declarada. */
+  function costQty(tpl: CompTpl, qtys: number[]): Record<number, number> {
+    const out: Record<number, number> = {};
+    tpl.custoComponentes.forEach((cc, i) => {
+      const q = qtys[i];
+      if (q !== undefined) out[cc.id] = q;
+    });
+    return out;
+  }
+
   interface PerComp {
     qtd: number;
     rt: number;
     kitQtds?: Record<number, number>;
+    custoQtds?: Record<number, number>;
   }
   /** Instancia um Room numa planta (novo BlueprintRoom + BRC por componente). */
   function inst(tpl: RoomTpl, perComp: PerComp[]): Ambiente {
@@ -199,6 +242,8 @@ export function createSeed(): SeedData {
       ghost: ct.ghost,
       ordem: ct.ordem,
       kitQtds: perComp[i]!.kitQtds ?? {},
+      custoComponentes: ct.custoComponentes,
+      custoQtds: perComp[i]!.custoQtds ?? {},
     }));
     return { id: tpl.id, blueprintRoomId: nid(), nome: tpl.nome, componentes };
   }
@@ -219,6 +264,34 @@ export function createSeed(): SeedData {
   const salaT3 = inst(sala, [
     { qtd: 36.8, rt: 15, kitQtds: kitQty("kit-piso-barcelona", [36.8, 3, 3.68]) },
     { qtd: 28.4, rt: 5 },
+  ]);
+
+  // ── Hall — fixture dos COMPONENTES DE CUSTO (planilha do cliente) ──
+  //
+  // Um único componente PISO ofertado ao cliente; no custo ele carrega:
+  //   · SOLEIRA  (espelho) → acompanha o porcelanato escolhido, 1 und
+  //   · RODAPÉ   (fixo)    → poliestireno, 7,5 mL, igual em toda opção ($G$57)
+  //   · no lado PADRÃO, o rodapé Munari RS e 2 soleiras de granito, que somam
+  //     ao crédito do grupo (H41 = SUM(G41:G44) = 826,2175)
+  //
+  // qtd 2,25 m² com RT 50%: o padrão é Munari 59x59 (pouca perda) e o upgrade
+  // é 120x120 (3,375 m²) — é daí que sai a decisão "crédito sem RT".
+  const hallPiso = comp(
+    "Piso",
+    "m²",
+    "hall-piso-pad",
+    ["hall-piso-bcn", "hall-piso-avo", "hall-piso-brc"],
+    0,
+    [
+      { nome: "Soleira", tipo: "espelho", baseKey: null, unidade: "und", lado: "upgrade" },
+      { nome: "Rodapé", tipo: "fixo", baseKey: "hall-rod-pol", unidade: "ml", lado: "upgrade" },
+      { nome: "Rodapé Munari RS", tipo: "fixo", baseKey: "hall-rod-pad", unidade: "ml", lado: "padrao" },
+      { nome: "Soleiras Granito", tipo: "fixo", baseKey: "hall-ped-pad", unidade: "und", lado: "padrao" },
+    ]
+  );
+  const hall = room("Hall", [hallPiso]);
+  const hallT1 = inst(hall, [
+    { qtd: 2.25, rt: 50, custoQtds: costQty(hallPiso, [1, 7.5, 5, 2]) },
   ]);
 
   // ── Tipologia 1 — Planta A (86m²) ──
@@ -242,6 +315,9 @@ export function createSeed(): SeedData {
       { qtd: 1, rt: 0 },
       { qtd: 1, rt: 0, kitQtds: kitQty("kit-metais-bronze", [2, 1, 1, 1]) },
     ]),
+    // Por último de propósito: os testes existentes indexam ambientes/componentes
+    // por posição, e o Hall é fixture nova.
+    hallT1,
   ]);
 
   // ── Tipologia 2 — Planta B (115m²) ──

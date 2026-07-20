@@ -5,8 +5,10 @@
 import {
   calcBudgetRow,
   calcKitRow,
+  resolveSatellites,
   rowKey,
   type BudgetRowResult,
+  type CostSatelliteResult,
   type KitRowResult,
   type RowOverrides,
 } from "@/lib/budget";
@@ -65,14 +67,60 @@ function effKit(baseCosts: BaseCosts, kit: Kit): Kit {
   };
 }
 
-/** Uma opção está pendente quando o custo (efetivo) de material é <= 0. */
-export function isOptionPending(deps: BudgetDeps, opt: MaterialOption): boolean {
+/**
+ * Materiais dos componentes de custo "fixo" deste componente, já com o custo
+ * base da sessão aplicado — o motor recebe tudo resolvido.
+ */
+export function satelliteMats(deps: BudgetDeps, comp: Componente): Map<number, Material> {
+  const out = new Map<number, Material>();
+  for (const cc of comp.custoComponentes ?? []) {
+    if (cc.tipo !== "fixo" || cc.baseId == null || out.has(cc.baseId)) continue;
+    const m = getMaterial(deps.materiais, cc.baseId);
+    if (m) out.set(cc.baseId, effMaterial(deps.baseCosts, m));
+  }
+  return out;
+}
+
+/** Algum componente de custo "fixo" do componente está sem preço? */
+function anySatellitePending(deps: BudgetDeps, comp: Componente): boolean {
+  return (comp.custoComponentes ?? []).some((cc) => {
+    if (cc.tipo !== "fixo") return false;
+    if (cc.baseId == null) return true; // fixo sem material = mal configurado
+    const m = getMaterial(deps.materiais, cc.baseId);
+    return !m || effCustoMat(deps.baseCosts, cc.baseId, m.custoMat) <= 0;
+  });
+}
+
+/**
+ * Uma opção está pendente quando o custo (efetivo) de material é <= 0 — ou
+ * quando algum componente de custo "fixo" do componente está sem preço: essa
+ * linha entra no débito de TODA opção, então derruba o componente inteiro
+ * (mesmo critério do sub-item de kit).
+ */
+export function isOptionPending(
+  deps: BudgetDeps,
+  comp: Componente,
+  opt: MaterialOption
+): boolean {
+  if (anySatellitePending(deps, comp)) return true;
   const ent = getOptionEntity(deps.materiais, deps.kits, opt);
   if (!ent) return false;
   if (ent.isKit) {
     return ent.itens.some((it) => effCustoMat(deps.baseCosts, it.materialId, it.custoMat) <= 0);
   }
   return effCustoMat(deps.baseCosts, ent.id, ent.custoMat) <= 0;
+}
+
+/**
+ * Satélites do lado PADRÃO já resolvidos — a linha de crédito da tabela precisa
+ * deles para mostrar o crédito do grupo (H41 = SUM(G41:G44) da planilha).
+ */
+export function padraoSatellites(
+  deps: BudgetDeps,
+  comp: Componente,
+  valUnPad: number
+): CostSatelliteResult[] {
+  return resolveSatellites(comp, "padrao", valUnPad, satelliteMats(deps, comp));
 }
 
 export type AnyRowResult =
@@ -95,12 +143,13 @@ export function calcAnyRow(
 ): AnyRowResult | null {
   const ovr = deps.overrides[rowKey(opt.id)] ?? {};
   const padraoMat = padraoMaterial(deps, comp);
+  const sats = satelliteMats(deps, comp);
   if (opt.isKit) {
     const kit = getKit(deps.kits, opt.baseId);
     if (!kit) return null;
     return {
       kind: "kit",
-      result: calcKitRow(effKit(deps.baseCosts, kit), comp, padraoMat, deps.cols, ovr),
+      result: calcKitRow(effKit(deps.baseCosts, kit), comp, padraoMat, sats, deps.cols, ovr),
     };
   }
   const upg = getMaterial(deps.materiais, opt.baseId);
@@ -108,8 +157,8 @@ export function calcAnyRow(
   const result = calcBudgetRow(
     effMaterial(deps.baseCosts, upg),
     padraoMat,
-    comp.qtd,
-    comp.rt,
+    comp,
+    sats,
     deps.cols,
     ovr
   );
@@ -127,7 +176,7 @@ export function ambTotal(deps: BudgetDeps, amb: Ambiente): number {
         if (r?.kind === "kit" && !r.result.anyPending) t += r.result.total;
         continue;
       }
-      if (isOptionPending(deps, opt)) continue;
+      if (isOptionPending(deps, comp, opt)) continue;
       const r = calcAnyRow(deps, comp, opt);
       if (r?.kind === "material") t += r.result.total;
     }
@@ -141,10 +190,15 @@ export interface ScopeRef {
   value: number;
 }
 
+// Descrições exibidas no autocomplete do editor de fórmula. Na convenção
+// estendida todos os monetários já são o TOTAL da linha — a redação precisa
+// dizer isso, senão o usuário escreve fórmula achando que é por unidade.
 const FIXED_REF_DEFS = [
-  { token: "custo_troca", desc: "Custo de troca (un.)" },
-  { token: "valor_unitario", desc: "Valor unitário upgrade" },
+  { token: "custo_troca", desc: "Custo de troca (total da linha)" },
+  { token: "valor_unitario", desc: "Débito estendido" },
   { token: "quantitativo", desc: "Qtd com RT" },
+  { token: "debito", desc: "Débito estendido" },
+  { token: "credito", desc: "Crédito do padrão (sem RT)" },
 ] as const;
 
 /** Escopo + referências disponíveis para o editor de uma coluna (só as à esquerda). */
@@ -155,8 +209,10 @@ export function buildScopeRefs(
 ): { scope: Record<string, number>; refs: ScopeRef[] } {
   const scope: Record<string, number> = {
     custo_troca: r.custoDeTroca,
-    valor_unitario: r.valUnUpg,
+    valor_unitario: r.debitoExt,
     quantitativo: r.qtdComRT,
+    debito: r.debitoExt,
+    credito: r.creditoExt,
   };
   const refs: ScopeRef[] = FIXED_REF_DEFS.map((f) => ({
     token: f.token,

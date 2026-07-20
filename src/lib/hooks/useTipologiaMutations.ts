@@ -18,7 +18,13 @@ import {
   reorderAmbientes,
   replaceUpgrade,
   reorderComponentes,
+  addCostComponent,
+  removeCostComponent,
+  reorderCostComponents,
+  setCostQtds,
   setKitQtds,
+  updateCostComponent,
+  type CostComponentInput,
   setPadrao,
   updateAmbiente,
   updateComponente,
@@ -223,5 +229,57 @@ export function useSetKitQtds() {
       qtds,
     }: CompPath & { qtds: Record<number, number> }) =>
       setKitQtds(tipologiaId, ambienteId, componenteId, qtds)
+  );
+}
+
+// ─── Componentes de custo (satélites) ──────────────────────────────────
+// Atenção: add/update/remove/reorder mexem na DEFINIÇÃO, compartilhada por
+// todas as tipologias que usam o ambiente. Só setCostQtds é local à planta.
+
+export function useAddCostComponent() {
+  return useTreeMutation(
+    ({ tipologiaId, ambienteId, componenteId, input }: CompPath & { input: CostComponentInput }) =>
+      addCostComponent(tipologiaId, ambienteId, componenteId, input)
+  );
+}
+
+export function useUpdateCostComponent() {
+  return useTreeMutation(
+    ({
+      tipologiaId,
+      ambienteId,
+      componenteId,
+      costItemId,
+      patch,
+    }: CompPath & {
+      costItemId: number;
+      patch: Partial<Omit<CostComponentInput, "qtd">>;
+    }) => updateCostComponent(tipologiaId, ambienteId, componenteId, costItemId, patch)
+  );
+}
+
+export function useRemoveCostComponent() {
+  return useTreeMutation(
+    ({ tipologiaId, ambienteId, componenteId, costItemId }: CompPath & { costItemId: number }) =>
+      removeCostComponent(tipologiaId, ambienteId, componenteId, costItemId)
+  );
+}
+
+export function useSetCostQtds() {
+  return useTreeMutation(
+    ({
+      tipologiaId,
+      ambienteId,
+      componenteId,
+      qtds,
+    }: CompPath & { qtds: Record<number, number> }) =>
+      setCostQtds(tipologiaId, ambienteId, componenteId, qtds)
+  );
+}
+
+export function useReorderCostComponents() {
+  return useTreeMutation(
+    ({ tipologiaId, ambienteId, componenteId, orderedIds }: CompPath & { orderedIds: number[] }) =>
+      reorderCostComponents(tipologiaId, ambienteId, componenteId, orderedIds)
   );
 }

@@ -88,6 +88,19 @@ enum CommentAuthor {
   incorporadora
 }
 
+/// Como um componente de custo resolve seu preço unitário.
+/// espelho = acompanha o material da opção; fixo = BaseMaterial próprio.
+enum CostItemKind {
+  espelho
+  fixo
+}
+
+/// Lado do cálculo: crédito (padrão) ou débito (toda opção de upgrade).
+enum CostItemSide {
+  padrao
+  upgrade
+}
+
 // ─── Enterprise (era Project) ───────────────────────────────────────────
 
 model Enterprise {
@@ -200,6 +213,7 @@ model RoomComponent {
   Options            Material[]               @relation("ComponentOptions")
   DefaultMaterial    Material?                @relation("DefaultOption", fields: [DefaultMaterialId], references: [Id], onDelete: SetNull)
   BlueprintInstances BlueprintRoomComponent[]
+  CostItems          RoomComponentCostItem[]
 
   @@index([RoomId])
 }
@@ -216,6 +230,7 @@ model BlueprintRoomComponent {
   BlueprintRoom BlueprintRoom      @relation(fields: [BlueprintRoomId], references: [Id], onDelete: Cascade)
   RoomComponent RoomComponent      @relation(fields: [RoomComponentId], references: [Id], onDelete: Cascade)
   KitUsages     MaterialKitUsage[]
+  CostUsages    CostItemUsage[]
 
   @@unique([BlueprintRoomId, RoomComponentId])
   @@index([BlueprintRoomId])
@@ -273,13 +288,14 @@ model BaseMaterial {
   CreatedAt DateTime @default(now()) @db.Timestamptz()
   UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
 
-  Organization Organization      @relation(fields: [OrganizationId], references: [id], onDelete: Cascade)
-  Category     MaterialCategory? @relation(fields: [CategoryId], references: [Id], onDelete: SetNull)
-  MediaFile    MediaFile?        @relation("BaseMaterialPreviewMedia", fields: [MediaFileId], references: [Id], onDelete: SetNull)
+  Organization Organization            @relation(fields: [OrganizationId], references: [id], onDelete: Cascade)
+  Category     MaterialCategory?       @relation(fields: [CategoryId], references: [Id], onDelete: SetNull)
+  MediaFile    MediaFile?              @relation("BaseMaterialPreviewMedia", fields: [MediaFileId], references: [Id], onDelete: SetNull)
   Options      Material[]
-  KitItems     MaterialKitItem[] @relation("KitParent")
-  ParentKits   MaterialKitItem[] @relation("KitChild")
+  KitItems     MaterialKitItem[]       @relation("KitParent")
+  ParentKits   MaterialKitItem[]       @relation("KitChild")
   PortalFills  PortalFill[]
+  CostItems    RoomComponentCostItem[] @relation("CostItemMaterial")
 
   @@index([OrganizationId])
   @@index([OrganizationId, Type])
@@ -302,10 +318,10 @@ model MaterialCategory {
 
 /// Composição do kit (era Kit.itens): sub-materiais de um BaseMaterial kit.
 model MaterialKitItem {
-  Id                   Int    @id @default(autoincrement())
+  Id                   Int     @id @default(autoincrement())
   ParentMaterialId     Int
   ChildMaterialId      Int
-  Position             Int    @default(0)
+  Position             Int     @default(0)
   Unit                 String? // unidade do sub-item (fallback: ChildMaterial.Unit)
   DefaultUsageQuantity Float?
 
@@ -328,6 +344,51 @@ model MaterialKitUsage {
   KitItem                MaterialKitItem        @relation(fields: [KitItemId], references: [Id], onDelete: Cascade)
 
   @@unique([BlueprintRoomComponentId, KitItemId])
+  @@index([BlueprintRoomComponentId])
+}
+
+// ─── Componente de custo ("satélite": SOLEIRA, RODAPÉ, RESERVA TÉCNICA) ──
+//
+// Linha somada ao custo do componente que NUNCA é ofertada na personalização.
+// Espelha o par MaterialKitItem/MaterialKitUsage: definição compartilhada no
+// RoomComponent + quantitativo por planta.
+
+/// Definição do componente de custo — COMPARTILHADA entre plantas.
+model RoomComponentCostItem {
+  Id              Int          @id @default(autoincrement())
+  RoomComponentId Int
+  Name            String
+  Kind            CostItemKind
+  Side            CostItemSide @default(upgrade)
+  /// BaseMaterial quando Kind = fixo; NULL quando espelho (segue a opção).
+  BaseMaterialId  Int?
+  Unit            String
+  Position        Int          @default(0)
+
+  CreatedAt DateTime @default(now()) @db.Timestamptz()
+  UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
+
+  RoomComponent RoomComponent   @relation(fields: [RoomComponentId], references: [Id], onDelete: Cascade)
+  /// Restrict: apagar um material usado como satélite zeraria o custo de troca
+  /// de todas as opções do componente em silêncio.
+  BaseMaterial  BaseMaterial?   @relation("CostItemMaterial", fields: [BaseMaterialId], references: [Id], onDelete: Restrict)
+  Usages        CostItemUsage[]
+
+  @@index([RoomComponentId])
+  @@index([BaseMaterialId])
+}
+
+/// Quantitativo de componente de custo POR PLANTA (Componente.custoQtds).
+model CostItemUsage {
+  Id                       Int   @id @default(autoincrement())
+  BlueprintRoomComponentId Int
+  CostItemId               Int
+  UsageQuantity            Float
+
+  BlueprintRoomComponent BlueprintRoomComponent @relation(fields: [BlueprintRoomComponentId], references: [Id], onDelete: Cascade)
+  CostItem               RoomComponentCostItem  @relation(fields: [CostItemId], references: [Id], onDelete: Cascade)
+
+  @@unique([BlueprintRoomComponentId, CostItemId])
   @@index([BlueprintRoomComponentId])
 }
 
