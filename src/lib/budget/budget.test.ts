@@ -113,34 +113,36 @@ describe("calcBudgetRow (material)", () => {
     expect(comRT.debitoTotal).toBeGreaterThan(semRT.debitoTotal); // débito muda
   });
 
-  // T-M2 — rowTotal/rowAvg somam/mediam APENAS as free à esquerda
-  it("T-M2: rowTotal e rowAvg consideram só as colunas free à esquerda", () => {
+  // T-M2 — não existe mais coluna calculada: um subtotal é uma coluna comum com
+  // fórmula explícita, e por isso ENTRA no sumFree (as antigas rowTotal não).
+  it("T-M2: subtotal é uma coluna comum e entra no sumFree", () => {
     const colsComp: BudgetColumn[] = [
       cols[0]!,
       cols[1]!,
-      { id: 101, nome: "Subtotal", kind: "rowTotal", expr: "", visivel: true },
-      cols[2]!,
-      { id: 102, nome: "Média", kind: "rowAvg", expr: "", visivel: true },
+      {
+        id: 101,
+        nome: "Subtotal",
+        expr: "=taxa_construtora + contingencia_incc",
+        visivel: true,
+      },
     ];
     const r = mustCalc(calcBudgetRow(piso002, piso001, plain(18.4, 15), new Map(), colsComp));
-    expect(col(r, 101).value).toBeCloseTo(127.972, 10); // 78.752 + 49.22 (tc3 à direita fora)
-    expect(col(r, 101).computed).toBe(true);
-    expect(col(r, 102).value).toBeCloseTo(686.596 / 3, 10); // média das 3 free
-    expect(r.sumFree).toBeCloseTo(686.596, 10); // computadas não somam
+    expect(col(r, 101).value).toBeCloseTo(127.972, 10); // 78.752 + 49.22
+    expect(r.sumFree).toBeCloseTo(78.752 + 49.22 + 127.972, 10);
   });
 
-  // T-M3 — referência a coluna anterior por nome normalizado (inclusive computada)
+  // T-M3 — referência a coluna anterior por nome normalizado
   it("T-M3: colunas referenciam colunas anteriores pelo nome normalizado", () => {
     const colsRef: BudgetColumn[] = [
-      cols[0]!, // Taxa Construtora → 2.84
-      { id: 201, nome: "Dobro", kind: "free", expr: "=taxa_construtora * 2", visivel: true },
-      { id: 202, nome: "Subtotal", kind: "rowTotal", expr: "", visivel: true },
-      { id: 203, nome: "Mais um", kind: "free", expr: "=subtotal + 1", visivel: true },
+      cols[0]!, // Taxa Construtora → 78.752
+      { id: 201, nome: "Dobro", expr: "=taxa_construtora * 2", visivel: true },
+      { id: 202, nome: "Subtotal", expr: "=taxa_construtora + dobro", visivel: true },
+      { id: 203, nome: "Mais um", expr: "=subtotal + 1", visivel: true },
     ];
     const r = mustCalc(calcBudgetRow(piso002, piso001, plain(18.4, 15), new Map(), colsRef));
     expect(col(r, 201).value).toBeCloseTo(157.504, 10); // 78.752 * 2
     expect(col(r, 202).value).toBeCloseTo(236.256, 10); // 78.752 + 157.504
-    expect(col(r, 203).value).toBeCloseTo(237.256, 10); // subtotal (computada) + 1
+    expect(col(r, 203).value).toBeCloseTo(237.256, 10); // subtotal + 1
   });
 
   // T-M4 — override por célula (keyed por String(col.id))
@@ -159,8 +161,8 @@ describe("calcBudgetRow (material)", () => {
   // T-M5 — referência desconhecida
   it("T-M5: referência desconhecida vira erro na célula e 0 no escopo", () => {
     const colsErr: BudgetColumn[] = [
-      { id: 301, nome: "Quebrada", kind: "free", expr: "=inexistente * 2", visivel: true },
-      { id: 302, nome: "Dependente", kind: "free", expr: "=quebrada + 1", visivel: true },
+      { id: 301, nome: "Quebrada", expr: "=inexistente * 2", visivel: true },
+      { id: 302, nome: "Dependente", expr: "=quebrada + 1", visivel: true },
     ];
     const r = mustCalc(calcBudgetRow(piso002, piso001, plain(18.4, 15), new Map(), colsErr));
     expect(col(r, 301).error).toBe('coluna "inexistente" não encontrada');
@@ -318,10 +320,9 @@ describe("componentes de custo (Hall)", () => {
 });
 
 describe("columnsAffectedByExtendedConvention", () => {
-  const c = (id: number, expr: string, kind: BudgetColumn["kind"] = "free"): BudgetColumn => ({
+  const c = (id: number, expr: string): BudgetColumn => ({
     id,
     nome: `c${id}`,
-    kind,
     expr,
     visivel: true,
   });
@@ -336,8 +337,8 @@ describe("columnsAffectedByExtendedConvention", () => {
     expect(columnsAffectedByExtendedConvention(cols).map((x) => x.id)).toEqual([1, 2]);
   });
 
-  it("ignora colunas calculadas e vazias", () => {
-    const cols = [c(1, "", "rowTotal"), c(2, "150", "rowAvg"), c(3, "")];
+  it("ignora colunas vazias", () => {
+    const cols = [c(1, ""), c(2, "   "), c(3, "")];
     expect(columnsAffectedByExtendedConvention(cols)).toEqual([]);
   });
 });

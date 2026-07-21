@@ -22,7 +22,6 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { assertMediaFileInOrg } from "@/lib/server/media";
 import { resolveMediaUrl } from "@/lib/server/mediaRules";
-import { TAX_COLUMNS_DEFAULT } from "@/shared/constants/budget";
 import type {
   Ambiente,
   ImagemVinculada,
@@ -265,7 +264,7 @@ const ENTERPRISE_INCLUDE = { BudgetColumns: true } satisfies Prisma.EnterpriseIn
 type EnterpriseRow = Prisma.EnterpriseGetPayload<{ include: typeof ENTERPRISE_INCLUDE }>;
 
 function toBudgetColumn(row: Prisma.BudgetColumnGetPayload<object>): BudgetColumn {
-  return { id: row.Id, nome: row.Name, kind: row.Kind, expr: row.Expr, visivel: row.Visible };
+  return { id: row.Id, nome: row.Name, expr: row.Expr, visivel: row.Visible };
 }
 
 function toProject(row: EnterpriseRow): Project {
@@ -635,7 +634,10 @@ export async function getBudgetColumns(
     where: { EnterpriseId: projectId },
     orderBy: { Position: "asc" },
   });
-  return rows.length > 0 ? rows.map(toBudgetColumn) : TAX_COLUMNS_DEFAULT.map((c) => ({ ...c }));
+  // Sem fallback para TAX_COLUMNS_DEFAULT: um empreendimento sem colunas
+  // gravadas começa mesmo vazio. O fallback antigo devolvia ids placeholder
+  // (1/2/3) que não existiam no banco e quebravam os overrides por célula.
+  return rows.map(toBudgetColumn);
 }
 
 export async function updateBudgetColumns(
@@ -644,17 +646,45 @@ export async function updateBudgetColumns(
   cols: BudgetColumn[]
 ): Promise<BudgetColumn[]> {
   await assertEnterprise(organizationId, projectId);
+  // Diff-and-upsert em vez de apagar-e-recriar: os overrides de célula são
+  // indexados pelo Id da coluna, então recriar tudo (Id autoincrement novo a
+  // cada gravação) zerava silenciosamente as fórmulas por célula a cada
+  // renomear/reordenar. Colunas preexistentes precisam manter o Id.
+  const existing = await prisma.budgetColumn.findMany({
+    where: { EnterpriseId: projectId },
+    select: { Id: true },
+  });
+  const existingIds = new Set(existing.map((r) => r.Id));
+  const incomingIds = new Set(cols.map((c) => c.id));
+  // Só ids que já existiam e não voltaram no payload — nunca por exclusão, ou
+  // as linhas criadas nesta mesma transação (Id novo) cairiam no notIn.
+  const removedIds = [...existingIds].filter((id) => !incomingIds.has(id));
+
   await prisma.$transaction([
-    prisma.budgetColumn.deleteMany({ where: { EnterpriseId: projectId } }),
-    prisma.budgetColumn.createMany({
-      data: cols.map((c, i) => ({
-        EnterpriseId: projectId,
-        Name: c.nome,
-        Kind: c.kind,
-        Expr: c.expr,
-        Visible: c.visivel,
-        Position: i,
-      })),
+    ...cols.map((c, i) =>
+      existingIds.has(c.id)
+        ? prisma.budgetColumn.update({
+            where: { Id: c.id },
+            data: {
+              Name: c.nome,
+              Expr: c.expr,
+              Visible: c.visivel,
+              Position: i,
+            },
+          })
+        : // Id do cliente é temporário (Date.now()) — o banco atribui o real.
+          prisma.budgetColumn.create({
+            data: {
+              EnterpriseId: projectId,
+              Name: c.nome,
+              Expr: c.expr,
+              Visible: c.visivel,
+              Position: i,
+            },
+          })
+    ),
+    prisma.budgetColumn.deleteMany({
+      where: { EnterpriseId: projectId, Id: { in: removedIds } },
     }),
   ]);
   return getBudgetColumns(organizationId, projectId);

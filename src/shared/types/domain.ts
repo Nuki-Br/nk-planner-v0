@@ -211,13 +211,13 @@ export interface UnitGroup {
   unidades: string[];
 }
 
-export type ColumnKind = "free" | "rowTotal" | "rowAvg";
-
-/** Coluna configurável do Construtor de Preço. */
+/**
+ * Coluna configurável do Construtor de Preço. Toda coluna é livre — a soma por
+ * linha é a coluna fixa "Total final", não uma coluna configurável.
+ */
 export interface BudgetColumn {
   id: number;
   nome: string;
-  kind: ColumnKind;
   /** Expressão padrão: número fixo ou fórmula iniciada por "=". */
   expr: string;
   visivel: boolean;

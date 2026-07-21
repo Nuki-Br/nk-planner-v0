@@ -92,7 +92,6 @@ async function main(): Promise<void> {
         BudgetColumns: {
           create: TAX_COLUMNS_DEFAULT.map((c, i) => ({
             Name: c.nome,
-            Kind: c.kind,
             Expr: c.expr,
             Visible: c.visivel,
             Position: i,

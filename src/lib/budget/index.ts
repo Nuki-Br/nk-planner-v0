@@ -27,8 +27,6 @@ import type {
 export interface ColResult {
   value: number;
   error: string | null;
-  /** true para colunas rowTotal/rowAvg (não editáveis). */
-  computed: boolean;
   /** true quando a célula usa override em vez da expressão padrão da coluna. */
   overridden: boolean;
 }
@@ -151,37 +149,26 @@ export function rowKey(optionId: number): string {
   return String(optionId);
 }
 
-// Laço de colunas (esquerda → direita): rowTotal/rowAvg somam/mediam as colunas
-// free à esquerda; free avalia override-da-célula ou col.expr e injeta no scope.
+// Laço de colunas (esquerda → direita): cada uma avalia o override da célula ou
+// a expressão padrão da coluna e injeta o resultado no scope, para que as
+// colunas à direita possam referenciá-la pelo nome.
 function runColumns(
   scope: Scope,
   cols: BudgetColumn[],
   rowOverrides: RowOverrides
 ): { colResults: ColResults; sumFree: number } {
   const colResults: ColResults = {};
-  const freeLeft: number[] = [];
   let sumFree = 0;
   for (const col of cols) {
     const cid = String(col.id);
-    if (col.kind === "rowTotal" || col.kind === "rowAvg") {
-      const sum = freeLeft.reduce((a, b) => a + b, 0);
-      const val = col.kind === "rowAvg" ? (freeLeft.length ? sum / freeLeft.length : 0) : sum;
-      colResults[cid] = { value: val, error: null, computed: true, overridden: false };
-      scope[normName(col.nome)] = val;
-    } else {
-      const override = rowOverrides[cid];
-      const hasOvr = override != null;
-      const expr = hasOvr ? override : col.expr || "";
-      const ev = evalCell(expr, scope);
-      colResults[cid] = { value: ev.value, error: ev.error, computed: false, overridden: hasOvr };
-      if (!ev.error) {
-        sumFree += ev.value;
-        freeLeft.push(ev.value);
-        scope[normName(col.nome)] = ev.value;
-      } else {
-        scope[normName(col.nome)] = 0;
-      }
-    }
+    const override = rowOverrides[cid];
+    const hasOvr = override != null;
+    const expr = hasOvr ? override : col.expr || "";
+    const ev = evalCell(expr, scope);
+    colResults[cid] = { value: ev.value, error: ev.error, overridden: hasOvr };
+    if (!ev.error) sumFree += ev.value;
+    // Coluna com erro entra no scope como 0 — as dependentes seguem calculando.
+    scope[normName(col.nome)] = ev.error ? 0 : ev.value;
   }
   return { colResults, sumFree };
 }
@@ -326,7 +313,7 @@ export function calcKitRow(
  * nem percentual (seguido de `%`).
  */
 export function columnsAffectedByExtendedConvention(cols: BudgetColumn[]): BudgetColumn[] {
-  return cols.filter((c) => c.kind === "free" && hasAdditiveLiteral(c.expr));
+  return cols.filter((c) => hasAdditiveLiteral(c.expr));
 }
 
 function hasAdditiveLiteral(expr: string | null | undefined): boolean {

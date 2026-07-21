@@ -77,12 +77,6 @@ enum BlueprintStatus {
   incompleta
 }
 
-enum ColumnKind {
-  free
-  rowTotal
-  rowAvg
-}
-
 enum CommentAuthor {
   construtora
   incorporadora
@@ -394,15 +388,16 @@ model CostItemUsage {
 
 // ─── Features só do planner (re-escopadas a Enterprise, ids Int) ────────
 
-/// Coluna configurável do Construtor de Preço (fórmula por Name).
+/// Coluna configurável do Construtor de Preço (fórmula por Name). Toda coluna
+/// é livre: valor fixo ou "=fórmula". A soma por linha é a coluna fixa
+/// "Total final", que não é configurável e não vive nesta tabela.
 model BudgetColumn {
-  Id           Int        @id @default(autoincrement())
+  Id           Int     @id @default(autoincrement())
   EnterpriseId Int
   Name         String
-  Kind         ColumnKind
   Expr         String
-  Visible      Boolean    @default(false)
-  Position     Int        @default(0)
+  Visible      Boolean @default(false)
+  Position     Int     @default(0)
 
   Enterprise Enterprise @relation(fields: [EnterpriseId], references: [Id], onDelete: Cascade)
 

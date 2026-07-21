@@ -2,10 +2,11 @@
 
 import React from "react";
 
-import { evalCell, normName, type Scope } from "@/lib/formula";
+import { evalCell, type Scope } from "@/lib/formula";
 import { cn, fmtBRL } from "@/lib/utils";
 
 import type { ScopeRef } from "../calc";
+import { useFormulaSuggestions } from "../hooks/useFormulaSuggestions";
 
 interface FormulaCellEditorProps {
   initial: string;
@@ -42,19 +43,12 @@ export function FormulaCellEditor({
 
   const trimmed = val.trim();
   const isFormula = trimmed.startsWith("=");
-  const fragMatch = isFormula ? val.match(/([\p{L}\p{N}_]*)$/u) : null;
-  const frag = fragMatch?.[1] ?? "";
-  const fragNorm = normName(frag);
-  const sugg = isFormula
-    ? refs.filter((r) => fragNorm === "" || r.token.includes(fragNorm)).slice(0, 6)
-    : [];
+  const { sugg, withToken } = useFormulaSuggestions(val, refs);
 
   const ev = evalCell(val, scope);
 
   const insert = (tok: string) => {
-    const base = frag !== "" ? val.slice(0, val.length - frag.length) : val;
-    const needsSpace = base.length > 0 && !/[\s(=+\-*/]$/.test(base);
-    setVal(base + (needsSpace ? " " : "") + tok);
+    setVal(withToken(tok));
     requestAnimationFrame(() => inputRef.current?.focus());
   };
 

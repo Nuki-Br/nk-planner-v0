@@ -3,7 +3,7 @@
 import React from "react";
 import { useRouter } from "next/navigation";
 
-import { Button, EmptyState, Icon, Modal, PageHeader, Textarea } from "@/components/ui";
+import { AlertModal, Button, EmptyState, Icon, Modal, PageHeader, Textarea } from "@/components/ui";
 import { columnsAffectedByExtendedConvention, rowKey } from "@/lib/budget";
 import { getKit, getMaterial } from "@/lib/data/entities";
 import { useActiveProjectId } from "@/lib/hooks/useActiveProject";
@@ -28,7 +28,6 @@ import type {
   Ambiente,
   BudgetColumn,
   BudgetVersion,
-  ColumnKind,
   Componente,
   CostComponent,
   CostComponentSide,
@@ -38,6 +37,7 @@ import {
   ambTotal,
   buildScopeRefs,
   calcAnyRow,
+  emptyScopeRefs,
   isOptionOwnPending,
   isOptionPending,
   padraoSatellites,
@@ -49,6 +49,7 @@ import {
 import { kitSubRow, satelliteRowsFor, satelliteSubRow } from "../subRows";
 import { AddColumnTh, ColHeaderCell } from "./ColHeaderCell";
 import { BudgetScreenSkeleton } from "./BudgetScreenSkeleton";
+import { ColumnModal, type ColumnDraft } from "./ColumnModal";
 import { CostBaseView } from "./CostBaseView";
 import { FormulaCellEditor } from "./FormulaCellEditor";
 import { PublishSplitButton } from "./PublishSplitButton";
@@ -81,6 +82,9 @@ interface CostRemoveTarget {
   comp: Componente;
   item: CostComponent;
 }
+
+/** Estado do modal de coluna: criando, editando uma existente, ou fechado. */
+type ColumnModalState = { mode: "create" } | { mode: "edit"; col: BudgetColumn } | null;
 
 /** Botão "+ Item de custo" das linhas mestre da tabela. */
 function AddCostItemBtn({ onClick }: { onClick: () => void }) {
@@ -285,7 +289,8 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   const [openThread, setOpenThread] = React.useState<ThreadRow | null>(null);
   const [overrides, setOverrides] = React.useState<CellOverrides>({});
   const [editingCell, setEditingCell] = React.useState<EditingCell | null>(null);
-  const [showAdd, setShowAdd] = React.useState(false);
+  const [columnModal, setColumnModal] = React.useState<ColumnModalState>(null);
+  const [deleteCol, setDeleteCol] = React.useState<BudgetColumn | null>(null);
   const [dragId, setDragId] = React.useState<number | null>(null);
   const [dragTarget, setDragTarget] = React.useState<number | null>(null);
   const [collapsedRows, setCollapsedRows] = React.useState<Set<string>>(new Set());
@@ -403,12 +408,17 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
 
   // ── colunas (persistem no store) ──
   const persistCols = (next: BudgetColumn[]) => updateCols.mutate({ projectId, cols: next });
-  const addColumn = ({ nome, kind }: { nome: string; kind: ColumnKind }) => {
-    persistCols([...cols, { id: Date.now(), nome, kind, expr: "", visivel: false }]);
-    setShowAdd(false);
+  // Id temporário: o servidor descarta e devolve o autoincrement real.
+  const addColumn = ({ nome, expr }: ColumnDraft) =>
+    persistCols([...cols, { id: Date.now(), nome, expr, visivel: true }]);
+  const saveColumn = (id: number, draft: ColumnDraft) =>
+    persistCols(cols.map((c) => (c.id === id ? { ...c, ...draft } : c)));
+  const submitColumn = (draft: ColumnDraft) => {
+    if (!columnModal) return;
+    if (columnModal.mode === "edit") saveColumn(columnModal.col.id, draft);
+    else addColumn(draft);
+    setColumnModal(null);
   };
-  const renameColumn = (id: number, nome: string) =>
-    persistCols(cols.map((c) => (c.id === id ? { ...c, nome } : c)));
   const deleteColumn = (id: number) => {
     persistCols(cols.filter((c) => c.id !== id));
     setOverrides((prev) => {
@@ -433,6 +443,26 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
     arr.splice(ti, 0, moved);
     persistCols(arr);
   };
+
+  // Prévia da expressão no modal de coluna: primeira linha calculável da
+  // tipologia ativa. `colIdx` é a posição da coluna editada (ou o fim, ao
+  // criar), o que já restringe as referências às colunas à esquerda — mesma
+  // regra do motor.
+  const columnScope = (() => {
+    const colIdx =
+      columnModal?.mode === "edit"
+        ? cols.findIndex((c) => c.id === columnModal.col.id)
+        : cols.length;
+    for (const amb of tip.ambientes) {
+      for (const comp of amb.componentes) {
+        for (const opt of comp.options) {
+          const r = calcAnyRow(deps, comp, opt);
+          if (r) return buildScopeRefs(cols, r.result, colIdx);
+        }
+      }
+    }
+    return emptyScopeRefs(cols, colIdx);
+  })();
 
   // ── overrides por célula ──
   const setOverride = (rowKey: string, colId: number, expr: string) =>
@@ -563,7 +593,6 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
     }
     const result = r.result;
     const cr = result.colResults[col.id];
-    const special = col.kind === "rowTotal" || col.kind === "rowAvg";
     const isEditing = editingCell?.rowKey === rowKey && editingCell.colId === col.id;
     const ovr = cr?.overridden ?? false;
 
@@ -592,38 +621,19 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
     }
 
     return (
-      <Td
-        key={col.id}
-        right
-        className={ovr ? "bg-[#f0faf9]" : special ? "bg-[#f7fdfc]" : rowBgClass}
-      >
+      <Td key={col.id} right className={ovr ? "bg-[#f0faf9]" : rowBgClass}>
         <div
-          role={special ? undefined : "button"}
-          tabIndex={special ? undefined : 0}
-          onClick={() => {
-            if (!special) setEditingCell({ rowKey, colId: col.id });
+          role="button"
+          tabIndex={0}
+          onClick={() => setEditingCell({ rowKey, colId: col.id })}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setEditingCell({ rowKey, colId: col.id });
+            }
           }}
-          onKeyDown={
-            special
-              ? undefined
-              : (e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    setEditingCell({ rowKey, colId: col.id });
-                  }
-                }
-          }
-          title={
-            special
-              ? col.kind === "rowAvg"
-                ? "Média das colunas livres (calculado)"
-                : "Soma das colunas livres (calculado)"
-              : "Clique para editar valor ou fórmula"
-          }
-          className={cn(
-            "flex items-center justify-end gap-1 rounded px-1 py-0.5",
-            special ? "cursor-default" : "cursor-pointer"
-          )}
+          title="Clique para editar valor ou fórmula"
+          className="flex cursor-pointer items-center justify-end gap-1 rounded px-1 py-0.5"
         >
           {cr?.error ? (
             <span title={cr.error} className="cursor-help font-bold text-functional-error">
@@ -631,15 +641,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
             </span>
           ) : (
             <>
-              <span
-                className={cn(
-                  ovr
-                    ? "font-bold text-primary-7"
-                    : special
-                      ? "font-bold text-primary-8"
-                      : "text-neutral-gray-8"
-                )}
-              >
+              <span className={ovr ? "font-bold text-primary-7" : "text-neutral-gray-8"}>
                 {cr ? fmtBRL(cr.value) : "—"}
               </span>
               {ovr && <span className="inline-block h-[5px] w-[5px] shrink-0 rounded-full bg-primary-7" />}
@@ -819,8 +821,8 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                   <ColHeaderCell
                     key={col.id}
                     col={col}
-                    onRename={renameColumn}
-                    onDelete={deleteColumn}
+                    onRequestEdit={(c) => setColumnModal({ mode: "edit", col: c })}
+                    onRequestDelete={setDeleteCol}
                     onDragStart={setDragId}
                     onDragEnter={setDragTarget}
                     onDrop={(id) => {
@@ -831,7 +833,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                     isDragTarget={dragTarget === col.id && dragId !== null && dragId !== col.id}
                   />
                 ))}
-                <AddColumnTh showAdd={showAdd} setShowAdd={(fn) => setShowAdd(fn)} onAdd={addColumn} />
+                <AddColumnTh onRequestCreate={() => setColumnModal({ mode: "create" })} />
                 <Th right teal>Total final</Th>
                 <Th />
               </tr>
@@ -1575,6 +1577,35 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
           {costRemove?.amb.nome}&rdquo;.
         </p>
       </Modal>
+
+      <ColumnModal
+        open={columnModal !== null}
+        onClose={() => setColumnModal(null)}
+        col={columnModal?.mode === "edit" ? columnModal.col : null}
+        scope={columnScope.scope}
+        refs={columnScope.refs}
+        isLoading={updateCols.isPending}
+        onSubmit={submitColumn}
+      />
+
+      <AlertModal
+        open={deleteCol !== null}
+        title="Remover coluna"
+        variant="error"
+        confirmLabel="Remover"
+        body={
+          <>
+            Remover a coluna <strong>{deleteCol?.nome}</strong>? As fórmulas definidas nas
+            células dessa coluna serão perdidas.
+          </>
+        }
+        isLoading={updateCols.isPending}
+        onCancel={() => setDeleteCol(null)}
+        onConfirm={() => {
+          if (deleteCol) deleteColumn(deleteCol.id);
+          setDeleteCol(null);
+        }}
+      />
 
       <VersionToast msg={toastMsg} />
     </div>

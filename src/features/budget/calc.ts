@@ -242,3 +242,28 @@ export function buildScopeRefs(
   }
   return { scope, refs };
 }
+
+/**
+ * Mesmos tokens de `buildScopeRefs`, todos zerados — para o modal de coluna
+ * quando a tipologia ainda não tem nenhuma linha calculável. Sem isso a prévia
+ * acusaria "coluna não encontrada" em referências perfeitamente válidas.
+ */
+export function emptyScopeRefs(
+  cols: BudgetColumn[],
+  colIdx: number
+): { scope: Record<string, number>; refs: ScopeRef[] } {
+  const scope: Record<string, number> = {};
+  const refs: ScopeRef[] = [];
+  for (const f of FIXED_REF_DEFS) {
+    scope[f.token] = 0;
+    refs.push({ token: f.token, desc: f.desc, value: 0 });
+  }
+  for (let j = 0; j < colIdx; j++) {
+    const cj = cols[j];
+    if (!cj) continue;
+    const tok = normName(cj.nome);
+    scope[tok] = 0;
+    refs.push({ token: tok, desc: fmtBRL(0), value: 0 });
+  }
+  return { scope, refs };
+}

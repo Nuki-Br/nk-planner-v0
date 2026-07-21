@@ -6,6 +6,8 @@ import { Button, Icon, Input, MaterialThumb, Modal, Select } from "@/components/
 import { EntityPickerList } from "@/features/catalog/components/EntityPickerList";
 import { cn } from "@/lib/utils";
 import { UNIDADE_OPTIONS } from "@/shared/constants/unidades";
+
+import { OptionRadioCard } from "./OptionRadioCard";
 import type {
   CatalogEntity,
   CostComponent,
@@ -26,42 +28,6 @@ export interface CostItemValue {
   unidade: Unidade;
   lado: CostComponentSide;
   qtd: number;
-}
-
-function RadioCard({
-  selected,
-  title,
-  desc,
-  onSelect,
-}: {
-  selected: boolean;
-  title: string;
-  desc: string;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={cn(
-        "flex-1 rounded-lg border px-3 py-2.5 text-left",
-        selected ? "border-primary-7 bg-primary-1" : "border-neutral-gray-4 bg-white"
-      )}
-    >
-      <div className="flex items-center gap-1.5">
-        <span
-          className={cn(
-            "h-2.5 w-2.5 shrink-0 rounded-full border",
-            selected ? "border-primary-7 bg-primary-7" : "border-neutral-gray-5"
-          )}
-        />
-        <span className={cn("text-xs font-bold", selected ? "text-primary-8" : "text-neutral-gray-9")}>
-          {title}
-        </span>
-      </div>
-      <p className="mt-1 pl-4 text-[11px] leading-snug text-neutral-gray-7">{desc}</p>
-    </button>
-  );
 }
 
 /**
@@ -211,7 +177,8 @@ export function CostItemModal({
               : "Cada opção tem um material diferente — a peça acompanha ou não essa troca."}
           </p>
           <div className="flex gap-2">
-            <RadioCard
+            <OptionRadioCard
+              className="flex-1"
               selected={tipo === "espelho"}
               title="Acompanha o material"
               desc={
@@ -221,7 +188,8 @@ export function CostItemModal({
               }
               onSelect={() => setTipo("espelho")}
             />
-            <RadioCard
+            <OptionRadioCard
+              className="flex-1"
               selected={tipo === "fixo"}
               title="Material próprio"
               desc="Preço de um material do catálogo, igual em todas as opções. Para peças que não mudam com a escolha — o rodapé de poliestireno serve para qualquer piso. Precisa ter custo preenchido."

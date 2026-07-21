@@ -174,7 +174,6 @@ async function main(): Promise<void> {
     data: cols.map((c, i) => ({
       EnterpriseId: activeId,
       Name: c.nome,
-      Kind: c.kind,
       Expr: c.expr,
       Visible: c.visivel,
       Position: i,
