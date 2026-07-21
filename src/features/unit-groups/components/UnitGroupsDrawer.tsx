@@ -12,6 +12,7 @@ import {
   useUpdateUnitGroup,
 } from "@/lib/hooks/useUnitGroups";
 import { cn } from "@/lib/utils";
+import { useActiveProjectId } from "@/lib/hooks/useActiveProject";
 import type { UnitGroup } from "@/shared/types/domain";
 
 import { UnitGroupEditor, UnitGroupEditorEmpty } from "./UnitGroupEditor";
@@ -26,9 +27,10 @@ interface UnitGroupsDrawerProps {
 // Tela 5 — Grupos de unidades (modal master-detail em nível de
 // empreendimento, protótipo: UnitGroupsDrawer). CRUD direto no store.
 export function UnitGroupsDrawer({ open, onClose, empreendimento }: UnitGroupsDrawerProps) {
-  const { data: groups = [] } = useUnitGroups();
-  const { data: torres = [] } = useTorres();
-  const createGroup = useCreateUnitGroup();
+  const projectId = useActiveProjectId();
+  const { data: groups = [] } = useUnitGroups(projectId);
+  const { data: torres = [] } = useTorres(projectId);
+  const createGroup = useCreateUnitGroup(projectId ?? 0);
   const updateGroup = useUpdateUnitGroup();
   const deleteGroup = useDeleteUnitGroup();
 

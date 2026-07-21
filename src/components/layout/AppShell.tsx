@@ -12,7 +12,6 @@ import {
   Sidebar,
 } from "@/components/layout/Sidebar";
 import { CurrentUserProvider } from "@/lib/hooks/useCurrentUser";
-import { useSelection } from "@/lib/store/selection";
 import { DASHBOARD_MODE_ROUTES } from "@/shared/constants/navigation";
 
 interface AppShellProps {
@@ -27,7 +26,6 @@ interface AppShellProps {
 // botão de feedback em todas as telas autenticadas.
 export function AppShell({ orgName, email, userName, children }: AppShellProps) {
   const pathname = usePathname();
-  const clearSelection = useSelection((s) => s.clearSelection);
 
   const isDashboardMode = DASHBOARD_MODE_ROUTES.some(
     (route) => pathname === route || pathname.startsWith(`${route}/`)
@@ -43,11 +41,10 @@ export function AppShell({ orgName, email, userName, children }: AppShellProps) 
     setSidebarCollapsed(isOrcamento);
   }, [isOrcamento]);
 
-  // Voltar ao dashboard limpa a seleção (tipologia/componente ativos). Vive
-  // aqui porque a Sidebar não monta em modo dashboard.
-  React.useEffect(() => {
-    if (pathname === "/dashboard") clearSelection();
-  }, [pathname, clearSelection]);
+  // Nada de limpar seleção ao entrar no dashboard: isso zeraria o
+  // empreendimento ativo a cada visita e anularia a persistência (ida e volta ao
+  // dashboard perderia o projeto). As sub-seleções são limpas por
+  // setActiveProject quando o empreendimento MUDA — o gatilho correto.
 
   const contentLeft = isDashboardMode || isCanvas
     ? 0

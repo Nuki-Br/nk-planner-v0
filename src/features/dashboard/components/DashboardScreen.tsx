@@ -24,6 +24,8 @@ import { useSelection } from "@/lib/store/selection";
 import { STATUS_CFG } from "@/shared/constants/status";
 import type { Project, ProjectStatus } from "@/shared/types/domain";
 
+import { EmpreendimentoModal } from "./EmpreendimentoModal";
+
 const STATUS_OPTIONS = (
   ["rascunho", "em_preenchimento", "em_revisao", "publicado"] as ProjectStatus[]
 ).map((s) => ({ value: s, label: STATUS_CFG[s].label }));
@@ -36,6 +38,9 @@ export function DashboardScreen() {
 
   const [search, setSearch] = React.useState("");
   const [statusFilter, setStatusFilter] = React.useState("");
+  // Um estado só: null = fechado, { project: null } = criar, { project } =
+  // editar. Dois booleanos permitiriam representar "aberto nos dois modos".
+  const [modal, setModal] = React.useState<{ project: Project | null } | null>(null);
 
   const filtered = projects.filter(
     (p) =>
@@ -115,10 +120,25 @@ export function DashboardScreen() {
     {
       key: "acoes",
       label: "",
+      // stopPropagation no wrapper: a linha inteira é clicável (onRowClick) e o
+      // Button do HeroUI usa onPress, que não expõe o evento DOM para barrar.
       render: (r) => (
-        <Button variant="bordered" size="sm" onPress={() => openProject(r)}>
-          Abrir
-        </Button>
+        <div
+          className="flex items-center justify-end gap-1.5"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            title="Editar empreendimento"
+            onClick={() => setModal({ project: r })}
+            className="flex shrink-0 p-1.5 text-neutral-gray-6 hover:text-primary-7"
+          >
+            <Icon name="edit" size={15} />
+          </button>
+          <Button variant="bordered" size="sm" onPress={() => openProject(r)}>
+            Abrir
+          </Button>
+        </div>
       ),
     },
   ];
@@ -129,7 +149,7 @@ export function DashboardScreen() {
         title="Planejamento e Orçamento"
         subtitle="Gerencie os ciclos de planejamento e orçamento dos seus empreendimentos"
         action={
-          <Button icon="plus" onPress={() => router.push("/config-base")}>
+          <Button icon="plus" onPress={() => setModal({ project: null })}>
             Novo empreendimento
           </Button>
         }
@@ -173,7 +193,7 @@ export function DashboardScreen() {
             title="Nenhum empreendimento ainda"
             subtitle="Crie seu primeiro empreendimento para começar o planejamento e o orçamento."
             action={
-              <Button variant="teal" icon="plus" onPress={() => router.push("/config-base")}>
+              <Button variant="teal" icon="plus" onPress={() => setModal({ project: null })}>
                 Novo empreendimento
               </Button>
             }
@@ -221,6 +241,14 @@ export function DashboardScreen() {
           </>
         )}
       </Card>
+
+      <EmpreendimentoModal
+        open={modal !== null}
+        project={modal?.project ?? null}
+        onClose={() => setModal(null)}
+        // Criar e já cair no fluxo — o mesmo gesto do "Abrir".
+        onCreated={openProject}
+      />
     </div>
   );
 }

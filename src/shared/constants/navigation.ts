@@ -12,13 +12,6 @@ export interface NavEntry {
   icon: IconName;
 }
 
-export const DASHBOARD_ITEM: NavEntry = {
-  key: "dashboard",
-  label: "Empreendimentos",
-  href: "/dashboard",
-  icon: "building",
-};
-
 /** Passos do fluxo na sidebar em modo projeto ativo (WORKFLOW_STEPS do protótipo). */
 export const WORKFLOW_NAV: NavEntry[] = [
   { key: "materials-catalog", label: "Catálogo de materiais", href: "/catalogo", icon: "box" },
@@ -27,5 +20,5 @@ export const WORKFLOW_NAV: NavEntry[] = [
   { key: "publish", label: "Publicação", href: "/publicacao", icon: "check_circle" },
 ];
 
-/** Rotas que mantêm a sidebar em modo dashboard (como no protótipo: dashboard e project-setup). */
-export const DASHBOARD_MODE_ROUTES = ["/dashboard", "/config-base"];
+/** Rotas que mantêm a sidebar em modo dashboard. */
+export const DASHBOARD_MODE_ROUTES = ["/dashboard"];

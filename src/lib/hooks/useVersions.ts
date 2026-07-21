@@ -6,26 +6,30 @@ import { createVersion, listVersions, restoreVersion, type VersionInput } from "
 
 import { queryKeys } from "./queryKeys";
 
-export function useVersions() {
-  return useQuery({ queryKey: queryKeys.versions, queryFn: listVersions });
+export function useVersions(projectId: number | null) {
+  return useQuery({
+    queryKey: queryKeys.versions(projectId ?? 0),
+    queryFn: () => listVersions(projectId ?? 0),
+    enabled: projectId !== null,
+  });
 }
 
-export function useCreateVersion() {
+export function useCreateVersion(projectId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: VersionInput) => createVersion(input),
+    mutationFn: (input: VersionInput) => createVersion(projectId, input),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.versions });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.versions(projectId) });
     },
   });
 }
 
-export function useRestoreVersion() {
+export function useRestoreVersion(projectId: number) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => restoreVersion(id),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.versions });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.versions(projectId) });
     },
   });
 }

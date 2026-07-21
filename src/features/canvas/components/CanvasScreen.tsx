@@ -26,6 +26,7 @@ import {
 } from "@/lib/hooks/useTipologiaMutations";
 import { useTipologias } from "@/lib/hooks/useTipologias";
 import { cn } from "@/lib/utils";
+import { useRequireActiveProject } from "@/lib/hooks/useRequireActiveProject";
 import { MaterialImageModal } from "@/features/catalog";
 import { guessAmbIcon } from "@/features/typologies/ambIcons";
 import { AmbienteModal, type AmbienteFormValue } from "@/features/typologies/components/modals/AmbienteModal";
@@ -93,7 +94,8 @@ const EMPTY_COMP: Componente = {
 // store e refletem nas outras telas), não uma cópia local.
 export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
   const router = useRouter();
-  const { data: tipologias = [], isLoading: tipsLoading } = useTipologias();
+  const projectId = useRequireActiveProject();
+  const { data: tipologias = [], isLoading: tipsLoading } = useTipologias(projectId);
   const { data: materiais = [], isLoading: matsLoading } = useMateriais();
   const { data: kits = [], isLoading: kitsLoading } = useKits();
 
@@ -118,7 +120,7 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
   const [pickerBusy, setPickerBusy] = React.useState(false);
 
   // Mutations (Fase 5 + replaceUpgrade)
-  const createTip = useCreateTipologia();
+  const createTip = useCreateTipologia(projectId ?? 0);
   const updateTip = useUpdateTipologia();
   const deleteTip = useDeleteTipologia();
   const duplicateTip = useDuplicateTipologia();

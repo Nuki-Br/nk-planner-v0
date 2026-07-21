@@ -26,8 +26,8 @@ import {
   useSetPadrao,
 } from "@/lib/hooks/useTipologiaMutations";
 import { useTipologia } from "@/lib/hooks/useTipologias";
-import { useSelection } from "@/lib/store/selection";
 import { fmtBRL, fmtNum } from "@/lib/utils";
+import { useRequireActiveProject } from "@/lib/hooks/useRequireActiveProject";
 import { KitBadge } from "@/features/catalog/components/KitBadge";
 import type { Material, Unidade } from "@/shared/types/domain";
 
@@ -74,7 +74,7 @@ export function MaterialsConfigScreen({
   const { data: tipologia, isLoading } = useTipologia(Number(tipologiaId));
   const { data: materiais = [] } = useMateriais();
   const { data: kits = [] } = useKits();
-  const activeProjectId = useSelection((s) => s.activeProjectId);
+  const activeProjectId = useRequireActiveProject();
   const { data: project } = useProject(activeProjectId);
 
   const setPadraoMut = useSetPadrao();

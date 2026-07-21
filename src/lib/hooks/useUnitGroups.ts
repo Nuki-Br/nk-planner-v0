@@ -15,40 +15,54 @@ import {
 
 import { queryKeys } from "./queryKeys";
 
-export function useUnitGroups() {
-  return useQuery({ queryKey: queryKeys.unitGroups, queryFn: listUnitGroups });
+export function useUnitGroups(projectId: number | null) {
+  return useQuery({
+    queryKey: queryKeys.unitGroups(projectId ?? 0),
+    queryFn: () => listUnitGroups(projectId ?? 0),
+    enabled: projectId !== null,
+  });
 }
 
-export function useTorres() {
-  return useQuery({ queryKey: queryKeys.torres, queryFn: listTorres });
+export function useTorres(projectId: number | null) {
+  return useQuery({
+    queryKey: queryKeys.torres(projectId ?? 0),
+    queryFn: () => listTorres(projectId ?? 0),
+    enabled: projectId !== null,
+  });
 }
 
-/** Salva a lista completa de torres (config base do empreendimento). */
+/** Salva a lista completa de torres de um empreendimento. */
 export function useUpdateTorres() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (items: TorreInput[]) => updateTorres(items),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.torres });
+    // projectId vem nos args (e não no hook) porque a invalidação precisa dele.
+    mutationFn: ({ projectId, items }: { projectId: number; items: TorreInput[] }) =>
+      updateTorres(projectId, items),
+    onSuccess: (_torres, { projectId }) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.torres(projectId) });
       // Rename/exclusão muda o `torre` dos grupos e o TowerLabel do projeto.
-      void queryClient.invalidateQueries({ queryKey: queryKeys.unitGroups });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.unitGroups(projectId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.projects });
     },
   });
 }
 
+/**
+ * Invalida a RAIZ de unit-groups: as mutações por id (update/delete) não sabem
+ * de qual empreendimento é o grupo, e descobrir custaria um fetch a mais.
+ */
 function useUnitGroupMutation<TArgs, TResult>(mutationFn: (args: TArgs) => Promise<TResult>) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn,
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.unitGroups });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.unitGroupsRoot });
     },
   });
 }
 
-export function useCreateUnitGroup() {
-  return useUnitGroupMutation((input: UnitGroupInput) => createUnitGroup(input));
+export function useCreateUnitGroup(projectId: number) {
+  return useUnitGroupMutation((input: UnitGroupInput) => createUnitGroup(projectId, input));
 }
 
 export function useUpdateUnitGroup() {

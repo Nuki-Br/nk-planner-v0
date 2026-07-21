@@ -2,6 +2,7 @@
 // store de servidor, agora chamando as rotas /api/* via httpGet/httpSend. Ids de
 // domínio em `number`; a organização vem da sessão no servidor (o cliente nunca
 // envia org). Pendência não é mais uma tabela — deriva do custo (custo 0).
+import type { ProjectPayload } from "@/lib/api/handler";
 import { httpGet, httpSend } from "@/lib/api/http";
 import type {
   Ambiente,
@@ -46,6 +47,16 @@ export async function listProjects(): Promise<Project[]> {
 
 export async function getProject(id: number): Promise<Project | null> {
   return httpGet<Project | null>(`/api/projects/${id}`);
+}
+
+export interface ProjectInput {
+  nome: string;
+  /** Nomes das torres, na ordem — criadas na mesma transação do empreendimento. */
+  torres: string[];
+}
+
+export async function createProject(input: ProjectInput): Promise<Project> {
+  return httpSend<Project, ProjectInput>("/api/projects", "POST", input);
 }
 
 export async function updateProject(id: number, patch: ProjectPatch): Promise<Project> {
@@ -151,16 +162,22 @@ export async function deleteCategoria(id: number): Promise<void> {
 
 export type TipologiaInput = Pick<Tipologia, "nome" | "metragem" | "descricao" | "unidades">;
 
-export async function listTipologias(): Promise<Tipologia[]> {
-  return httpGet<Tipologia[]>("/api/tipologias");
+export async function listTipologias(projectId: number): Promise<Tipologia[]> {
+  return httpGet<Tipologia[]>(`/api/tipologias?projectId=${projectId}`);
 }
 
 export async function getTipologia(id: number): Promise<Tipologia | null> {
   return httpGet<Tipologia | null>(`/api/tipologias/${id}`);
 }
 
-export async function createTipologia(input: TipologiaInput): Promise<Tipologia> {
-  return httpSend<Tipologia, TipologiaInput>("/api/tipologias", "POST", input);
+export async function createTipologia(
+  projectId: number,
+  input: TipologiaInput
+): Promise<Tipologia> {
+  return httpSend<Tipologia, ProjectPayload<TipologiaInput>>("/api/tipologias", "POST", {
+    projectId,
+    input,
+  });
 }
 
 export async function updateTipologia(
@@ -457,8 +474,8 @@ export interface SharedInfo {
   ambShared: Record<string, string>;
 }
 
-export async function getSharedInfo(): Promise<SharedInfo> {
-  return httpGet<SharedInfo>("/api/shared-ambientes");
+export async function getSharedInfo(projectId: number): Promise<SharedInfo> {
+  return httpGet<SharedInfo>(`/api/shared-ambientes?projectId=${projectId}`);
 }
 
 /**
@@ -480,12 +497,18 @@ export async function linkAmbiente(
 
 export type UnitGroupInput = Omit<UnitGroup, "id">;
 
-export async function listUnitGroups(): Promise<UnitGroup[]> {
-  return httpGet<UnitGroup[]>("/api/unit-groups");
+export async function listUnitGroups(projectId: number): Promise<UnitGroup[]> {
+  return httpGet<UnitGroup[]>(`/api/unit-groups?projectId=${projectId}`);
 }
 
-export async function createUnitGroup(input: UnitGroupInput): Promise<UnitGroup> {
-  return httpSend<UnitGroup, UnitGroupInput>("/api/unit-groups", "POST", input);
+export async function createUnitGroup(
+  projectId: number,
+  input: UnitGroupInput
+): Promise<UnitGroup> {
+  return httpSend<UnitGroup, ProjectPayload<UnitGroupInput>>("/api/unit-groups", "POST", {
+    projectId,
+    input,
+  });
 }
 
 export async function updateUnitGroup(
@@ -505,13 +528,16 @@ export async function deleteUnitGroup(id: number): Promise<void> {
 
 export type TorreInput = { id: number | null; nome: string };
 
-export async function listTorres(): Promise<Torre[]> {
-  return httpGet<Torre[]>("/api/torres");
+export async function listTorres(projectId: number): Promise<Torre[]> {
+  return httpGet<Torre[]>(`/api/torres?projectId=${projectId}`);
 }
 
-/** Reconcilia a lista completa de torres do empreendimento âncora. */
-export async function updateTorres(items: TorreInput[]): Promise<Torre[]> {
-  return httpSend<Torre[], TorreInput[]>("/api/torres", "PUT", items);
+/** Reconcilia a lista completa de torres do empreendimento. */
+export async function updateTorres(projectId: number, items: TorreInput[]): Promise<Torre[]> {
+  return httpSend<Torre[], ProjectPayload<TorreInput[]>>("/api/torres", "PUT", {
+    projectId,
+    input: items,
+  });
 }
 
 // ─── Versions ─────────────────────────────────────────────────────────
@@ -522,12 +548,18 @@ export interface VersionInput {
   changes: VersionChanges;
 }
 
-export async function listVersions(): Promise<BudgetVersion[]> {
-  return httpGet<BudgetVersion[]>("/api/versions");
+export async function listVersions(projectId: number): Promise<BudgetVersion[]> {
+  return httpGet<BudgetVersion[]>(`/api/versions?projectId=${projectId}`);
 }
 
-export async function createVersion(input: VersionInput): Promise<BudgetVersion> {
-  return httpSend<BudgetVersion, VersionInput>("/api/versions", "POST", input);
+export async function createVersion(
+  projectId: number,
+  input: VersionInput
+): Promise<BudgetVersion> {
+  return httpSend<BudgetVersion, ProjectPayload<VersionInput>>("/api/versions", "POST", {
+    projectId,
+    input,
+  });
 }
 
 /** Marca a versão como atual (snapshot/restore real de estado — §12). */
@@ -548,8 +580,10 @@ export async function getComments(rowKey: string): Promise<Comment[]> {
 }
 
 /** Todas as threads (contadores de comentário por linha nas tabelas). */
-export async function listCommentThreads(): Promise<Record<string, Comment[]>> {
-  return httpGet<Record<string, Comment[]>>("/api/comments");
+export async function listCommentThreads(
+  projectId: number
+): Promise<Record<string, Comment[]>> {
+  return httpGet<Record<string, Comment[]>>(`/api/comments?projectId=${projectId}`);
 }
 
 export async function appendComment(rowKey: string, input: CommentInput): Promise<Comment> {
@@ -563,6 +597,12 @@ export async function appendComment(rowKey: string, input: CommentInput): Promis
 
 export type FillLinkInput = Pick<FillLink, "tipologiaIds" | "campos" | "prazo" | "senha">;
 
-export async function createFillLink(input: FillLinkInput): Promise<FillLink> {
-  return httpSend<FillLink, FillLinkInput>("/api/fill-links", "POST", input);
+export async function createFillLink(
+  projectId: number,
+  input: FillLinkInput
+): Promise<FillLink> {
+  return httpSend<FillLink, ProjectPayload<FillLinkInput>>("/api/fill-links", "POST", {
+    projectId,
+    input,
+  });
 }

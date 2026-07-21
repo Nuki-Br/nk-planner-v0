@@ -2,8 +2,8 @@ import type { BudgetColumn } from "@/shared/types/domain";
 
 // Colunas de cálculo padrão do Construtor de Preço. `expr` é a expressão padrão
 // da coluna, sobrescrevível célula a célula.
-// Usado APENAS no seeding (prisma/onboard.ts e prisma/seed.ts), que grava as
-// linhas e recebe o Id autoincrement real. Não há fallback em tempo de leitura:
+// Usado só na SEMEADURA — prisma/onboard.ts, prisma/seed.ts e createProject —,
+// que grava as linhas e recebe o Id autoincrement real. Sem fallback em leitura:
 // empreendimento sem colunas gravadas começa vazio. Os ids abaixo são inertes.
 export const TAX_COLUMNS_DEFAULT: BudgetColumn[] = [
   { id: 1, nome: "Taxa Construtora", expr: "=custo_troca * 8%", visivel: false },

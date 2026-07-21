@@ -10,7 +10,7 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
   const resolved = await getFillLinkByToken(params.token);
   if (!resolved) return fail("Link inválido ou expirado.", 404);
 
-  const { link, organizationId } = resolved;
+  const { link, organizationId, enterpriseId } = resolved;
   const { fills, senha, nome } = (await req.json()) as {
     fills: Record<string, PortalFill>;
     senha?: string;
@@ -21,5 +21,6 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
   }
   // Escopo do link: só materiais das tipologias liberadas podem ser preenchidos.
   const allowed = await getPortalMaterialIds(organizationId, link.tipologiaIds);
-  return publicRoute(() => submitPortalFills(organizationId, fills, allowed, nome));
+  // Grava no empreendimento do PRÓPRIO link — nunca no âncora da org.
+  return publicRoute(() => submitPortalFills(organizationId, enterpriseId, fills, allowed, nome));
 }

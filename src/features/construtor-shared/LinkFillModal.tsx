@@ -7,6 +7,7 @@ import { Button, Icon, Modal } from "@/components/ui";
 import { useCreateFillLink } from "@/lib/hooks/useFillLinks";
 import { useTipologias } from "@/lib/hooks/useTipologias";
 import { cn } from "@/lib/utils";
+import { useActiveProjectId } from "@/lib/hooks/useActiveProject";
 import type { FillLink, FillLinkCampos, Tipologia } from "@/shared/types/domain";
 
 /** Itens preenchíveis de uma tipologia (padrão + upgrades por componente). */
@@ -33,8 +34,9 @@ const CAMPOS: { key: keyof FillLinkCampos; label: string }[] = [
 // é persistido no store e o token abre /portal/[token].
 export function LinkFillModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const router = useRouter();
-  const { data: tipologias = [] } = useTipologias();
-  const createLink = useCreateFillLink();
+  const projectId = useActiveProjectId();
+  const { data: tipologias = [] } = useTipologias(projectId);
+  const createLink = useCreateFillLink(projectId ?? 0);
 
   const [link, setLink] = React.useState<FillLink | null>(null);
   const [copied, setCopied] = React.useState(false);

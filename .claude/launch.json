@@ -5,8 +5,12 @@
       "name": "planner-dev",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
-      "port": 3000,
-      "autoPort": true
+      "port": 3005,
+      "autoPort": true,
+      "creedentials": {
+        "email": "beta@nukibr.com",
+        "password": "nuki-beta-2026"
+      }
     }
   ]
 }

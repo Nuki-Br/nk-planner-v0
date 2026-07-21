@@ -3,10 +3,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
+  createProject,
   getProject,
   listProjects,
   publishProject,
   updateProject,
+  type ProjectInput,
   type ProjectPatch,
 } from "@/lib/data/store";
 
@@ -21,6 +23,17 @@ export function useProject(id: number | null) {
     queryKey: queryKeys.project(id ?? 0),
     queryFn: () => getProject(id ?? 0),
     enabled: id !== null,
+  });
+}
+
+/** Cria o empreendimento com as torres numa transação só (ver createProject). */
+export function useCreateProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: ProjectInput) => createProject(input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+    },
   });
 }
 

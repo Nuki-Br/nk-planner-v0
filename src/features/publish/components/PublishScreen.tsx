@@ -15,12 +15,12 @@ import {
 } from "@/components/ui";
 import { calcBudgetRow } from "@/lib/budget";
 import { getMaterial } from "@/lib/data/entities";
-import { useActiveProjectId } from "@/lib/hooks/useActiveProject";
 import { useBudgetColumns } from "@/lib/hooks/useBudgetColumns";
 import { useMateriais } from "@/lib/hooks/useMateriais";
 import { useProject, usePublishProject } from "@/lib/hooks/useProjects";
 import { useTipologias } from "@/lib/hooks/useTipologias";
 import { cn, fmtBRL } from "@/lib/utils";
+import { useRequireActiveProject } from "@/lib/hooks/useRequireActiveProject";
 import { NUKI_EMAIL, nukiWhatsAppUrl } from "@/shared/constants/contact";
 import type { Componente, Material, Tipologia } from "@/shared/types/domain";
 
@@ -65,9 +65,9 @@ function ChecklistRow({ item }: { item: ChecklistItem }) {
 // publicado (não bloqueia edição) e mostra a mensagem para avisar a Nuki.
 export function PublishScreen() {
   const router = useRouter();
-  const projectId = useActiveProjectId();
+  const projectId = useRequireActiveProject();
   const { data: project, isLoading: projectLoading } = useProject(projectId);
-  const { data: tipologias = [] } = useTipologias();
+  const { data: tipologias = [] } = useTipologias(projectId);
   const { data: materiais = [] } = useMateriais();
   const { data: cols = [] } = useBudgetColumns(projectId);
   const publish = usePublishProject();

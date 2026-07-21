@@ -3,8 +3,16 @@
 export const queryKeys = {
   projects: ["projects"] as const,
   project: (id: number) => ["projects", id] as const,
-  tipologias: ["tipologias"] as const,
-  tipologia: (id: number) => ["tipologias", id] as const,
+  /**
+   * Raiz das tipologias — existe SÓ para invalidação em massa (useTreeMutation
+   * cobre lista + detalhes num invalidate). Não a substitua por `tipologias(0)`:
+   * as 21 mutações da árvore dependem dela ser um prefixo puro.
+   */
+  tipologiasRoot: ["tipologias"] as const,
+  /** O discriminante "list"/"detail" evita que ["tipologias", projectId] e
+   *  ["tipologias", id] virem a MESMA key com formas incompatíveis. */
+  tipologias: (projectId: number) => ["tipologias", "list", projectId] as const,
+  tipologia: (id: number) => ["tipologias", "detail", id] as const,
   materiais: ["materiais"] as const,
   kits: ["kits"] as const,
   /**
@@ -23,14 +31,22 @@ export const queryKeys = {
   /** Prefixo de TODAS as listas de catálogo. */
   catalogEntitiesAll: ["catalog-entities"] as const,
   categorias: ["categorias"] as const,
-  unitGroups: ["unit-groups"] as const,
-  torres: ["torres"] as const,
+  unitGroups: (projectId: number) => ["unit-groups", projectId] as const,
+  /** Raiz — para quem invalida sem saber de qual empreendimento é o grupo. */
+  unitGroupsRoot: ["unit-groups"] as const,
+  torres: (projectId: number) => ["torres", projectId] as const,
   budgetColumns: (projectId: number) => ["budget-columns", projectId] as const,
-  sharedAmbientes: ["shared-ambientes"] as const,
-  versions: ["versions"] as const,
+  sharedAmbientes: (projectId: number) => ["shared-ambientes", projectId] as const,
+  sharedAmbientesRoot: ["shared-ambientes"] as const,
+  versions: (projectId: number) => ["versions", projectId] as const,
+  /**
+   * Raiz dos comentários — cobre a thread aberta E o mapa de contadores num
+   * invalidate só (é disso que useAppendComment depende).
+   */
+  commentsRoot: ["comments"] as const,
   /** rowKey = String(optionId) (id da linha Material). */
-  comments: (rowKey: string) => ["comments", rowKey] as const,
-  commentThreads: ["comments"] as const,
+  comments: (rowKey: string) => ["comments", "row", rowKey] as const,
+  commentThreads: (projectId: number) => ["comments", "threads", projectId] as const,
   /** Payload público do portal — muda com o token e com a senha fornecida. */
   portal: (token: string, senha: string | null) => ["portal", token, senha ?? ""] as const,
 

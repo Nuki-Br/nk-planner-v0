@@ -4,6 +4,7 @@ import React from "react";
 
 import { Button, Icon, Input, Modal, Textarea } from "@/components/ui";
 import { useCreateTipologia } from "@/lib/hooks/useTipologiaMutations";
+import { useActiveProjectId } from "@/lib/hooks/useActiveProject";
 import type { Tipologia } from "@/shared/types/domain";
 
 import { CaracteristicasPicker } from "./CaracteristicasPicker";
@@ -18,7 +19,8 @@ interface NewTipologiaModalProps {
 // Quartos/suítes, características e grupos são locais como no protótipo (o
 // domínio ainda não os comporta); metragem/unidades saíram da UI e nascem 0.
 export function NewTipologiaModal({ open, onClose, onCreated }: NewTipologiaModalProps) {
-  const createTipologia = useCreateTipologia();
+  const projectId = useActiveProjectId();
+  const createTipologia = useCreateTipologia(projectId ?? 0);
   const [nome, setNome] = React.useState("");
   const [descricao, setDescricao] = React.useState("");
   const [quartos, setQuartos] = React.useState("");

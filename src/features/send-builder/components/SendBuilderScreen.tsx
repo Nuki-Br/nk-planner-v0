@@ -13,10 +13,10 @@ import {
   StatCard,
   Textarea,
 } from "@/components/ui";
-import { useActiveProjectId } from "@/lib/hooks/useActiveProject";
 import { useCreateFillLink } from "@/lib/hooks/useFillLinks";
 import { useProject, useUpdateProject } from "@/lib/hooks/useProjects";
 import { useTipologias } from "@/lib/hooks/useTipologias";
+import { useRequireActiveProject } from "@/lib/hooks/useRequireActiveProject";
 import type { FillLink, Tipologia } from "@/shared/types/domain";
 
 /** Itens preenchíveis (opções por componente). */
@@ -38,10 +38,10 @@ function todayBR(): string {
 // para copiar / abrir o portal / seguir para a revisão.
 export function SendBuilderScreen() {
   const router = useRouter();
-  const projectId = useActiveProjectId();
+  const projectId = useRequireActiveProject();
   const { data: project, isLoading: projectLoading } = useProject(projectId);
-  const { data: tipologias = [] } = useTipologias();
-  const createLink = useCreateFillLink();
+  const { data: tipologias = [] } = useTipologias(projectId);
+  const createLink = useCreateFillLink(projectId ?? 0);
   const updateProject = useUpdateProject();
 
   const [emails, setEmails] = React.useState("");

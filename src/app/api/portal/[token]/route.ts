@@ -2,7 +2,6 @@ import type { NextRequest } from "next/server";
 
 import { fail, publicRoute } from "@/lib/api/handler";
 import {
-  getActiveProjectId,
   getFillLinkByToken,
   getPortalFills,
   getPortalMaterialIds,
@@ -19,7 +18,7 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
   const resolved = await getFillLinkByToken(params.token);
   if (!resolved) return publicRoute(() => Promise.resolve(null));
 
-  const { link, organizationId } = resolved;
+  const { link, organizationId, enterpriseId } = resolved;
   const senha = req.nextUrl.searchParams.get("senha");
   if (link.senha !== null && senha !== null && senha !== link.senha) {
     return fail("Senha incorreta.", 401);
@@ -27,8 +26,8 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
 
   const protegido = link.senha !== null && senha === null;
   return publicRoute(async (): Promise<PortalData> => {
-    const activeId = await getActiveProjectId(organizationId);
-    const project = activeId ? await getProject(organizationId, activeId) : null;
+    // O empreendimento é o do PRÓPRIO link, não o âncora da org.
+    const project = await getProject(organizationId, enterpriseId);
     if (protegido) {
       return {
         protegido: true,
@@ -41,9 +40,9 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
       };
     }
     const [tipologias, materiais, fills, scopedIds] = await Promise.all([
-      listTipologias(organizationId),
+      listTipologias(organizationId, enterpriseId),
       listMateriais(organizationId),
-      getPortalFills(organizationId),
+      getPortalFills(organizationId, enterpriseId),
       getPortalMaterialIds(organizationId, link.tipologiaIds),
     ]);
     // Escopo do link: só as tipologias liberadas e os BaseMaterials preenchíveis

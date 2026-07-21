@@ -42,6 +42,7 @@ import { useTipologias } from "@/lib/hooks/useTipologias";
 import { useUnitGroups } from "@/lib/hooks/useUnitGroups";
 import { useSelection } from "@/lib/store/selection";
 import { cn } from "@/lib/utils";
+import { useRequireActiveProject } from "@/lib/hooks/useRequireActiveProject";
 import { MaterialImageModal } from "@/features/catalog";
 import { UnitGroupsDrawer } from "@/features/unit-groups/components/UnitGroupsDrawer";
 import type { Ambiente, Componente, Material, Tipologia } from "@/shared/types/domain";
@@ -70,12 +71,12 @@ const configuredComps = (tip: Tipologia) =>
 // store via reorderAmbientes/reorderComponentes.
 export function TypologiesScreen() {
   const router = useRouter();
-  const { data: tipologias = [], isLoading: tipsLoading } = useTipologias();
+  const activeProjectId = useRequireActiveProject();
+  const { data: tipologias = [], isLoading: tipsLoading } = useTipologias(activeProjectId);
   const { data: materiais = [] } = useMateriais();
   const { data: kits = [] } = useKits();
-  const { data: unitGroups = [] } = useUnitGroups();
-  const { data: sharedInfo } = useSharedInfo();
-  const activeProjectId = useSelection((s) => s.activeProjectId);
+  const { data: unitGroups = [] } = useUnitGroups(activeProjectId);
+  const { data: sharedInfo } = useSharedInfo(activeProjectId);
   const setSelectedTipologia = useSelection((s) => s.setSelectedTipologia);
   const { data: project } = useProject(activeProjectId);
 

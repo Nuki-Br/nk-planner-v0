@@ -12,8 +12,12 @@ import {
 import { queryKeys } from "./queryKeys";
 
 /** Todas as threads (rowKey → Comment[]) — contadores por linha. */
-export function useCommentThreads() {
-  return useQuery({ queryKey: queryKeys.commentThreads, queryFn: listCommentThreads });
+export function useCommentThreads(projectId: number | null) {
+  return useQuery({
+    queryKey: queryKeys.commentThreads(projectId ?? 0),
+    queryFn: () => listCommentThreads(projectId ?? 0),
+    enabled: projectId !== null,
+  });
 }
 
 /** Thread de comentários de uma linha (rowKey = `${compId}-${optId}`). */
@@ -31,8 +35,8 @@ export function useAppendComment() {
     mutationFn: ({ rowKey, input }: { rowKey: string; input: CommentInput }) =>
       appendComment(rowKey, input),
     onSuccess: () => {
-      // Prefixo ["comments"] cobre a thread específica e o mapa de contadores.
-      void queryClient.invalidateQueries({ queryKey: queryKeys.commentThreads });
+      // A RAIZ ["comments"] cobre a thread específica e o mapa de contadores.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.commentsRoot });
     },
   });
 }

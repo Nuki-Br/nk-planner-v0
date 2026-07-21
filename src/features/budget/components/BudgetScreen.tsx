@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import { AlertModal, Button, EmptyState, Icon, Modal, PageHeader, Textarea } from "@/components/ui";
 import { columnsAffectedByExtendedConvention, rowKey } from "@/lib/budget";
 import { getKit, getMaterial } from "@/lib/data/entities";
-import { useActiveProjectId } from "@/lib/hooks/useActiveProject";
 import { useBudgetColumns, useUpdateBudgetColumns } from "@/lib/hooks/useBudgetColumns";
 import { useCommentThreads } from "@/lib/hooks/useComments";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
@@ -22,6 +21,7 @@ import {
 } from "@/lib/hooks/useTipologiaMutations";
 import { useCreateVersion, useRestoreVersion, useVersions } from "@/lib/hooks/useVersions";
 import { cn, fmtBRL, fmtNum } from "@/lib/utils";
+import { useRequireActiveProject } from "@/lib/hooks/useRequireActiveProject";
 import { CommentThreadPanel, type ThreadRow } from "@/features/construtor-shared/CommentThreadPanel";
 import { LinkFillModal } from "@/features/construtor-shared/LinkFillModal";
 import type {
@@ -264,18 +264,18 @@ function FillInput({
 export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: PendingFillMode }) {
   const router = useRouter();
   const currentUser = useCurrentUser();
-  const projectId = useActiveProjectId();
+  const projectId = useRequireActiveProject();
   const { data: project } = useProject(projectId);
-  const { data: tipologias = [], isLoading: tipsLoading } = useTipologias();
+  const { data: tipologias = [], isLoading: tipsLoading } = useTipologias(projectId);
   const { data: materiais = [] } = useMateriais();
   const { data: kits = [] } = useKits();
   const { data: cols = [] } = useBudgetColumns(projectId);
-  const { data: versions = [] } = useVersions();
-  const { data: commentThreads = {} } = useCommentThreads();
+  const { data: versions = [] } = useVersions(projectId);
+  const { data: commentThreads = {} } = useCommentThreads(projectId);
   const updateCols = useUpdateBudgetColumns();
   const updateMaterial = useUpdateMaterial();
-  const createVersion = useCreateVersion();
-  const restoreVersion = useRestoreVersion();
+  const createVersion = useCreateVersion(projectId ?? 0);
+  const restoreVersion = useRestoreVersion(projectId ?? 0);
   const addCostMut = useAddCostComponent();
   const updateCostMut = useUpdateCostComponent();
   const removeCostMut = useRemoveCostComponent();

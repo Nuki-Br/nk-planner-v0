@@ -1,20 +1,18 @@
 import type { NextRequest } from "next/server";
 
-import { withOrg } from "@/lib/api/handler";
-import {
-  appendComment,
-  getComments,
-  listCommentThreads,
-  type CommentInput,
-} from "@/lib/server/store";
-import type { Comment } from "@/shared/types/domain";
+import { withOrg, withProject } from "@/lib/api/handler";
+import { appendComment, getComments, listCommentThreads, type CommentInput } from "@/lib/server/store";
 
-/** GET ?rowKey= → thread única; sem query → todas as threads (contadores). */
+/**
+ * GET ?rowKey= → thread única; sem query → todas as threads do empreendimento.
+ * Só o segundo ramo precisa de projectId: a thread única é escopada pelo próprio
+ * Material (que já resolve org + empreendimento), então exigir ?projectId= nela
+ * seria pedir um dado que o chamador não precisa ter.
+ */
 export async function GET(req: NextRequest) {
   const rowKey = req.nextUrl.searchParams.get("rowKey");
-  return withOrg<Comment[] | Record<string, Comment[]>>((org) =>
-    rowKey !== null ? getComments(org, rowKey) : listCommentThreads(org)
-  );
+  if (rowKey !== null) return withOrg((org) => getComments(org, rowKey));
+  return withProject(req, listCommentThreads);
 }
 
 export async function POST(req: NextRequest) {

@@ -8,9 +8,11 @@
 // quantitativos de kit variam POR PLANTA em BlueprintRoomComponent / MaterialKitUsage.
 // Catálogo = BaseMaterial (Type single|kit) + MaterialKitItem, escopado por Organization.
 //
-// Nota (beta): o domínio é single-Enterprise por org (onboarding = 1 org = 1
-// empreendimento). `activeEnterprise*` resolve o empreendimento âncora (o mais
-// antigo). Escopo multi-empreendimento entra quando o produto precisar.
+// Escopo: uma org tem N empreendimentos. Toda fn por empreendimento recebe
+// `projectId` explícito, JÁ validado contra a org na borda por
+// withProject/withProjectBody (lib/api/handler.ts) — por isso não repetimos o
+// assertEnterprise aqui dentro. O catálogo (BaseMaterial/kits/categorias) é a
+// única entidade compartilhada entre empreendimentos: escopa só por org.
 //
 // Conversões de borda:
 //   custo reais↔cents: fromCents(null|0 → 0); toCentsOrNull(reais>0 ? round : null).
@@ -22,6 +24,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { assertMediaFileInOrg } from "@/lib/server/media";
 import { resolveMediaUrl } from "@/lib/server/mediaRules";
+import { TAX_COLUMNS_DEFAULT } from "@/shared/constants/budget";
 import type {
   Ambiente,
   ImagemVinculada,
@@ -132,32 +135,6 @@ async function assertImagemInOrg(
   if (imagem?.mediaFileId != null) {
     await assertMediaFileInOrg(organizationId, imagem.mediaFileId);
   }
-}
-
-// ─── Empreendimento âncora (single-Enterprise por org no beta) ──────────
-
-async function activeEnterpriseIdOrNull(organizationId: string): Promise<number | null> {
-  const e = await prisma.enterprise.findFirst({
-    where: { OrganizationId: organizationId },
-    orderBy: { CreatedAt: "asc" },
-    select: { Id: true },
-  });
-  return e?.Id ?? null;
-}
-
-async function activeEnterpriseId(organizationId: string): Promise<number> {
-  const id = await activeEnterpriseIdOrNull(organizationId);
-  if (id == null) throw new Error("Nenhum empreendimento encontrado.");
-  return id;
-}
-
-/**
- * Empreendimento âncora da org (MVP single-project): o mais antigo criado.
- * null se a org ainda não tem empreendimento. Mantém o nome legado usado pelo
- * portal e por submitPortalFills.
- */
-export async function getActiveProjectId(organizationId: string): Promise<number | null> {
-  return activeEnterpriseIdOrNull(organizationId);
 }
 
 // ─── Categorias de catálogo (MaterialCategory por org) ──────────────────
@@ -597,6 +574,60 @@ export async function getProject(organizationId: string, id: number): Promise<Pr
   return row ? toProject(row) : null;
 }
 
+export interface ProjectInput {
+  nome: string;
+  /** Nomes das torres, na ordem. Na criação toda torre é nova — daí string[]. */
+  torres: string[];
+}
+
+/**
+ * Cria o empreendimento COM as torres numa transação só (o create aninhado do
+ * Prisma): dois requests separados deixariam um empreendimento órfão sem torres
+ * se o segundo falhasse.
+ *
+ * Semeia TAX_COLUMNS_DEFAULT como o onboarding faz — getBudgetColumns não tem
+ * fallback em leitura (de propósito: o fallback antigo devolvia ids inexistentes
+ * e quebrava os overrides por célula), então sem semear aqui o segundo
+ * empreendimento da org abriria o Construtor de Preço vazio enquanto o primeiro
+ * abre com as três colunas.
+ */
+export async function createProject(
+  organizationId: string,
+  input: ProjectInput
+): Promise<Project> {
+  const nome = input.nome.trim();
+  if (nome === "") throw new Error("Nome do empreendimento é obrigatório.");
+  const torres = normalizeTowerNames(input.torres);
+
+  // Incorporadora = nome da org, igual ao onboarding: sem isso o card
+  // "Incorporadora" sumiria só para os projetos criados pela UI.
+  const org = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: { name: true },
+  });
+
+  const row = await prisma.enterprise.create({
+    data: {
+      OrganizationId: organizationId,
+      Name: nome,
+      Developer: org?.name ?? null,
+      Status: "rascunho",
+      TowerLabel: towerLabel(torres),
+      Towers: { create: torres.map((t, i) => ({ Name: t, Position: i })) },
+      BudgetColumns: {
+        create: TAX_COLUMNS_DEFAULT.map((c, i) => ({
+          Name: c.nome,
+          Expr: c.expr,
+          Visible: c.visivel,
+          Position: i,
+        })),
+      },
+    },
+    include: ENTERPRISE_INCLUDE,
+  });
+  return toProject(row);
+}
+
 export async function updateProject(
   organizationId: string,
   id: number,
@@ -690,7 +721,12 @@ export async function updateBudgetColumns(
   return getBudgetColumns(organizationId, projectId);
 }
 
-async function assertEnterprise(organizationId: string, id: number): Promise<void> {
+/**
+ * Valida que o empreendimento existe E pertence à org. É a checagem canônica de
+ * escopo: withProject/withProjectBody a chamam na borda para toda rota por
+ * empreendimento (ver lib/api/handler.ts).
+ */
+export async function assertEnterprise(organizationId: string, id: number): Promise<void> {
   const e = await prisma.enterprise.findFirst({
     where: { Id: id, OrganizationId: organizationId },
     select: { Id: true },
@@ -991,11 +1027,12 @@ export async function deleteKit(organizationId: string, id: number): Promise<voi
 
 export type TipologiaInput = Pick<Tipologia, "nome" | "metragem" | "descricao" | "unidades">;
 
-export async function listTipologias(organizationId: string): Promise<Tipologia[]> {
-  const enterpriseId = await activeEnterpriseIdOrNull(organizationId);
-  if (enterpriseId == null) return [];
+export async function listTipologias(
+  organizationId: string,
+  projectId: number
+): Promise<Tipologia[]> {
   const rows = await prisma.blueprint.findMany({
-    where: { EnterpriseId: enterpriseId },
+    where: { EnterpriseId: projectId },
     include: BLUEPRINT_INCLUDE,
     orderBy: { Position: "asc" },
   });
@@ -1012,9 +1049,10 @@ export async function getTipologia(organizationId: string, id: number): Promise<
 
 export async function createTipologia(
   organizationId: string,
+  projectId: number,
   input: TipologiaInput
 ): Promise<Tipologia> {
-  const enterpriseId = await activeEnterpriseId(organizationId);
+  const enterpriseId = projectId;
   const agg = await prisma.blueprint.aggregate({
     where: { EnterpriseId: enterpriseId },
     _max: { Position: true },
@@ -1780,13 +1818,14 @@ export interface SharedInfo {
   ambShared: Record<string, string>;
 }
 
-export async function getSharedInfo(organizationId: string): Promise<SharedInfo> {
-  const enterpriseId = await activeEnterpriseIdOrNull(organizationId);
+export async function getSharedInfo(
+  organizationId: string,
+  projectId: number
+): Promise<SharedInfo> {
   const sharedReg: Record<string, { tips: string[] }> = {};
   const ambShared: Record<string, string> = {};
-  if (enterpriseId == null) return { sharedReg, ambShared };
   const rooms = await prisma.room.findMany({
-    where: { EnterpriseId: enterpriseId },
+    where: { EnterpriseId: projectId },
     select: { Id: true, BlueprintRooms: { select: { BlueprintId: true } } },
   });
   for (const room of rooms) {
@@ -1905,11 +1944,12 @@ function toUnitGroup(row: UnitGroupRow): UnitGroup {
   return { id: row.Id, nome: row.Name, torre: row.Tower?.Name ?? "", unidades: row.UnitNumbers };
 }
 
-export async function listUnitGroups(organizationId: string): Promise<UnitGroup[]> {
-  const enterpriseId = await activeEnterpriseIdOrNull(organizationId);
-  if (enterpriseId == null) return [];
+export async function listUnitGroups(
+  organizationId: string,
+  projectId: number
+): Promise<UnitGroup[]> {
   const rows = await prisma.unitGroup.findMany({
-    where: { EnterpriseId: enterpriseId },
+    where: { EnterpriseId: projectId },
     include: { Tower: true },
     orderBy: { Id: "asc" },
   });
@@ -1918,9 +1958,10 @@ export async function listUnitGroups(organizationId: string): Promise<UnitGroup[
 
 export async function createUnitGroup(
   organizationId: string,
+  projectId: number,
   input: UnitGroupInput
 ): Promise<UnitGroup> {
-  const enterpriseId = await activeEnterpriseId(organizationId);
+  const enterpriseId = projectId;
   const towerId = await resolveTowerId(enterpriseId, input.torre);
   const row = await prisma.unitGroup.create({
     data: { EnterpriseId: enterpriseId, Name: input.nome, TowerId: towerId, UnitNumbers: input.unidades },
@@ -1957,11 +1998,9 @@ export async function deleteUnitGroup(organizationId: string, id: number): Promi
   if (res.count === 0) throw new Error("Grupo de unidades não encontrado.");
 }
 
-export async function listTorres(organizationId: string): Promise<Torre[]> {
-  const enterpriseId = await activeEnterpriseIdOrNull(organizationId);
-  if (enterpriseId == null) return [];
+export async function listTorres(organizationId: string, projectId: number): Promise<Torre[]> {
   const rows = await prisma.tower.findMany({
-    where: { EnterpriseId: enterpriseId },
+    where: { EnterpriseId: projectId },
     orderBy: { Position: "asc" },
   });
   return rows.map((r) => ({ id: r.Id, nome: r.Name }));
@@ -1976,27 +2015,40 @@ function towerLabel(nomes: string[]): string | null {
   return `${nomes.length} torres`;
 }
 
+/** Rejeita duplicados case-insensitive. Compartilhado por create e update. */
+function assertNoDuplicateTowerNames(nomes: string[]): void {
+  const seen = new Set<string>();
+  for (const nome of nomes) {
+    const key = nome.toLowerCase();
+    if (seen.has(key)) throw new Error("Nomes de torre duplicados.");
+    seen.add(key);
+  }
+}
+
+/** trim + descarta vazios + rejeita duplicados — normalização da criação. */
+function normalizeTowerNames(nomes: string[]): string[] {
+  const trimmed = nomes.map((n) => n.trim()).filter((n) => n !== "");
+  assertNoDuplicateTowerNames(trimmed);
+  return trimmed;
+}
+
 /**
- * Reconcilia a lista COMPLETA de torres do empreendimento âncora — por id, não
+ * Reconcilia a lista COMPLETA de torres do empreendimento — por id, não
  * delete-all+recreate: UnitGroup.TowerId (SetNull) perderia o vínculo dos
  * grupos a cada salvamento. Grupos de torres removidas caem em "Sem torre
  * definida" (comportamento do FK).
  */
 export async function updateTorres(
   organizationId: string,
+  projectId: number,
   items: TorreInput[]
 ): Promise<Torre[]> {
-  const enterpriseId = await activeEnterpriseId(organizationId);
+  const enterpriseId = projectId;
 
   const normalized = items
     .map((t) => ({ id: t.id, nome: t.nome.trim() }))
     .filter((t) => t.nome !== "");
-  const seen = new Set<string>();
-  for (const t of normalized) {
-    const key = t.nome.toLowerCase();
-    if (seen.has(key)) throw new Error("Nomes de torre duplicados.");
-    seen.add(key);
-  }
+  assertNoDuplicateTowerNames(normalized.map((t) => t.nome));
 
   const current = await prisma.tower.findMany({
     where: { EnterpriseId: enterpriseId },
@@ -2029,7 +2081,7 @@ export async function updateTorres(
     }),
   ]);
 
-  return listTorres(organizationId);
+  return listTorres(organizationId, projectId);
 }
 
 // ─── Versions (BudgetVersion) ───────────────────────────────────────────
@@ -2052,11 +2104,12 @@ function toVersion(row: Prisma.BudgetVersionGetPayload<object>): BudgetVersion {
   };
 }
 
-export async function listVersions(organizationId: string): Promise<BudgetVersion[]> {
-  const enterpriseId = await activeEnterpriseIdOrNull(organizationId);
-  if (enterpriseId == null) return [];
+export async function listVersions(
+  organizationId: string,
+  projectId: number
+): Promise<BudgetVersion[]> {
   const rows = await prisma.budgetVersion.findMany({
-    where: { EnterpriseId: enterpriseId },
+    where: { EnterpriseId: projectId },
     orderBy: { Position: "asc" },
   });
   return rows.map(toVersion);
@@ -2064,9 +2117,10 @@ export async function listVersions(organizationId: string): Promise<BudgetVersio
 
 export async function createVersion(
   organizationId: string,
+  projectId: number,
   input: VersionInput
 ): Promise<BudgetVersion> {
-  const enterpriseId = await activeEnterpriseId(organizationId);
+  const enterpriseId = projectId;
   const count = await prisma.budgetVersion.count({ where: { EnterpriseId: enterpriseId } });
   const agg = await prisma.budgetVersion.aggregate({
     where: { EnterpriseId: enterpriseId },
@@ -2145,13 +2199,12 @@ export async function getComments(organizationId: string, rowKey: string): Promi
 
 /** Todas as threads (contadores por linha) — keyed por String(MaterialId). */
 export async function listCommentThreads(
-  organizationId: string
+  organizationId: string,
+  projectId: number
 ): Promise<Record<string, Comment[]>> {
-  const enterpriseId = await activeEnterpriseIdOrNull(organizationId);
   const threads: Record<string, Comment[]> = {};
-  if (enterpriseId == null) return threads;
   const rows = await prisma.comment.findMany({
-    where: { EnterpriseId: enterpriseId },
+    where: { EnterpriseId: projectId },
     orderBy: { CreatedAt: "asc" },
   });
   for (const r of rows) {
@@ -2203,9 +2256,10 @@ function toFillLink(row: Prisma.FillLinkGetPayload<object>): FillLink {
 
 export async function createFillLink(
   organizationId: string,
+  projectId: number,
   input: FillLinkInput
 ): Promise<FillLink> {
-  const enterpriseId = await activeEnterpriseId(organizationId);
+  const enterpriseId = projectId;
   const row = await prisma.fillLink.create({
     data: {
       EnterpriseId: enterpriseId,
@@ -2222,24 +2276,33 @@ export async function createFillLink(
   return toFillLink(row);
 }
 
-/** Resolução do token do portal — PÚBLICA (retorna também a org do link). */
+/**
+ * Resolução do token do portal — PÚBLICA. Devolve a org E o empreendimento do
+ * link: o FillLink nasce amarrado a um EnterpriseId específico, então ler de
+ * volta pelo empreendimento âncora escreveria fills no projeto errado assim que
+ * a org tivesse mais de um.
+ */
 export async function getFillLinkByToken(
   token: string
-): Promise<{ link: FillLink; organizationId: string } | null> {
+): Promise<{ link: FillLink; organizationId: string; enterpriseId: number } | null> {
   const row = await prisma.fillLink.findUnique({
     where: { Token: token },
     include: { Enterprise: { select: { OrganizationId: true } } },
   });
-  return row ? { link: toFillLink(row), organizationId: row.Enterprise.OrganizationId } : null;
+  if (!row) return null;
+  return {
+    link: toFillLink(row),
+    organizationId: row.Enterprise.OrganizationId,
+    enterpriseId: row.EnterpriseId,
+  };
 }
 
 export async function getPortalFills(
-  organizationId: string
+  organizationId: string,
+  projectId: number
 ): Promise<Record<string, PortalFill>> {
-  const enterpriseId = await activeEnterpriseIdOrNull(organizationId);
   const fills: Record<string, PortalFill> = {};
-  if (enterpriseId == null) return fills;
-  const rows = await prisma.portalFill.findMany({ where: { EnterpriseId: enterpriseId } });
+  const rows = await prisma.portalFill.findMany({ where: { EnterpriseId: projectId } });
   for (const r of rows) fills[String(r.BaseMaterialId)] = { mat: r.Mat, mo: r.Mo, comment: r.Comment };
   return fills;
 }
@@ -2367,11 +2430,12 @@ async function syncConstrutoraComments(
  */
 export async function submitPortalFills(
   organizationId: string,
+  projectId: number,
   fills: Record<string, PortalFill>,
   allowedBaseMaterialIds: Set<number>,
   authorName?: string
 ): Promise<number> {
-  const enterpriseId = await activeEnterpriseId(organizationId);
+  const enterpriseId = projectId;
 
   // Escopo do link: descarta fills fora das plantas liberadas.
   const scoped = Object.entries(fills).filter(([baseId]) => allowedBaseMaterialIds.has(Number(baseId)));

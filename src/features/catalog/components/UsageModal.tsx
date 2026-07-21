@@ -3,6 +3,7 @@
 import { Button, EmptyState, Modal, StatusBadge } from "@/components/ui";
 import { useTipologias } from "@/lib/hooks/useTipologias";
 import { cn } from "@/lib/utils";
+import { useActiveProjectId } from "@/lib/hooks/useActiveProject";
 import type { Material } from "@/shared/types/domain";
 
 import { getMaterialUsage } from "../usage";
@@ -15,7 +16,8 @@ interface UsageModalProps {
 
 /** Modal "Onde este material é usado": Tipologia/Ambiente/Componente/Função. */
 export function UsageModal({ open, onClose, material }: UsageModalProps) {
-  const { data: tipologias = [] } = useTipologias();
+  const projectId = useActiveProjectId();
+  const { data: tipologias = [] } = useTipologias(projectId);
   const usages = material ? getMaterialUsage(tipologias, material.id) : [];
 
   return (

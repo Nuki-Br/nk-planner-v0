@@ -24,7 +24,7 @@ import { useKits, useUpdateKit } from "@/lib/hooks/useKits";
 import { useMateriais, useUpdateMaterial } from "@/lib/hooks/useMateriais";
 import { useProject } from "@/lib/hooks/useProjects";
 import { useTipologias } from "@/lib/hooks/useTipologias";
-import { useSelection } from "@/lib/store/selection";
+import { useRequireActiveProject } from "@/lib/hooks/useRequireActiveProject";
 import type { Kit, Material } from "@/shared/types/domain";
 
 import { getUsageCounts } from "../usage";
@@ -71,14 +71,14 @@ const SORT_COLUMNS = Object.entries(SORT_VALUES).map(([key, sortValue]) => ({
 
 // Tela 6 — Catálogo de materiais e kits (protótipo: MaterialsCatalogScreen).
 export function CatalogScreen() {
+  const activeProjectId = useRequireActiveProject();
   const { data: materiais = [], isLoading: matLoading, isError: matError, refetch: refetchMat } =
     useMateriais();
   const { data: kits = [], isLoading: kitLoading } = useKits();
   const { data: categoriasCatalogo = [] } = useCategorias();
-  const { data: tipologias = [] } = useTipologias();
+  const { data: tipologias = [] } = useTipologias(activeProjectId);
   const updateMaterial = useUpdateMaterial();
   const updateKit = useUpdateKit();
-  const activeProjectId = useSelection((s) => s.activeProjectId);
   const { data: project } = useProject(activeProjectId);
 
   const [search, setSearch] = React.useState("");

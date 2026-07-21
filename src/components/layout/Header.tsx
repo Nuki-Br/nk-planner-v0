@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 
+import { ProjectSwitcher } from "@/components/layout/ProjectSwitcher";
 import { Icon, Skeleton, StatusBadge } from "@/components/ui";
 import { useActiveProjectId } from "@/lib/hooks/useActiveProject";
 import { useProject } from "@/lib/hooks/useProjects";
@@ -31,7 +32,7 @@ interface HeaderProps {
 // do React Query junto com a sessão.
 export function Header({ orgName, email, inProject }: HeaderProps) {
   const router = useRouter();
-  const clearSelection = useSelection((s) => s.clearSelection);
+  const clearSubSelection = useSelection((s) => s.clearSubSelection);
   const projectId = useActiveProjectId();
   const { data: project, isLoading: projectLoading } = useProject(
     inProject ? projectId : null,
@@ -43,10 +44,10 @@ export function Header({ orgName, email, inProject }: HeaderProps) {
     window.location.href = "/login";
   };
 
-  // Voltar limpa a seleção antes de navegar para o dashboard não piscar o
-  // projeto antigo enquanto a rota troca.
+  // Só as sub-seleções: voltar ao dashboard não desfaz a escolha do
+  // empreendimento (o Header já o esconde via inProject).
   const backToDashboard = () => {
-    clearSelection();
+    clearSubSelection();
     router.push("/dashboard");
   };
 
@@ -80,9 +81,7 @@ export function Header({ orgName, email, inProject }: HeaderProps) {
             </button>
             {project ? (
               <>
-                <span className="max-w-[280px] truncate text-[13px] font-bold text-neutral-gray-11">
-                  {project.nome}
-                </span>
+                <ProjectSwitcher project={project} />
                 <StatusBadge status={project.status} />
               </>
             ) : projectLoading ? (

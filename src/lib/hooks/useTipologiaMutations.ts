@@ -48,7 +48,7 @@ function useTreeMutation<TArgs, TResult>(
   return useMutation({
     mutationFn,
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.tipologias });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.tipologiasRoot });
       for (const key of extraKeys) {
         void queryClient.invalidateQueries({ queryKey: key });
       }
@@ -58,8 +58,8 @@ function useTreeMutation<TArgs, TResult>(
 
 // ─── Tipologias ───────────────────────────────────────────────────────
 
-export function useCreateTipologia() {
-  return useTreeMutation((input: TipologiaInput) => createTipologia(input));
+export function useCreateTipologia(projectId: number) {
+  return useTreeMutation((input: TipologiaInput) => createTipologia(projectId, input));
 }
 
 export function useUpdateTipologia() {
@@ -104,7 +104,7 @@ export function useDeleteAmbiente() {
   return useTreeMutation(
     ({ tipologiaId, ambienteId }: { tipologiaId: number; ambienteId: number }) =>
       deleteAmbiente(tipologiaId, ambienteId),
-    [queryKeys.sharedAmbientes]
+    [queryKeys.sharedAmbientesRoot]
   );
 }
 
@@ -124,8 +124,12 @@ export function useReorderAmbientes() {
 
 // ─── Compartilhamento ─────────────────────────────────────────────────
 
-export function useSharedInfo() {
-  return useQuery({ queryKey: queryKeys.sharedAmbientes, queryFn: getSharedInfo });
+export function useSharedInfo(projectId: number | null) {
+  return useQuery({
+    queryKey: queryKeys.sharedAmbientes(projectId ?? 0),
+    queryFn: () => getSharedInfo(projectId ?? 0),
+    enabled: projectId !== null,
+  });
 }
 
 export function useLinkAmbiente() {
@@ -137,7 +141,7 @@ export function useLinkAmbiente() {
       targetTipologiaId: number;
       srcAmbienteId: number;
     }) => linkAmbiente(targetTipologiaId, srcAmbienteId),
-    [queryKeys.sharedAmbientes]
+    [queryKeys.sharedAmbientesRoot]
   );
 }
 
