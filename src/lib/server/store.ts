@@ -28,6 +28,7 @@ import type {
   ImagemVinculada,
   BudgetColumn,
   BudgetVersion,
+  CatalogEntity,
   CategoriaCatalogo,
   Comment,
   Componente,
@@ -50,6 +51,7 @@ import type {
   UnitGroup,
   VersionChanges,
 } from "@/shared/types/domain";
+import type { FetchCatalogParams, FetchCatalogResponse } from "@/shared/types/catalog";
 
 // ─── Utilidades de borda ────────────────────────────────────────────────
 
@@ -677,6 +679,88 @@ export async function listMateriais(organizationId: string): Promise<Material[]>
     orderBy: { Id: "asc" },
   });
   return rows.map(toMaterial);
+}
+
+/**
+ * Include superconjunto de BASE_MATERIAL_INCLUDE e KIT_INCLUDE. É o que permite
+ * uma consulta paginada só devolver linhas que `toMaterial` E `toKit` aceitam
+ * sem alteração: o superconjunto é estruturalmente atribuível aos dois row
+ * types (o excess-property check só morde object literals).
+ *
+ * KitItems vem junto mesmo para linhas Type="single", que nunca têm itens — é
+ * um join a mais sobre no máximo `limit` linhas por página. Paginar ids e
+ * hidratar em dois passos economizaria isso e não paga a complexidade.
+ */
+const CATALOG_INCLUDE = {
+  Category: true,
+  MediaFile: true,
+  KitItems: { include: { ChildMaterial: { include: { Category: true } } } },
+} satisfies Prisma.BaseMaterialInclude;
+
+const CATALOG_DEFAULT_LIMIT = 20;
+const CATALOG_MAX_LIMIT = 100;
+
+/**
+ * Listagem paginada do catálogo (materiais e/ou kits) para as telas de busca e
+ * os pickers. Contraparte de listMateriais/listKits, que seguem existindo
+ * inteiras para o portal público e para as telas que precisam da lista completa
+ * como lookup (canvas, orçamento, publicar, revisão de custo, tipologias).
+ *
+ * TODOS os filtros — inclusive excludeIds — vão no `where`, nunca depois do
+ * fatiamento: filtrar uma página já cortada faria `total` contar linhas que o
+ * cliente nunca vê, e a contagem de páginas discordaria dos resultados (o mesmo
+ * bug que listMediaFiles documenta).
+ */
+export async function listCatalogEntities(
+  organizationId: string,
+  params: FetchCatalogParams
+): Promise<FetchCatalogResponse> {
+  const page = Math.max(1, params.page ?? 1);
+  const limit = Math.min(
+    Math.max(1, params.limit ?? CATALOG_DEFAULT_LIMIT),
+    CATALOG_MAX_LIMIT
+  );
+  const tipo = params.tipo ?? "all";
+  const search = params.search?.trim();
+  const excludeIds = params.excludeIds ?? [];
+
+  const where: Prisma.BaseMaterialWhereInput = {
+    OrganizationId: organizationId,
+    ...(tipo === "all" ? {} : { Type: tipo }),
+    // `null` é filtro legítimo (sem categoria), então testa contra undefined.
+    ...(params.categoriaId === undefined ? {} : { CategoryId: params.categoriaId }),
+    ...(excludeIds.length > 0 ? { Id: { notIn: [...excludeIds] } } : {}),
+    ...(search
+      ? {
+          OR: [
+            { Name: { contains: search, mode: "insensitive" } },
+            { ReferenceCode: { contains: search, mode: "insensitive" } },
+            { Manufacturer: { contains: search, mode: "insensitive" } },
+          ],
+        }
+      : {}),
+  };
+
+  const [rows, total] = await Promise.all([
+    prisma.baseMaterial.findMany({
+      where,
+      include: CATALOG_INCLUDE,
+      // "kit" < "single" alfabeticamente, então asc mantém os kits no topo — a
+      // ordem que os pickers já mostravam. Ordenar por Id intercalaria os dois
+      // tipos, e a ordem tem que ser determinística entre páginas.
+      orderBy: [{ Type: "asc" }, { Name: "asc" }],
+      skip: (page - 1) * limit,
+      take: limit,
+    }),
+    prisma.baseMaterial.count({ where }),
+  ]);
+
+  const results: CatalogEntity[] = rows.map((row) =>
+    row.Type === "kit"
+      ? { ...toKit(row), isKit: true }
+      : { ...toMaterial(row), isKit: false }
+  );
+  return { results, total, page, limit };
 }
 
 async function baseMaterialCreateData(

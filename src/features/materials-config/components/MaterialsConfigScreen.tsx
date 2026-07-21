@@ -462,9 +462,7 @@ export function MaterialsConfigScreen({
         onClose={() => setModal(null)}
         onConfirm={applySelection}
         categoria={compCat}
-        unidade={comp.unidade}
         materiais={materiais}
-        kits={kits}
         excludeIds={excludeIds}
         existingKitQtds={kitQtds}
         compNome={comp.nome}

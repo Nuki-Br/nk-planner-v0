@@ -93,8 +93,8 @@ describe("calcBudgetRow (material)", () => {
     expect(r.qtdComRT).toBeCloseTo(21.16, 10); // 18.4 * 1.15
     expect(r.valUnUpg).toBe(120);
     expect(r.valUnPad).toBe(84.5);
-    expect(r.debitoExt).toBeCloseTo(2539.2, 10); // 120 * 21.16 (com RT)
-    expect(r.creditoExt).toBeCloseTo(1554.8, 10); // 84.5 * 18.40 (SEM RT)
+    expect(r.debitoTotal).toBeCloseTo(2539.2, 10); // 120 * 21.16 (com RT)
+    expect(r.creditoTotal).toBeCloseTo(1554.8, 10); // 84.5 * 18.40 (SEM RT)
     expect(r.custoDeTroca).toBeCloseTo(984.4, 10); // 2539.2 - 1554.8
     expect(col(r, 1).value).toBeCloseTo(78.752, 10); // custo_troca * 8%
     expect(col(r, 2).value).toBeCloseTo(49.22, 10); // custo_troca * 5%
@@ -109,8 +109,8 @@ describe("calcBudgetRow (material)", () => {
   it("T-M1b: crédito usa a quantidade líquida, débito usa a quantidade com RT", () => {
     const semRT = mustCalc(calcBudgetRow(piso002, piso001, plain(18.4, 0), new Map(), cols));
     const comRT = mustCalc(calcBudgetRow(piso002, piso001, plain(18.4, 15), new Map(), cols));
-    expect(semRT.creditoExt).toBeCloseTo(comRT.creditoExt, 10); // crédito não muda com a RT
-    expect(comRT.debitoExt).toBeGreaterThan(semRT.debitoExt); // débito muda
+    expect(semRT.creditoTotal).toBeCloseTo(comRT.creditoTotal, 10); // crédito não muda com a RT
+    expect(comRT.debitoTotal).toBeGreaterThan(semRT.debitoTotal); // débito muda
   });
 
   // T-M2 — rowTotal/rowAvg somam/mediam APENAS as free à esquerda
@@ -192,29 +192,29 @@ describe("calcKitRow (kit)", () => {
   // T-K1 — agrega sub-itens e credita o padrão
   it("T-K1: agrega sub-itens e credita o padrão", () => {
     const r = calcKitRow(bronze, metaisComp, padraoMat(metaisComp), new Map(), cols);
-    expect(r.debitoExt).toBe(1240); // 170*2 + 520*1 + 280*1 + 100*1
+    expect(r.debitoTotal).toBe(1240); // 170*2 + 520*1 + 280*1 + 100*1
     expect(r.qtdComRT).toBe(1);
-    expect(r.creditoExt).toBe(850); // met-001 (850) * 1
+    expect(r.creditoTotal).toBe(850); // met-001 (850) * 1
     expect(r.custoDeTroca).toBe(390); // 1240 - 850
     expect(col(r, 1).value).toBeCloseTo(31.2, 10); // custo_troca * 8%
     expect(col(r, 2).value).toBeCloseTo(19.5, 10); // custo_troca * 5%
     expect(col(r, 3).value).toBeCloseTo(272.8, 10); // valor_unitario (=kitMaterialTotal) * 22%
     expect(r.sumFree).toBeCloseTo(323.5, 10);
     expect(r.total).toBeCloseTo(713.5, 10); // custoDeTroca + sumFree (sem multiplicar por qtdComRT)
-    expect(r.anyPending).toBe(false);
+    expect(r.subItemPending).toBe(false);
   });
 
   // T-K2 — kit NÃO multiplica por qtdComRT (extensão já está nos sub-itens)
   it("T-K2: total do kit não é multiplicado por qtdComRT", () => {
     const r = calcKitRow(barcelona, salaPisoT1, padraoMat(salaPisoT1), new Map(), cols);
     // piso-bcn 208 * 18.40 + sol-bcn 115 * 2 + rt-bcn (pendente, 0) * 1.84
-    expect(r.debitoExt).toBeCloseTo(4057.2, 10);
+    expect(r.debitoTotal).toBeCloseTo(4057.2, 10);
     expect(r.qtdComRT).toBeCloseTo(21.16, 10);
-    expect(r.creditoExt).toBeCloseTo(1554.8, 10); // 84.5 * 18.40 (SEM RT)
+    expect(r.creditoTotal).toBeCloseTo(1554.8, 10); // 84.5 * 18.40 (SEM RT)
     expect(r.custoDeTroca).toBeCloseTo(2502.4, 10);
     expect(r.sumFree).toBeCloseTo(1217.896, 4);
     expect(r.total).toBeCloseTo(3720.296, 4); // custoDeTroca + sumFree
-    expect(r.anyPending).toBe(true); // rt-bcn tem custoMat 0
+    expect(r.subItemPending).toBe(true); // rt-bcn tem custoMat 0
     // prova da semântica: o total NÃO é (custoDeTroca + sumFree) * qtdComRT
     expect(r.total).not.toBeCloseTo((r.custoDeTroca + r.sumFree) * r.qtdComRT, 0);
   });
@@ -225,17 +225,17 @@ describe("calcKitRow (kit)", () => {
     const rtBcn = r.subItems.find((s) => s.item.nome === "Reserva Técnica Porcelanato Barcelona");
     expect(rtBcn?.item.custoMat).toBe(0);
     expect(rtBcn?.pending).toBe(true);
-    expect(r.anyPending).toBe(true);
+    expect(r.subItemPending).toBe(true);
 
     // kit todo precificado → sem pendência; zerar um sub-item reintroduz a pendência
-    expect(calcKitRow(bronze, metaisComp, padraoMat(metaisComp), new Map(), cols).anyPending).toBe(false);
+    expect(calcKitRow(bronze, metaisComp, padraoMat(metaisComp), new Map(), cols).subItemPending).toBe(false);
     const bronzeZerado: Kit = {
       ...bronze,
       itens: bronze.itens.map((it, i) => (i === 0 ? { ...it, custoMat: 0 } : it)),
     };
     const rz = calcKitRow(bronzeZerado, metaisComp, padraoMat(metaisComp), new Map(), cols);
     expect(rz.subItems[0]?.pending).toBe(true);
-    expect(rz.anyPending).toBe(true);
+    expect(rz.subItemPending).toBe(true);
   });
 });
 
@@ -261,8 +261,8 @@ describe("componentes de custo (Hall)", () => {
   // H51 = SUM(G51 + G52 + $G$57) − $H$41
   it("reproduz o custo de troca da planilha", () => {
     expect(bcn.qtdComRT).toBeCloseTo(3.375, 10); // 2,25 × 1,50
-    expect(bcn.debitoExt).toBeCloseTo(1998.915, 6); // 1106,217 + 327,768 + 564,93
-    expect(bcn.creditoExt).toBeCloseTo(826.2175, 6); // H41 = SUM(G41:G44)
+    expect(bcn.debitoTotal).toBeCloseTo(1998.915, 6); // 1106,217 + 327,768 + 564,93
+    expect(bcn.creditoTotal).toBeCloseTo(826.2175, 6); // H41 = SUM(G41:G44)
     expect(bcn.custoDeTroca).toBeCloseTo(1172.6975, 6);
     expect(col(bcn, 1).value).toBeCloseTo(93.8158, 6); // 8% (o projeto usa 8%, a planilha 10%)
     expect(bcn.total).toBeCloseTo(bcn.custoDeTroca + bcn.sumFree, 10);
@@ -270,9 +270,23 @@ describe("componentes de custo (Hall)", () => {
     expect(bcn.total).not.toBeCloseTo((bcn.custoDeTroca + bcn.sumFree) * bcn.qtdComRT, 0);
   });
 
+  // A coluna "Déb." mostra G51 (só o item); é H51 que soma os satélites.
+  it("débito do item é qtd × valor unitário — satélites só no custo de troca", () => {
+    expect(bcn.debitoItem).toBeCloseTo(1106.217, 6); // 327,768 × 3,375
+    expect(bcn.debitoItem).toBeCloseTo(bcn.valUnUpg * bcn.qtdComRT, 6);
+    // o total é o item + soleira (327,768) + rodapé (564,93)
+    expect(bcn.debitoTotal).toBeCloseTo(bcn.debitoItem + 327.768 + 564.93, 6);
+    expect(bcn.debitoTotal).toBeGreaterThan(bcn.debitoItem);
+  });
+
+  it("crédito do item é qtd líquida × valor unitário, sem os satélites", () => {
+    expect(bcn.creditoItem).toBeCloseTo(355.1175, 6); // 157,83 × 2,25
+    expect(bcn.creditoTotal).toBeCloseTo(826.2175, 6); // + 283 + 188,10
+  });
+
   it("o crédito do grupo soma os satélites do lado padrão", () => {
     // 157,83×2,25 (piso, SEM RT) + 56,60×5 (rodapé RS) + 94,05×2 (soleiras)
-    expect(bcn.creditoExt).toBeCloseTo(157.83 * 2.25 + 56.6 * 5 + 94.05 * 2, 6);
+    expect(bcn.creditoTotal).toBeCloseTo(157.83 * 2.25 + 56.6 * 5 + 94.05 * 2, 6);
     expect(sat(bcn, "Rodapé Munari RS").line).toBeCloseTo(283, 6);
     expect(sat(bcn, "Soleiras Granito").line).toBeCloseTo(188.1, 6);
   });
@@ -296,10 +310,10 @@ describe("componentes de custo (Hall)", () => {
     const semCusto = new Map(sats);
     semCusto.set(rodape.id, { ...rodape, custoMat: 0, custoMO: 0 });
     for (const opt of upgrades) {
-      expect(calc(opt.baseId, semCusto).anyPending).toBe(true);
+      expect(calc(opt.baseId, semCusto).satellitePending).toBe(true);
     }
     // com custo, nenhuma pendência
-    for (const opt of upgrades) expect(calc(opt.baseId).anyPending).toBe(false);
+    for (const opt of upgrades) expect(calc(opt.baseId).satellitePending).toBe(false);
   });
 });
 

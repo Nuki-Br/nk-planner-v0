@@ -1,9 +1,10 @@
 // Resolvedores de catálogo — funções puras sobre listas (os dados vêm dos
 // hooks React Query). No modelo normalizado, kit-ness é um atributo da entidade
 // (Kit vs Material) / da opção, não mais um prefixo de id.
-import type { Kit, Material, MaterialOption } from "@/shared/types/domain";
+import type { CatalogEntity, Kit, Material, MaterialOption } from "@/shared/types/domain";
 
-export type Entity = (Material & { isKit: false }) | (Kit & { isKit: true });
+/** Alias histórico — a união canônica é CatalogEntity em shared/types/domain. */
+export type Entity = CatalogEntity;
 
 export function getMaterial(
   materiais: readonly Material[],

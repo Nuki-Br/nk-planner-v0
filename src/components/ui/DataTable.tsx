@@ -13,6 +13,8 @@ import {
 
 import { cn } from "@/lib/utils";
 
+import { sortRows } from "./sortRows";
+
 export interface DataTableColumn<T> {
   /** Identificador único da coluna. */
   key: string;
@@ -36,6 +38,16 @@ interface DataTableProps<T> {
   onRowClick?: (row: T) => void;
   emptyText?: string;
   "aria-label": string;
+  /**
+   * Ordenação controlada. Só faz sentido para quem PAGINA: com as linhas já
+   * fatiadas, ordenar aqui dentro ordenaria apenas a página visível, e
+   * "ordenar por código" não traria o menor código da lista inteira. Quem passa
+   * estes props ordena o conjunto completo antes de fatiar (ver CatalogScreen).
+   *
+   * Omitidos, o estado interno continua valendo — é o modo dos demais callers.
+   */
+  sortDescriptor?: SortDescriptor;
+  onSortChange?: (descriptor: SortDescriptor) => void;
 }
 
 /** Tabela simples com ordenação client-side (DataTable do protótipo). */
@@ -46,22 +58,20 @@ export function DataTable<T>({
   onRowClick,
   emptyText = "Nenhum item encontrado.",
   "aria-label": ariaLabel,
+  sortDescriptor,
+  onSortChange,
 }: DataTableProps<T>) {
-  const [sort, setSort] = React.useState<SortDescriptor | undefined>(undefined);
+  const [internalSort, setInternalSort] = React.useState<SortDescriptor | undefined>(undefined);
+  const controlled = onSortChange !== undefined;
+  const sort = controlled ? sortDescriptor : internalSort;
+  const setSort = controlled ? onSortChange : setInternalSort;
 
-  const sorted = React.useMemo(() => {
-    if (!sort) return rows;
-    const col = columns.find((c) => c.key === sort.column);
-    const sortValue = col?.sortValue;
-    if (!sortValue) return rows;
-    const dir = sort.direction === "descending" ? -1 : 1;
-    return [...rows].sort((a, b) => {
-      const va = sortValue(a);
-      const vb = sortValue(b);
-      if (typeof va === "number" && typeof vb === "number") return (va - vb) * dir;
-      return String(va).localeCompare(String(vb), "pt-BR", { numeric: true }) * dir;
-    });
-  }, [rows, sort, columns]);
+  const sorted = React.useMemo(
+    // No modo controlado as linhas já chegam ordenadas por quem controla —
+    // reordenar aqui só reordenaria a página.
+    () => (controlled ? rows : sortRows(rows, columns, sort)),
+    [rows, sort, columns, controlled]
+  );
 
   const byKey = React.useMemo(() => {
     const map = new Map<string, T>();

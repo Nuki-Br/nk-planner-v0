@@ -22,6 +22,7 @@ export function useCreateMaterial() {
     mutationFn: (input: MaterialInput) => createMaterial(input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.materiais });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.catalogEntitiesAll });
     },
   });
 }
@@ -34,6 +35,7 @@ export function useUpdateMaterial() {
     onSuccess: () => {
       // custoMat > 0 tira a pendência (derivada do custo) — refletir na UI.
       void queryClient.invalidateQueries({ queryKey: queryKeys.materiais });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.catalogEntitiesAll });
     },
   });
 }
@@ -45,6 +47,7 @@ export function useImportMateriais() {
     mutationFn: (inputs: MaterialInput[]) => createMateriais(inputs),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.materiais });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.catalogEntitiesAll });
     },
   });
 }

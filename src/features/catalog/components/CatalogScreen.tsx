@@ -2,7 +2,7 @@
 
 import React from "react";
 import dynamic from "next/dynamic";
-import { Input as HeroInput } from "@heroui/react";
+import { Input as HeroInput, type SortDescriptor } from "@heroui/react";
 
 import {
   Button,
@@ -12,11 +12,14 @@ import {
   Icon,
   MaterialThumb,
   PageHeader,
+  Pagination,
   TableSkeleton,
+  sortRows,
   type DataTableColumn,
 } from "@/components/ui";
 import type { Entity } from "@/lib/data/entities";
 import { useCategorias } from "@/lib/hooks/useCategorias";
+import { useDebounce } from "@/lib/hooks/useDebounce";
 import { useKits, useUpdateKit } from "@/lib/hooks/useKits";
 import { useMateriais, useUpdateMaterial } from "@/lib/hooks/useMateriais";
 import { useProject } from "@/lib/hooks/useProjects";
@@ -41,6 +44,31 @@ const CsvImportModal = dynamic(() =>
 
 type TypeFilter = "" | "Material" | "Kit";
 
+/**
+ * Paginação client-side: a tela mescla materiais e kits de duas queries e
+ * ordena por coluna, então continua buscando as duas listas inteiras. O que a
+ * página corta é o custo de montar 600+ linhas de tabela no DOM de uma vez.
+ */
+const CATALOG_PAGE_SIZE = 50;
+
+/**
+ * Critérios de ordenação em escopo de módulo: são funções puras da linha, e
+ * mantê-las fora do render dá ao `sorted` uma dependência estável — senão o
+ * array de colunas (que fecha sobre handlers) reordenaria 600+ itens a cada
+ * render. As colunas abaixo referenciam estas mesmas funções.
+ */
+const SORT_VALUES = {
+  codigo: (r: Entity) => r.codigo,
+  tipo: (r: Entity) => (r.isKit ? "Kit" : "Material"),
+  nome: (r: Entity) => r.nome,
+  categoria: (r: Entity) => r.categoria,
+} as const;
+
+const SORT_COLUMNS = Object.entries(SORT_VALUES).map(([key, sortValue]) => ({
+  key,
+  sortValue,
+}));
+
 // Tela 6 — Catálogo de materiais e kits (protótipo: MaterialsCatalogScreen).
 export function CatalogScreen() {
   const { data: materiais = [], isLoading: matLoading, isError: matError, refetch: refetchMat } =
@@ -54,8 +82,14 @@ export function CatalogScreen() {
   const { data: project } = useProject(activeProjectId);
 
   const [search, setSearch] = React.useState("");
+  // Filtrar 600+ entidades e remontar a tabela a cada tecla trava a digitação.
+  const debouncedSearch = useDebounce(search, 300);
   const [typeFilter, setTypeFilter] = React.useState<TypeFilter>("");
   const [catFilters, setCatFilters] = React.useState<string[]>([]);
+  const [page, setPage] = React.useState(1);
+  // Ordenação controlada: com a página já fatiada, deixar o DataTable ordenar
+  // ordenaria só as 50 linhas visíveis.
+  const [sort, setSort] = React.useState<SortDescriptor | undefined>(undefined);
 
   // Modais
   const [materialModal, setMaterialModal] = React.useState<{ open: boolean; material: Material | null }>({ open: false, material: null });
@@ -74,20 +108,19 @@ export function CatalogScreen() {
 
   const usageCounts = React.useMemo(() => getUsageCounts(tipologias), [tipologias]);
 
-  const matchTxt = (e: Entity) => {
-    const q = search.toLowerCase();
-    return (
+  const filtered = React.useMemo(() => {
+    const q = debouncedSearch.toLowerCase();
+    const matchTxt = (e: Entity) =>
       e.nome.toLowerCase().includes(q) ||
       e.codigo.toLowerCase().includes(q) ||
-      (!e.isKit && e.fabricante.toLowerCase().includes(q))
+      (!e.isKit && e.fabricante.toLowerCase().includes(q));
+    return entities.filter(
+      (e) =>
+        matchTxt(e) &&
+        (catFilters.length === 0 || catFilters.includes(e.categoria)) &&
+        (typeFilter === "" || (typeFilter === "Kit") === e.isKit)
     );
-  };
-  const filtered = entities.filter(
-    (e) =>
-      matchTxt(e) &&
-      (catFilters.length === 0 || catFilters.includes(e.categoria)) &&
-      (typeFilter === "" || (typeFilter === "Kit") === e.isKit)
-  );
+  }, [entities, debouncedSearch, catFilters, typeFilter]);
 
   // Entity é Material/Kit + flag isKit — estruturalmente atribuível aos tipos base.
   const openEdit = (e: Entity) => {
@@ -99,7 +132,7 @@ export function CatalogScreen() {
     {
       key: "codigo",
       label: "Código",
-      sortValue: (r) => r.codigo,
+      sortValue: SORT_VALUES.codigo,
       render: (r) => (
         <code className="rounded bg-neutral-gray-3 px-1.5 py-px font-mono text-[11px] text-neutral-gray-7">
           {!r.codigo || r.codigo === '' ? '-' : r.codigo}
@@ -109,7 +142,7 @@ export function CatalogScreen() {
     {
       key: "tipo",
       label: "Tipo",
-      sortValue: (r) => (r.isKit ? "Kit" : "Material"),
+      sortValue: SORT_VALUES.tipo,
       render: (r) =>
         r.isKit ? (
           <KitBadge />
@@ -120,7 +153,7 @@ export function CatalogScreen() {
     {
       key: "nome",
       label: "Especificação",
-      sortValue: (r) => r.nome,
+      sortValue: SORT_VALUES.nome,
       // A miniatura vai DENTRO da célula do nome (não em coluna própria): é onde
       // o olho já está e não mexe na largura das outras colunas.
       render: (r) => (
@@ -155,7 +188,7 @@ export function CatalogScreen() {
     {
       key: "categoria",
       label: "Categoria",
-      sortValue: (r) => r.categoria,
+      sortValue: SORT_VALUES.categoria,
       render: (r) => (
         <CategoryCellPicker
           value={r.categoria}
@@ -203,6 +236,27 @@ export function CatalogScreen() {
       ),
     },
   ];
+
+  // Ordena a lista INTEIRA antes de fatiar — é o que mantém "ordenar por
+  // código" honesto com 600+ itens.
+  const sorted = React.useMemo(() => sortRows(filtered, SORT_COLUMNS, sort), [filtered, sort]);
+  const totalPages = Math.max(1, Math.ceil(sorted.length / CATALOG_PAGE_SIZE));
+  const pageRows = React.useMemo(
+    () => sorted.slice((page - 1) * CATALOG_PAGE_SIZE, page * CATALOG_PAGE_SIZE),
+    [sorted, page]
+  );
+
+  React.useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, typeFilter, catFilters]);
+
+  // Filtrar estando na última página pode deixar `page` além do fim.
+  React.useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  const primeiro = (page - 1) * CATALOG_PAGE_SIZE + 1;
+  const ultimo = Math.min(page * CATALOG_PAGE_SIZE, sorted.length);
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -340,10 +394,20 @@ export function CatalogScreen() {
             <DataTable
               aria-label="Catálogo de materiais e kits"
               columns={columns}
-              rows={filtered}
+              rows={pageRows}
               rowKey={(r) => r.id}
               emptyText="Nenhum material ou kit encontrado."
+              sortDescriptor={sort}
+              onSortChange={setSort}
             />
+            {sorted.length > 0 && (
+              <div className="flex items-center justify-between border-t border-neutral-gray-4 px-4 py-3">
+                <span className="text-xs text-neutral-gray-7">
+                  Mostrando {primeiro}–{ultimo} de {sorted.length}
+                </span>
+                <Pagination page={page} total={totalPages} onChange={setPage} />
+              </div>
+            )}
           </>
         )}
       </Card>

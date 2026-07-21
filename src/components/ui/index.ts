@@ -19,6 +19,7 @@ export { Card } from "./Card";
 export { Checkbox, type CheckboxProps } from "./Checkbox";
 export { Chip, type ChipTone } from "./Chip";
 export { DataTable, type DataTableColumn } from "./DataTable";
+export { sortRows } from "./sortRows";
 export { EmptyState } from "./EmptyState";
 export { Icon, ICON_NAMES, type IconName } from "./Icon";
 export { Input, type InputProps } from "./Input";

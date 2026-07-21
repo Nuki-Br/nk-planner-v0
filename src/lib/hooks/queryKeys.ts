@@ -7,6 +7,21 @@ export const queryKeys = {
   tipologia: (id: number) => ["tipologias", id] as const,
   materiais: ["materiais"] as const,
   kits: ["kits"] as const,
+  /**
+   * Lista paginada do catálogo (materiais + kits) — mesmo par parametrizada +
+   * prefixo cru do Media Center. `excludeKey` é a lista de ids excluídos já
+   * normalizada em string ordenada (ver useCatalogEntities): um array recriado
+   * a cada render churnaria a key e viraria refetch em loop.
+   */
+  catalogEntities: (
+    tipo: string,
+    page: number,
+    search: string,
+    categoriaId: string,
+    excludeKey: string
+  ) => ["catalog-entities", tipo, page, search, categoriaId, excludeKey] as const,
+  /** Prefixo de TODAS as listas de catálogo. */
+  catalogEntitiesAll: ["catalog-entities"] as const,
   categorias: ["categorias"] as const,
   unitGroups: ["unit-groups"] as const,
   torres: ["torres"] as const,

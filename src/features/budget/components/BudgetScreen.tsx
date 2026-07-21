@@ -38,8 +38,10 @@ import {
   ambTotal,
   buildScopeRefs,
   calcAnyRow,
+  isOptionOwnPending,
   isOptionPending,
   padraoSatellites,
+  pendingCostItems,
   type BaseCosts,
   type BudgetDeps,
   type CellOverrides,
@@ -535,7 +537,8 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
         if (opt.isDefault) continue;
         if (opt.isKit) {
           const r = calcAnyRow(deps, comp, opt);
-          if (r?.kind === "kit" && r.result.anyPending) excludedCount++;
+          if (r?.kind === "kit" && (r.result.subItemPending || r.result.satellitePending))
+            excludedCount++;
         } else if (isOptionPending(deps, comp, opt)) {
           excludedCount++;
         }
@@ -882,12 +885,11 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                       // perda extra do upgrade, não do padrão.
                       const valUnit = padMat.custoMat + padMat.custoMO;
                       const bg = "bg-[#f4fffe]";
-                      // Crédito do GRUPO: o padrão mais seus componentes de
-                      // custo do lado padrão (H41 = SUM(G41:G44) da planilha).
+                      // A coluna mostra o crédito DESTE item; cada satélite tem
+                      // sua própria sub-linha. A soma (H41 da planilha) entra no
+                      // custo de troca das opções, não aqui.
                       const padSats = padraoSatellites(deps, comp, valUnit);
                       const padChildren = padSats.map(satelliteSubRow);
-                      const creditoGrupo =
-                        valUnit * comp.qtd + padSats.reduce((a, s) => a + s.line, 0);
                       const padKey = `pad-${comp.id}`;
                       const padExpanded = !collapsedRows.has(padKey);
                       return (
@@ -928,7 +930,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                             </Td>
                             <Td right className={bg}>
                               <span className="font-semibold text-functional-success">
-                                Créd. {fmtBRL(creditoGrupo)}
+                                Créd. {fmtBRL(valUnit * comp.qtd)}
                               </span>
                             </Td>
                             <Td right className={cn(bg, "text-neutral-gray-5")}>—</Td>
@@ -981,7 +983,12 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                           if (!kit) return null;
                           const rr = calcAnyRow(deps, comp, opt);
                           const r = rr?.kind === "kit" ? rr.result : null;
-                          const pending = r ? r.anyPending : true;
+                          // Pendência do kit vem de duas fontes distintas: um
+                          // sub-item sem custo (o kit em si) ou um item de custo
+                          // sem preço (que não é culpa do kit).
+                          const subPending = r ? r.subItemPending : true;
+                          const satPending = r?.satellitePending ?? false;
+                          const pending = subPending || satPending;
                           const expanded = !collapsedRows.has(rk);
                           const kitBg = pending ? "bg-functional-warning-light" : "bg-[#fbf6ff]";
                           // Sub-itens do kit e componentes de custo são irmãos:
@@ -1024,9 +1031,14 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                         )}
                                       >
                                         {comp.nome} · {kit.itens.length} itens
-                                        {pending && (
+                                        {subPending && (
                                           <span className="ml-1.5 font-bold text-tint-orange-fg">
                                             · Sub-item aguardando custo
+                                          </span>
+                                        )}
+                                        {!subPending && satPending && (
+                                          <span className="ml-1.5 font-bold text-tint-orange-fg">
+                                            · Item de custo sem preço
                                           </span>
                                         )}
                                       </div>
@@ -1052,7 +1064,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                 <Td right className={kitBg}>
                                   {r && !pending ? (
                                     <span className="font-semibold text-[#c2410c]">
-                                      Déb. {fmtBRL(r.debitoExt)}
+                                      Déb. {fmtBRL(r.debitoItem)}
                                     </span>
                                   ) : (
                                     "—"
@@ -1106,8 +1118,18 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                         // ── MATERIAL: linha + preenchimento de custo base ──
                         const upgMat = getMaterial(materiais, opt.baseId);
                         if (!upgMat) return null;
-                        const pending = isOptionPending(deps, comp, opt);
-                        const rr = pending ? null : calcAnyRow(deps, comp, opt);
+                        // "own" = o material desta opção está sem custo.
+                        // "cost" = um item de custo do componente está — a linha
+                        // sai do total, mas ESTE material pode estar preenchido:
+                        // acusar "aguardando custo" aqui seria mentira.
+                        const ownPending = isOptionOwnPending(deps, opt);
+                        const faltandoCusto = pendingCostItems(deps, comp);
+                        const pending = ownPending || faltandoCusto.length > 0;
+                        // Calcula mesmo com item de custo pendente: qtd, valor
+                        // unitário e débito DESTA opção são conhecidos e ajudam.
+                        // Só o que depende do custo de troca (taxas e total) é
+                        // que fica em branco — esse sim está incompleto.
+                        const rr = ownPending ? null : calcAnyRow(deps, comp, opt);
                         const r = rr?.kind === "material" ? rr.result : null;
                         const rowBg = pending ? "bg-functional-warning-light" : "bg-white";
                         const cmts = commentThreads[rk] ?? [];
@@ -1151,13 +1173,19 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                       )}
                                     >
                                       {comp.nome} · {upgMat.fabricante}
-                                      {pending && (
+                                      {ownPending && (
                                         <span className="ml-1.5 font-bold text-tint-orange-fg">
                                           · Aguardando custo
                                         </span>
                                       )}
+                                      {!ownPending && faltandoCusto.length > 0 && (
+                                        <span className="ml-1.5 font-bold text-tint-orange-fg">
+                                          · Item de custo sem preço:{" "}
+                                          {faltandoCusto.map((c) => c.nome).join(", ")}
+                                        </span>
+                                      )}
                                     </div>
-                                    {pending && !inlineFill && !(filling && pendingFill === "expandRow") && (
+                                    {ownPending && !inlineFill && !(filling && pendingFill === "expandRow") && (
                                       <button
                                         type="button"
                                         onClick={() => openFill(rk, opt.baseId)}
@@ -1223,7 +1251,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                   </div>
                                 ) : r ? (
                                   <span className="font-semibold text-[#c2410c]">
-                                    Déb. {fmtBRL(r.debitoExt)}
+                                    Déb. {fmtBRL(r.debitoItem)}
                                   </span>
                                 ) : (
                                   "—"
@@ -1249,7 +1277,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                       ✕
                                     </button>
                                   </div>
-                                ) : r ? (
+                                ) : r && !pending ? (
                                   // custoDeTroca já é estendido — multiplicar de
                                   // novo por qtdComRT duplicaria a extensão.
                                   <span
@@ -1270,8 +1298,10 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                 renderConfigCell(col, colIdx, pending ? null : rr, rk, rowBg)
                               )}
                               <Td className={rowBg} />
-                              <Td right className={r ? "bg-primary-1" : rowBg}>
-                                {r ? (
+                              {/* O total depende do custo de troca; com item de
+                                  custo pendente ele estaria subestimado. */}
+                              <Td right className={r && !pending ? "bg-primary-1" : rowBg}>
+                                {r && !pending ? (
                                   <span className="text-[13px] font-extrabold text-primary-7">
                                     {fmtBRL(r.total)}
                                   </span>
@@ -1518,7 +1548,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
             ? costTarget.comp.custoQtds[costTarget.editing.id] ?? 0
             : 1
         }
-        materiais={materiais}
+        baseInicial={getMaterial(materiais, costTarget?.editing?.baseId) ?? null}
         saving={addCostMut.isPending || updateCostMut.isPending || setCostQtdsMut.isPending}
         onClose={() => setCostTarget(null)}
         onSave={saveCostItem}

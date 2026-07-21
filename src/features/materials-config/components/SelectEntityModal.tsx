@@ -1,13 +1,14 @@
 "use client";
 
 import React from "react";
-import { Input as HeroInput } from "@heroui/react";
 
-import { Button, Icon, Modal } from "@/components/ui";
-import { getMaterial, type Entity } from "@/lib/data/entities";
-import { cn, fmtBRL, parseBR } from "@/lib/utils";
+import { Button, Modal } from "@/components/ui";
+import { getMaterial } from "@/lib/data/entities";
+import { useCategorias } from "@/lib/hooks/useCategorias";
+import { parseBR } from "@/lib/utils";
+import { EntityPickerList } from "@/features/catalog/components/EntityPickerList";
 import { KitBadge } from "@/features/catalog/components/KitBadge";
-import type { Kit, Material, Unidade } from "@/shared/types/domain";
+import type { CatalogEntity, Material } from "@/shared/types/domain";
 
 export interface SelectionResult {
   /** Id de catálogo (BaseMaterial) escolhido. */
@@ -22,10 +23,12 @@ interface SelectEntityModalProps {
   onClose: () => void;
   onConfirm: (result: SelectionResult) => void;
   categoria: string;
-  /** Unidade do componente — sufixo dos custos ("R$ X/m²"); o material não tem unidade. */
-  unidade: Unidade;
+  /**
+   * Só para o passo 2 (quantitativos): KitItem tem nome/fabricante mas NÃO tem
+   * `codigo`, que a tela exibe — resolver pelo material continua necessário.
+   * A lista do passo 1 vem paginada do servidor, não daqui.
+   */
   materiais: Material[];
-  kits: Kit[];
   /** Ids de catálogo excluídos da lista (padrão atual e upgrades já usados). */
   excludeIds: Set<number>;
   /** Quantitativos já gravados (keyed por KitItem id) — pré-preenche o passo 2. */
@@ -43,9 +46,7 @@ export function SelectEntityModal({
   onClose,
   onConfirm,
   categoria,
-  unidade,
   materiais,
-  kits,
   excludeIds,
   existingKitQtds,
   compNome,
@@ -53,34 +54,32 @@ export function SelectEntityModal({
   confirming,
 }: SelectEntityModalProps) {
   const [step, setStep] = React.useState<1 | 2>(1);
-  const [picked, setPicked] = React.useState<number | null>(null);
+  // Guarda a ENTIDADE, não só o id: com a lista paginada no servidor o kit
+  // escolhido pode não estar mais na página quando o passo 2 precisar dele.
+  const [pickedEntity, setPickedEntity] = React.useState<CatalogEntity | null>(null);
   const [qtds, setQtds] = React.useState<Record<number, string>>({});
-  const [search, setSearch] = React.useState("");
 
   React.useEffect(() => {
     if (!open) return;
     setStep(1);
-    setPicked(null);
+    setPickedEntity(null);
     setQtds({});
-    setSearch("");
   }, [open]);
 
-  // categoria "" (componente sem padrão) → sem filtro: mostra o catálogo todo.
-  const matchCat = (c: string) => categoria === "" || c === categoria;
-  const candidates: Entity[] = [
-    ...kits.filter((k) => matchCat(k.categoria)).map((k): Entity => ({ ...k, isKit: true })),
-    ...materiais
-      .filter((m) => matchCat(m.categoria))
-      .map((m): Entity => ({ ...m, isKit: false })),
-  ]
-    .filter((e) => !excludeIds.has(e.id))
-    .filter(
-      (e) =>
-        e.nome.toLowerCase().includes(search.toLowerCase()) ||
-        e.codigo.toLowerCase().includes(search.toLowerCase())
-    );
+  const { data: categorias = [] } = useCategorias();
+  // O prop chega como NOME e o picker filtra por id. categoria "" (componente
+  // sem padrão) = sem filtro, e nome que não resolve também cai em undefined —
+  // travar num id inexistente esvaziaria a lista em vez de mostrar tudo.
+  const lockedCategoriaId = React.useMemo(() => {
+    if (categoria === "") return undefined;
+    return categorias.find((c) => c.nome === categoria)?.id;
+  }, [categoria, categorias]);
 
-  const pickedKit = picked !== null ? (kits.find((k) => k.id === picked) ?? null) : null;
+  // O picker recebe array; o call site já tem um Set.
+  const excludeIdList = React.useMemo(() => [...excludeIds], [excludeIds]);
+
+  const picked = pickedEntity?.id ?? null;
+  const pickedKit = pickedEntity?.isKit ? pickedEntity : null;
 
   const goToQtds = () => {
     if (!pickedKit) return;
@@ -159,71 +158,15 @@ export function SelectEntityModal({
               </>
             )}
           </p>
-          <HeroInput
-            value={search}
-            onValueChange={setSearch}
-            placeholder="Buscar material ou kit..."
-            aria-label="Buscar material ou kit"
-            variant="bordered"
-            radius="sm"
-            size="sm"
-            startContent={<Icon name="search" size={14} className="text-neutral-gray-6" />}
-            classNames={{
-              base: "mb-3",
-              inputWrapper: "!border-small h-10 border-neutral-gray-5 bg-white",
-              input: "text-[13px]",
-            }}
+          <EntityPickerList
+            tipo="all"
+            lockedCategoriaId={lockedCategoriaId}
+            excludeIds={excludeIdList}
+            mode="single"
+            selectedId={picked}
+            onSelect={setPickedEntity}
+            emptyText="Nenhum item encontrado nesta categoria."
           />
-          <div className="flex max-h-[340px] flex-col gap-1 overflow-y-auto">
-            {candidates.length === 0 && (
-              <div className="p-[18px] text-center text-xs text-neutral-gray-6">
-                Nenhum item encontrado nesta categoria.
-              </div>
-            )}
-            {candidates.map((e) => {
-              const sel = picked === e.id;
-              return (
-                <button
-                  key={e.id}
-                  type="button"
-                  onClick={() => setPicked(e.id)}
-                  className={cn(
-                    "flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left",
-                    sel ? "border-primary-7 bg-primary-1" : "border-neutral-gray-4 bg-white"
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2",
-                      sel ? "border-primary-7" : "border-neutral-gray-5"
-                    )}
-                  >
-                    {sel && <span className="h-[7px] w-[7px] rounded-full bg-primary-7" />}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="flex items-center gap-2">
-                      <span className="truncate text-[13px] font-semibold text-neutral-gray-11">
-                        {e.nome}
-                      </span>
-                      {e.isKit && <KitBadge />}
-                    </span>
-                    <span className="mt-px block text-[11px] text-neutral-gray-7">
-                      {e.isKit
-                        ? `${e.codigo} · ${e.itens.length} itens`
-                        : `${e.codigo} · ${e.fabricante}`}
-                    </span>
-                  </span>
-                  <span className="shrink-0 text-xs text-neutral-gray-8">
-                    {e.isKit ? (
-                      <span className="text-neutral-gray-5">soma dos itens</span>
-                    ) : (
-                      `${fmtBRL(e.custoMat)}/${unidade}`
-                    )}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
         </>
       )}
 

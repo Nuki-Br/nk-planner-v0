@@ -27,7 +27,8 @@ export function useCreateCategoria() {
 }
 
 // Renomear/excluir muda o `categoria` materializado nos materiais e kits —
-// invalidar os três recursos mantém chips e filtros coerentes.
+// invalidar os recursos todos (incluindo as listas paginadas do catálogo)
+// mantém chips e filtros coerentes.
 export function useUpdateCategoria() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -37,6 +38,7 @@ export function useUpdateCategoria() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.categorias });
       void queryClient.invalidateQueries({ queryKey: queryKeys.materiais });
       void queryClient.invalidateQueries({ queryKey: queryKeys.kits });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.catalogEntitiesAll });
     },
   });
 }
@@ -49,6 +51,7 @@ export function useDeleteCategoria() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.categorias });
       void queryClient.invalidateQueries({ queryKey: queryKeys.materiais });
       void queryClient.invalidateQueries({ queryKey: queryKeys.kits });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.catalogEntitiesAll });
     },
   });
 }

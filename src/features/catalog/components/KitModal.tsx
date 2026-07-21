@@ -1,17 +1,17 @@
 "use client";
 
 import React from "react";
-import { Input as HeroInput } from "@heroui/react";
 
 import { Button, Icon, Input, Modal, Select } from "@/components/ui";
 import { getMaterial } from "@/lib/data/entities";
 import { useCategorias } from "@/lib/hooks/useCategorias";
 import { useCreateKit, useUpdateKit } from "@/lib/hooks/useKits";
 import { UNIDADE_OPTIONS, type Unidade } from "@/shared/constants/unidades";
-import type { Kit, KitItem, Material } from "@/shared/types/domain";
+import type { CatalogEntity, Kit, KitItem, Material } from "@/shared/types/domain";
 
 import { CategoryChip } from "./CategoryChip";
 import { CategoryCombobox } from "./CategoryCombobox";
+import { EntityPickerList } from "./EntityPickerList";
 
 interface KitModalProps {
   open: boolean;
@@ -46,14 +46,12 @@ export function KitModal({ open, onClose, kit, materiais }: KitModalProps) {
   const [nome, setNome] = React.useState("");
   const [categoria, setCategoria] = React.useState("");
   const [itens, setItens] = React.useState<KitItem[]>([]);
-  const [search, setSearch] = React.useState("");
 
   React.useEffect(() => {
     if (!open) return;
     setNome(kit?.nome ?? "");
     setCategoria(kit?.categoria ?? "");
     setItens(kit?.itens ?? []);
-    setSearch("");
   }, [open, kit]);
 
   const addItem = (m: Material) =>
@@ -78,14 +76,20 @@ export function KitModal({ open, onClose, kit, materiais }: KitModalProps) {
   const setItemUnidade = (materialId: number, unidade: Unidade) =>
     setItens((xs) => xs.map((it) => (it.materialId === materialId ? { ...it, unidade } : it)));
 
-  const candidates = materiais
-    .filter((m) => categoria === "" || m.categoria === categoria)
-    .filter((m) => !itens.some((it) => it.materialId === m.id))
-    .filter(
-      (m) =>
-        m.nome.toLowerCase().includes(search.toLowerCase()) ||
-        m.codigo.toLowerCase().includes(search.toLowerCase())
-    );
+  /** O picker entrega CatalogEntity; tipo="single" garante que nunca é kit. */
+  const addEntity = React.useCallback((e: CatalogEntity) => {
+    if (e.isKit) return;
+    addItem(e);
+  }, []);
+
+  // A categoria do kit trava o picker, mas ela é um NOME e o filtro é por id.
+  // Categoria não escolhida ainda (ou nome que não resolve) → sem trava.
+  const lockedCategoriaId = React.useMemo(() => {
+    if (categoria === "") return undefined;
+    return categorias.find((c) => c.nome === categoria)?.id;
+  }, [categoria, categorias]);
+
+  const excludeIds = React.useMemo(() => itens.map((it) => it.materialId), [itens]);
 
   const valid = nome.trim() !== "" && categoria !== "" && itens.length > 0;
   const pending = createKit.isPending || updateKit.isPending;
@@ -198,46 +202,15 @@ export function KitModal({ open, onClose, kit, materiais }: KitModalProps) {
             </div>
           )}
 
-          <HeroInput
-            value={search}
-            onValueChange={setSearch}
-            placeholder="Buscar material para adicionar..."
-            aria-label="Buscar material para adicionar"
-            variant="bordered"
-            radius="sm"
-            size="sm"
-            startContent={<Icon name="search" size={14} className="text-neutral-gray-6" />}
-            classNames={{
-              base: "mb-2.5",
-              inputWrapper: "!border-small h-10 border-neutral-gray-5 bg-white",
-              input: "text-[13px]",
-            }}
+          <EntityPickerList
+            tipo="single"
+            lockedCategoriaId={lockedCategoriaId}
+            excludeIds={excludeIds}
+            mode="add"
+            onSelect={addEntity}
+            maxHeightClass="max-h-[220px]"
+            emptyText="Nenhum material disponível para adicionar"
           />
-          <div className="max-h-[200px] overflow-y-auto rounded-lg border border-neutral-gray-4">
-            {candidates.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => addItem(m)}
-                className="flex w-full items-center gap-3 border-b border-neutral-gray-4 px-3 py-[9px] text-left last:border-b-0 hover:bg-primary-1"
-              >
-                <Icon name="plus" size={14} className="shrink-0 text-primary-7" />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[13px] font-semibold text-neutral-gray-11">
-                    {m.nome}
-                  </span>
-                  <span className="mt-px block text-[11px] text-neutral-gray-7">
-                    {m.codigo} · {m.fabricante}
-                  </span>
-                </span>
-              </button>
-            ))}
-            {candidates.length === 0 && (
-              <div className="p-3.5 text-center text-xs text-neutral-gray-6">
-                Nenhum material disponível para adicionar
-              </div>
-            )}
-          </div>
         </div>
       </div>
     </Modal>

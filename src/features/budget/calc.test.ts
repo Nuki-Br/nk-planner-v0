@@ -9,7 +9,9 @@ import {
   buildScopeRefs,
   calcAnyRow,
   effMaterial,
+  isOptionOwnPending,
   isOptionPending,
+  pendingCostItems,
   type BudgetDeps,
 } from "./calc";
 
@@ -69,9 +71,42 @@ describe("calcAnyRow", () => {
     expect(r?.kind).toBe("kit");
     if (r?.kind === "kit") {
       // 208*36.8 + 115*3 + 0*3.68 (rt-bcn pendente)
-      expect(r.result.debitoExt).toBeCloseTo(7999.4, 10);
-      expect(r.result.anyPending).toBe(true);
+      expect(r.result.debitoTotal).toBeCloseTo(7999.4, 10);
+      expect(r.result.subItemPending).toBe(true);
     }
+  });
+});
+
+describe("pendência de item de custo", () => {
+  const hall = t1.ambientes.find((a) => a.nome === "Hall")!;
+  const hallPiso = hall.componentes[0]!;
+  const rodape = seed.materiais.find((m) => m.codigo === "RDP-466-SL")!;
+  /** Zera o custo do rodapé (satélite fixo do Hall) no catálogo. */
+  const semRodape = deps({
+    materiais: seed.materiais.map((m) =>
+      m.id === rodape.id ? { ...m, custoMat: 0, custoMO: 0 } : m
+    ),
+  });
+
+  it("derruba todas as opções do componente afetado", () => {
+    for (const opt of hallPiso.options.filter((o) => !o.isDefault)) {
+      expect(isOptionPending(semRodape, hallPiso, opt)).toBe(true);
+    }
+  });
+
+  it("NÃO acusa a opção em si — o material dela está preenchido", () => {
+    for (const opt of hallPiso.options.filter((o) => !o.isDefault)) {
+      expect(isOptionOwnPending(semRodape, opt)).toBe(false);
+    }
+    expect(pendingCostItems(semRodape, hallPiso).map((c) => c.nome)).toEqual(["Rodapé"]);
+  });
+
+  it("não vaza para outros componentes nem outros ambientes", () => {
+    // A Sala não tem itens de custo: um rodapé sem preço no Hall não pode
+    // marcar as opções dela como pendentes.
+    const salaOpt = optByCodigo(salaPisoT1, "PP-6060-BI");
+    expect(isOptionPending(semRodape, salaPisoT1, salaOpt)).toBe(false);
+    expect(pendingCostItems(semRodape, salaPisoT1)).toEqual([]);
   });
 });
 

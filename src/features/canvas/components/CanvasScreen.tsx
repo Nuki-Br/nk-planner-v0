@@ -474,8 +474,6 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
         title={matPicker?.title}
         subtitle={matPicker?.subtitle}
         currentId={matPicker?.currentId ?? null}
-        materiais={materiais}
-        kits={kits}
         onClose={() => setMatPicker(null)}
         onConfirm={confirmMatPicker}
         confirming={pickerBusy}

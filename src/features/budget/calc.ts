@@ -19,6 +19,7 @@ import type {
   Ambiente,
   BudgetColumn,
   Componente,
+  CostComponent,
   Kit,
   Material,
   MaterialOption,
@@ -81,9 +82,9 @@ export function satelliteMats(deps: BudgetDeps, comp: Componente): Map<number, M
   return out;
 }
 
-/** Algum componente de custo "fixo" do componente está sem preço? */
-function anySatellitePending(deps: BudgetDeps, comp: Componente): boolean {
-  return (comp.custoComponentes ?? []).some((cc) => {
+/** Itens de custo "fixo" do componente que estão sem preço. */
+export function pendingCostItems(deps: BudgetDeps, comp: Componente): CostComponent[] {
+  return (comp.custoComponentes ?? []).filter((cc) => {
     if (cc.tipo !== "fixo") return false;
     if (cc.baseId == null) return true; // fixo sem material = mal configurado
     const m = getMaterial(deps.materiais, cc.baseId);
@@ -92,23 +93,33 @@ function anySatellitePending(deps: BudgetDeps, comp: Componente): boolean {
 }
 
 /**
- * Uma opção está pendente quando o custo (efetivo) de material é <= 0 — ou
- * quando algum componente de custo "fixo" do componente está sem preço: essa
- * linha entra no débito de TODA opção, então derruba o componente inteiro
- * (mesmo critério do sub-item de kit).
+ * A OPÇÃO em si está sem custo (o material/kit dela).
+ *
+ * Distinto de isOptionPending: um item de custo sem preço também exclui a linha
+ * dos totais, mas o material da opção pode estar preenchido. Quem monta a UI
+ * precisa desta versão para não acusar "aguardando custo" — e não oferecer
+ * "preencher custo base" — em item que já tem preço.
  */
-export function isOptionPending(
-  deps: BudgetDeps,
-  comp: Componente,
-  opt: MaterialOption
-): boolean {
-  if (anySatellitePending(deps, comp)) return true;
+export function isOptionOwnPending(deps: BudgetDeps, opt: MaterialOption): boolean {
   const ent = getOptionEntity(deps.materiais, deps.kits, opt);
   if (!ent) return false;
   if (ent.isKit) {
     return ent.itens.some((it) => effCustoMat(deps.baseCosts, it.materialId, it.custoMat) <= 0);
   }
   return effCustoMat(deps.baseCosts, ent.id, ent.custoMat) <= 0;
+}
+
+/**
+ * A linha sai dos totais: ou a própria opção está sem custo, ou algum item de
+ * custo "fixo" do componente está — essa linha entra no débito de TODA opção,
+ * então derruba o componente inteiro (mesmo critério do sub-item de kit).
+ */
+export function isOptionPending(
+  deps: BudgetDeps,
+  comp: Componente,
+  opt: MaterialOption
+): boolean {
+  return pendingCostItems(deps, comp).length > 0 || isOptionOwnPending(deps, opt);
 }
 
 /**
@@ -173,7 +184,8 @@ export function ambTotal(deps: BudgetDeps, amb: Ambiente): number {
       if (opt.isDefault) continue;
       if (opt.isKit) {
         const r = calcAnyRow(deps, comp, opt);
-        if (r?.kind === "kit" && !r.result.anyPending) t += r.result.total;
+        if (r?.kind === "kit" && !r.result.subItemPending && !r.result.satellitePending)
+          t += r.result.total;
         continue;
       }
       if (isOptionPending(deps, comp, opt)) continue;
@@ -209,10 +221,10 @@ export function buildScopeRefs(
 ): { scope: Record<string, number>; refs: ScopeRef[] } {
   const scope: Record<string, number> = {
     custo_troca: r.custoDeTroca,
-    valor_unitario: r.debitoExt,
+    valor_unitario: r.debitoTotal,
     quantitativo: r.qtdComRT,
-    debito: r.debitoExt,
-    credito: r.creditoExt,
+    debito: r.debitoTotal,
+    credito: r.creditoTotal,
   };
   const refs: ScopeRef[] = FIXED_REF_DEFS.map((f) => ({
     token: f.token,

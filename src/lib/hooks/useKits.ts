@@ -16,6 +16,7 @@ export function useCreateKit() {
     mutationFn: (input: KitInput) => createKit(input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.kits });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.catalogEntitiesAll });
     },
   });
 }
@@ -27,6 +28,7 @@ export function useUpdateKit() {
       updateKit(id, patch),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.kits });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.catalogEntitiesAll });
     },
   });
 }

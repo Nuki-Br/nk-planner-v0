@@ -2,10 +2,12 @@
 
 import React from "react";
 
-import { Button, Icon, Input, Modal, Select } from "@/components/ui";
+import { Button, Icon, Input, MaterialThumb, Modal, Select } from "@/components/ui";
+import { EntityPickerList } from "@/features/catalog/components/EntityPickerList";
 import { cn } from "@/lib/utils";
 import { UNIDADE_OPTIONS } from "@/shared/constants/unidades";
 import type {
+  CatalogEntity,
   CostComponent,
   CostComponentKind,
   CostComponentSide,
@@ -77,7 +79,7 @@ export function CostItemModal({
   ambNome,
   nOpcoes,
   qtdInicial,
-  materiais,
+  baseInicial,
   saving,
   onClose,
   onSave,
@@ -92,25 +94,49 @@ export function CostItemModal({
   /** Quantas opções de upgrade o componente tem (para o aviso de abrangência). */
   nOpcoes: number;
   qtdInicial: number;
-  materiais: Material[];
+  /** Material já gravado em `editing.baseId`, resolvido pelo chamador. */
+  baseInicial: Material | null;
   saving: boolean;
   onClose: () => void;
   onSave: (v: CostItemValue) => void;
 }) {
   const [nome, setNome] = React.useState("");
   const [tipo, setTipo] = React.useState<CostComponentKind>("espelho");
-  const [baseId, setBaseId] = React.useState<number | null>(null);
+  // Guarda a entidade, não só o id: a lista do picker vem paginada do servidor,
+  // então o material escolhido pode não estar em memória na hora de exibi-lo.
+  const [baseEntity, setBaseEntity] = React.useState<CatalogEntity | null>(null);
+  const [picking, setPicking] = React.useState(false);
   const [unidade, setUnidade] = React.useState<Unidade>("und");
   const [qtd, setQtd] = React.useState("1");
 
+  // Semeia UMA vez por abertura. `baseInicial` é recalculado a cada render a
+  // partir da lista de materiais do BudgetScreen, então um refetch em segundo
+  // plano troca a identidade do objeto — sem esta trava o efeito rodaria de
+  // novo e jogaria fora o material que o usuário acabou de escolher.
+  const seededRef = React.useRef(false);
   React.useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      seededRef.current = false;
+      return;
+    }
+    if (seededRef.current) return;
+    seededRef.current = true;
     setNome(editing?.nome ?? "");
     setTipo(editing?.tipo ?? "espelho");
-    setBaseId(editing?.baseId ?? null);
+    // `editing` só carrega baseId; o nome para exibir vem de baseInicial, que o
+    // BudgetScreen resolve com a lista que ele já tem para os cálculos.
+    setBaseEntity(baseInicial ? { ...baseInicial, isKit: false } : null);
+    setPicking(false);
     setUnidade(editing?.unidade ?? "und");
     setQtd(String(qtdInicial || 1));
-  }, [open, editing, qtdInicial]);
+  }, [open, editing, qtdInicial, baseInicial]);
+
+  const baseId = baseEntity?.id ?? null;
+
+  const pickBase = React.useCallback((e: CatalogEntity) => {
+    setBaseEntity(e);
+    setPicking(false);
+  }, []);
 
   const qtdNum = parseFloat(qtd.replace(",", ".")) || 0;
   const invalido = nome.trim() === "" || (tipo === "fixo" && baseId == null) || qtdNum <= 0;
@@ -156,52 +182,90 @@ export function CostItemModal({
             </span>
           </div>
           <p className="mt-1.5 text-[11px] leading-snug text-neutral-gray-7">
+            Peça que entra no custo mas <strong>não é escolhida pelo cliente</strong> — soleira,
+            rodapé, reserva técnica.{" "}
             {lado === "padrao" ? (
-              <>Soma ao crédito do material padrão de {compNome}.</>
+              <>Entra no crédito do material padrão, aumentando o desconto na troca.</>
             ) : (
               <>
-                Soma ao débito de <strong>todas as {nOpcoes} opções</strong> de {compNome} — não só
+                Entra no débito de <strong>todas as {nOpcoes} opções</strong> de {compNome}, não só
                 da linha clicada.
               </>
-            )}{" "}
-            Não é oferecido ao cliente na personalização.
+            )}
           </p>
         </div>
 
-        <Input label="Nome" value={nome} onValueChange={setNome} placeholder="Soleira, Rodapé…" />
+        <Input
+          label="Nome"
+          value={nome}
+          onValueChange={setNome}
+          placeholder="Soleira, Rodapé, Reserva técnica…"
+          description="Aparece como sub-linha abaixo do item na tabela"
+        />
 
         <div>
-          <p className="mb-1.5 text-xs font-semibold text-neutral-gray-9">Preço unitário</p>
+          <p className="mb-1 text-xs font-semibold text-neutral-gray-9">De onde vem o preço</p>
+          <p className="mb-2 text-[11px] leading-snug text-neutral-gray-6">
+            {lado === "padrao"
+              ? "O padrão é um material só, mas a peça pode ou não ser dele."
+              : "Cada opção tem um material diferente — a peça acompanha ou não essa troca."}
+          </p>
           <div className="flex gap-2">
             <RadioCard
               selected={tipo === "espelho"}
-              title="Espelha a opção"
+              title="Acompanha o material"
               desc={
                 lado === "padrao"
-                  ? "Usa o preço do material padrão — ex.: soleira do mesmo piso."
-                  : "Usa o preço da opção escolhida — ex.: soleira do mesmo porcelanato."
+                  ? "Mesmo preço por unidade do material padrão. Para peças cortadas do próprio material — a soleira do mesmo piso."
+                  : "Mesmo preço por unidade da opção que o cliente escolher, então muda a cada opção. Para peças do próprio material — soleira e reserva técnica do porcelanato escolhido."
               }
               onSelect={() => setTipo("espelho")}
             />
             <RadioCard
               selected={tipo === "fixo"}
-              title="Material fixo"
-              desc="Sempre o mesmo material do catálogo, em todas as opções."
+              title="Material próprio"
+              desc="Preço de um material do catálogo, igual em todas as opções. Para peças que não mudam com a escolha — o rodapé de poliestireno serve para qualquer piso. Precisa ter custo preenchido."
               onSelect={() => setTipo("fixo")}
             />
           </div>
         </div>
 
         {tipo === "fixo" && (
-          <Select
-            label="Material"
-            value={baseId != null ? String(baseId) : ""}
-            onValueChange={(v) => setBaseId(Number(v) || null)}
-            options={materiais.map((m) => ({
-              value: String(m.id),
-              label: `${m.nome} · ${m.fabricante}`,
-            }))}
-          />
+          <div>
+            <p className="mb-1.5 text-xs font-semibold text-neutral-gray-9">Material</p>
+            {baseEntity && !picking ? (
+              <div className="flex items-center gap-3 rounded-lg border border-neutral-gray-4 px-3 py-2.5">
+                <MaterialThumb
+                  url={baseEntity.isKit ? null : baseEntity.imagem?.url}
+                  alt={baseEntity.nome}
+                  isKit={baseEntity.isKit}
+                  size={36}
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[13px] font-semibold text-neutral-gray-11">
+                    {baseEntity.nome}
+                  </p>
+                  <p className="mt-px truncate text-[11px] text-neutral-gray-7">
+                    {baseEntity.isKit
+                      ? `${baseEntity.codigo} · ${baseEntity.itens.length} itens`
+                      : `${baseEntity.codigo} · ${baseEntity.fabricante || "sem fabricante"}`}
+                  </p>
+                </div>
+                <Button variant="bordered" size="sm" onPress={() => setPicking(true)}>
+                  Trocar
+                </Button>
+              </div>
+            ) : (
+              <EntityPickerList
+                tipo="single"
+                mode="single"
+                selectedId={baseId}
+                onSelect={pickBase}
+                maxHeightClass="max-h-[260px]"
+                emptyText="Nenhum material encontrado."
+              />
+            )}
+          </div>
         )}
 
         <div className="grid grid-cols-2 gap-3">
@@ -217,15 +281,16 @@ export function CostItemModal({
             step="0.01"
             value={qtd}
             onValueChange={setQtd}
-            description="Só desta tipologia"
+            description="Já com a reserva técnica embutida"
           />
         </div>
 
         <div className="flex items-start gap-2 rounded-lg bg-neutral-gray-2 px-3 py-2">
           <Icon name="info" size={13} className="mt-px shrink-0 text-neutral-gray-7" />
           <p className="text-[11px] leading-snug text-neutral-gray-8">
-            Nome, preço unitário e unidade valem para todas as tipologias que usam &ldquo;{ambNome}
-            &rdquo;. A quantidade é só desta tipologia.
+            Nome, origem do preço e unidade valem para <strong>todas as tipologias</strong> que
+            usam &ldquo;{ambNome}&rdquo;. A <strong>quantidade</strong> é só desta tipologia — cada
+            planta tem a sua.
           </p>
         </div>
       </div>
