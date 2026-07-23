@@ -159,6 +159,7 @@ async function main(): Promise<void> {
         PublishedAtLabel: p.publicadoEm ?? null,
         TotalItems: p.totalItens,
         FilledItems: p.itensPreenchidos,
+        UsesDebitCredit: p.usaDebitoCredito ?? true,
         CreatedAt: new Date(base + i * 1000), // garante ordem: projects[0] = âncora
       },
       select: { Id: true },

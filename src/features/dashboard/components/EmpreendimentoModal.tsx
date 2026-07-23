@@ -2,7 +2,7 @@
 
 import React from "react";
 
-import { Button, Input, Modal } from "@/components/ui";
+import { Button, Input, Modal, Switch } from "@/components/ui";
 import { useCreateProject, useUpdateProject } from "@/lib/hooks/useProjects";
 import { useTorres, useUnitGroups, useUpdateTorres } from "@/lib/hooks/useUnitGroups";
 import type { Project } from "@/shared/types/domain";
@@ -45,6 +45,7 @@ export function EmpreendimentoModal({
   const updateTorres = useUpdateTorres();
 
   const [nome, setNome] = React.useState("");
+  const [usaDebitoCredito, setUsaDebitoCredito] = React.useState(true);
   const [towers, setTowers] = React.useState<TowerDraft[]>([]);
   const [error, setError] = React.useState<string | null>(null);
   // Semeado por [open, project], NÃO pelas guardas "semeia uma vez" da tela
@@ -53,6 +54,7 @@ export function EmpreendimentoModal({
   React.useEffect(() => {
     if (!open) return;
     setNome(project?.nome ?? "");
+    setUsaDebitoCredito(project?.usaDebitoCredito !== false);
     setTowers([]);
     setError(null);
   }, [open, project]);
@@ -75,11 +77,15 @@ export function EmpreendimentoModal({
         const created = await createProject.mutateAsync({
           nome,
           torres: towers.map((t) => t.nome),
+          usaDebitoCredito,
         });
         onCreated?.(created);
       } else {
         const [, savedTorres] = await Promise.all([
-          updateProject.mutateAsync({ id: project.id, patch: { nome } }),
+          updateProject.mutateAsync({
+            id: project.id,
+            patch: { nome, usaDebitoCredito },
+          }),
           updateTorres.mutateAsync({ projectId: project.id, items: towers }),
         ]);
         // Ressincroniza com os ids reais: torres novas ganham id no servidor —
@@ -127,6 +133,22 @@ export function EmpreendimentoModal({
             onValueChange={setNome}
             placeholder="Ex: Parque Ibirapuera Residências"
           />
+          <div className="mt-4 flex items-start justify-between gap-4 rounded-lg border border-neutral-gray-4 bg-neutral-gray-2 px-3.5 py-3">
+            <div>
+              <div className="text-sm font-semibold text-neutral-gray-11">
+                Usar débito/crédito
+              </div>
+              <p className="mt-0.5 text-xs text-neutral-gray-7">
+                Quando desligado, a aba &ldquo;Preço final&rdquo; esconde a coluna Déb./Créd. e o
+                &ldquo;Custo troca&rdquo; vira &ldquo;Custo total&rdquo; (sem abater o crédito do padrão).
+              </p>
+            </div>
+            <Switch
+              isSelected={usaDebitoCredito}
+              onValueChange={setUsaDebitoCredito}
+              aria-label="Usar débito/crédito"
+            />
+          </div>
         </div>
         <div className="border-t border-neutral-gray-4 pt-4">
           <SectionTitle sub="Adicione as torres/blocos — os grupos de unidades referenciam estas torres">

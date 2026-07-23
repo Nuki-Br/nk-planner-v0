@@ -113,6 +113,10 @@ model Enterprise {
   TotalItems  Int @default(0)
   FilledItems Int @default(0)
 
+  /// Usa o fluxo de débito/crédito na aba "Preço final"? false esconde a coluna
+  /// Déb./Créd. e transforma "Custo troca" em "Custo total" (sem abater crédito).
+  UsesDebitCredit Boolean @default(true)
+
   CreatedAt DateTime @default(now()) @db.Timestamptz()
   UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
 

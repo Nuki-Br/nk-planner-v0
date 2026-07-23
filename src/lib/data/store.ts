@@ -38,6 +38,7 @@ export type ProjectPatch = Partial<
     | "prazo"
     | "totalItens"
     | "itensPreenchidos"
+    | "usaDebitoCredito"
   >
 >;
 
@@ -53,6 +54,8 @@ export interface ProjectInput {
   nome: string;
   /** Nomes das torres, na ordem — criadas na mesma transação do empreendimento. */
   torres: string[];
+  /** Ausente = usa débito/crédito (padrão). */
+  usaDebitoCredito?: boolean;
 }
 
 export async function createProject(input: ProjectInput): Promise<Project> {

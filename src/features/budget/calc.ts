@@ -38,6 +38,8 @@ export interface BudgetDeps {
   cols: BudgetColumn[];
   overrides: CellOverrides;
   baseCosts: BaseCosts;
+  /** Empreendimento usa débito/crédito? Ausente = sim (comportamento padrão). */
+  usaDebitoCredito?: boolean;
 }
 
 /** Custo de material efetivo (override da sessão sobrepõe o catálogo). */
@@ -185,6 +187,7 @@ export function calcAnyRow(
   opt: MaterialOption
 ): AnyRowResult | null {
   const ovr = deps.overrides[rowKey(opt.id)] ?? {};
+  const usaDC = deps.usaDebitoCredito ?? true;
   const padraoMat = padraoMaterial(deps, comp);
   const sats = satelliteMats(deps, comp);
   if (opt.isKit) {
@@ -200,7 +203,8 @@ export function calcAnyRow(
         deps.cols,
         opt.id,
         comp.padrao,
-        ovr
+        ovr,
+        usaDC
       ),
     };
   }
@@ -214,7 +218,8 @@ export function calcAnyRow(
     deps.cols,
     opt.id,
     comp.padrao,
-    ovr
+    ovr,
+    usaDC
   );
   return result ? { kind: "material", result } : null;
 }

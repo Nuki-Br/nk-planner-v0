@@ -112,6 +112,21 @@ describe("calcBudgetRow (material)", () => {
     expect(comRT.debitoTotal).toBeGreaterThan(semRT.debitoTotal); // débito muda
   });
 
+  // T-M1c — empreendimento sem débito/crédito: o crédito zera, então o
+  // "Custo total" (custoDeTroca) passa a ser o próprio débito estendido.
+  it("T-M1c: sem débito/crédito, custoDeTroca = debitoTotal e crédito = 0", () => {
+    const comDC = mustCalc(calcBudgetRow(piso002, piso001, plain(18.4, 15), new Map(), cols, null, null));
+    const semDC = mustCalc(
+      calcBudgetRow(piso002, piso001, plain(18.4, 15), new Map(), cols, null, null, {}, false)
+    );
+    expect(semDC.debitoTotal).toBeCloseTo(comDC.debitoTotal, 10); // débito não muda
+    expect(semDC.creditoTotal).toBe(0);
+    expect(semDC.custoDeTroca).toBeCloseTo(semDC.debitoTotal, 10); // = débito
+    // colunas livres que usam custo_troca acompanham o novo valor
+    expect(col(semDC, 1).value).toBeCloseTo(semDC.debitoTotal * 0.08, 10); // custo_troca * 8%
+    expect(semDC.total).toBeCloseTo(semDC.custoDeTroca + semDC.sumFree, 10);
+  });
+
   // T-M2 — não existe mais coluna calculada: um subtotal é uma coluna comum com
   // fórmula explícita, e por isso ENTRA no sumFree (as antigas rowTotal não).
   it("T-M2: subtotal é uma coluna comum e entra no sumFree", () => {

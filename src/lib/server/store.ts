@@ -24,7 +24,6 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { assertMediaFileInOrg } from "@/lib/server/media";
 import { resolveMediaUrl } from "@/lib/server/mediaRules";
-import { TAX_COLUMNS_DEFAULT } from "@/shared/constants/budget";
 import type {
   Ambiente,
   ImagemVinculada,
@@ -257,6 +256,7 @@ function toProject(row: EnterpriseRow): Project {
     publicadoEm: row.PublishedAtLabel,
     totalItens: row.TotalItems,
     itensPreenchidos: row.FilledItems,
+    usaDebitoCredito: row.UsesDebitCredit,
     taxColumns:
       row.BudgetColumns.length > 0
         ? [...row.BudgetColumns].sort((a, b) => a.Position - b.Position).map(toBudgetColumn)
@@ -558,6 +558,7 @@ export type ProjectPatch = Partial<
     | "prazo"
     | "totalItens"
     | "itensPreenchidos"
+    | "usaDebitoCredito"
   >
 >;
 
@@ -569,6 +570,7 @@ function projectPatchToData(patch: ProjectPatch): Prisma.EnterpriseUpdateInput {
   if (patch.prazo !== undefined) data.DeadlineLabel = patch.prazo;
   if (patch.totalItens !== undefined) data.TotalItems = patch.totalItens;
   if (patch.itensPreenchidos !== undefined) data.FilledItems = patch.itensPreenchidos;
+  if (patch.usaDebitoCredito !== undefined) data.UsesDebitCredit = patch.usaDebitoCredito;
   return data;
 }
 
@@ -593,6 +595,8 @@ export interface ProjectInput {
   nome: string;
   /** Nomes das torres, na ordem. Na criação toda torre é nova — daí string[]. */
   torres: string[];
+  /** Ausente = usa débito/crédito (default do schema). */
+  usaDebitoCredito?: boolean;
 }
 
 /**
@@ -627,16 +631,9 @@ export async function createProject(
       Name: nome,
       Developer: org?.name ?? null,
       Status: "rascunho",
+      UsesDebitCredit: input.usaDebitoCredito ?? true,
       TowerLabel: towerLabel(torres),
       Towers: { create: torres.map((t, i) => ({ Name: t, Position: i })) },
-      BudgetColumns: {
-        create: TAX_COLUMNS_DEFAULT.map((c, i) => ({
-          Name: c.nome,
-          Expr: c.expr,
-          Visible: c.visivel,
-          Position: i,
-        })),
-      },
     },
     include: ENTERPRISE_INCLUDE,
   });

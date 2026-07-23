@@ -146,6 +146,7 @@ function EmptySectionRow({
 
 function Th({
   children,
+  center = false,
   right = false,
   teal = false,
   sticky = false,
@@ -153,6 +154,7 @@ function Th({
 }: {
   children?: React.ReactNode;
   right?: boolean;
+  center?: boolean;
   teal?: boolean;
   sticky?: boolean;
   minW?: number;
@@ -162,7 +164,7 @@ function Th({
       style={{ minWidth: minW }}
       className={cn(
         "whitespace-nowrap border-b-2 border-neutral-gray-4 px-2.5 py-2 text-[10px] font-bold uppercase tracking-wider",
-        right ? "text-right" : "text-left",
+        right ? "text-right" : center ? "text-center" : "text-left",
         teal ? "bg-primary-1 text-primary-7" : "bg-neutral-gray-2 text-neutral-gray-7",
         sticky && "sticky left-0 z-[2]"
       )}
@@ -344,9 +346,15 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   const tip = tipologias.find((t) => t.id === activeTipId) ?? tipologias[0] ?? null;
   const currentVersion = versions.find((v) => v.isCurrent) ?? versions[0] ?? null;
 
+  const usaDC = project?.usaDebitoCredito !== false;
+  // Sem débito/crédito a coluna Déb./Créd. some, e é ela que hospeda o input de
+  // "Custo MO" no preenchimento inline — então caímos no painel expandRow (full
+  // width, independente das colunas) para não perder o campo.
+  const fillMode = usaDC ? pendingFill : "expandRow";
+
   const deps = React.useMemo<BudgetDeps>(
-    () => ({ materiais, kits, cols, overrides, baseCosts }),
-    [materiais, kits, cols, overrides, baseCosts]
+    () => ({ materiais, kits, cols, overrides, baseCosts, usaDebitoCredito: usaDC }),
+    [materiais, kits, cols, overrides, baseCosts, usaDC]
   );
 
   const affectedCols = React.useMemo(
@@ -458,8 +466,9 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
       </div>
     );
   // Colunas: Especificação, Qtd, Valor un., Déb/Créd, Custo troca, N livres,
-  // (+ coluna), Total final, Comentários (extremidade direita).
-  const colCount = 8 + cols.length;
+  // (+ coluna), Total final, Comentários (extremidade direita). Sem débito/crédito
+  // a coluna Déb/Créd some, então são 7 fixas em vez de 8.
+  const colCount = (usaDC ? 8 : 7) + cols.length;
   // Total por ambiente calculado UMA vez e reusado no cabeçalho de cada ambiente
   // e no grand-total (antes o motor rodava 2× por ambiente a cada render).
   const ambTotals = tip.ambientes.map((amb) => ambTotal(deps, amb));
@@ -814,7 +823,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
       )}
 
       {/* Abas de tipologia */}
-      <div className="flex border-b-2 border-neutral-gray-4">
+      <div className="flex border-b-2 border-neutral-gray-4 mb-2">
         {tipologias.map((t) => (
           <button
             key={t.id}
@@ -873,8 +882,8 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                 <Th sticky minW={216}>Especificação</Th>
                 <Th right>Qtd c/ RT</Th>
                 <Th right>Valor un.</Th>
-                <Th right>Déb./Créd.</Th>
-                <Th right>Custo troca</Th>
+                {usaDC && <Th right>Déb./Créd.</Th>}
+                <Th right>{usaDC ? "Custo troca" : "Custo total"}</Th>
                 {cols.map((col) => (
                   <ColHeaderCell
                     key={col.id}
@@ -892,7 +901,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                   />
                 ))}
                 <AddColumnTh onRequestCreate={() => setColumnModal({ mode: "create" })} />
-                <Th right teal>Total final</Th>
+                <Th center teal minW={120}>Total final</Th>
                 <Th />
               </tr>
             </thead>
@@ -925,7 +934,9 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                         colSpan={colCount}
                         className="bg-functional-success-light px-3.5 py-1 text-[10px] font-bold uppercase tracking-[0.06em] text-functional-success"
                       >
-                        Acabamentos padrão — crédito incluído no preço
+                        {usaDC
+                          ? "Acabamentos padrão — crédito incluído no preço"
+                          : "Acabamentos padrão — inclusos no preço base"}
                       </td>
                     </tr>
                     {!hasPadrao && !hasRegistro && (
@@ -957,7 +968,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                       const ownPending = isOptionOwnPending(deps, def);
                       const rk = rowKey(def.id);
                       const filling = fillOpen.has(rk);
-                      const inlineFill = ownPending && filling && pendingFill === "inline";
+                      const inlineFill = ownPending && filling && fillMode === "inline";
                       const draft = fillDraft[def.baseId] ?? { mat: "", mo: "" };
                       const rowBg = ownPending ? "bg-functional-warning-light" : bg;
                       const fillCell = inlineFill ? "bg-primary-1" : rowBg;
@@ -1005,7 +1016,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                       </span>
                                     )}
                                   </div>
-                                  {ownPending && !inlineFill && !(filling && pendingFill === "expandRow") && (
+                                  {ownPending && !inlineFill && !(filling && fillMode === "expandRow") && (
                                     <button
                                       type="button"
                                       onClick={() => openFill(rk, def.baseId)}
@@ -1060,27 +1071,29 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                 fmtBRL(valUnit)
                               )}
                             </Td>
-                            <Td right className={fillCell}>
-                              {inlineFill ? (
-                                <div className="flex flex-col items-end gap-0.5">
-                                  <span className="text-[8.5px] font-bold tracking-wide text-primary-7">
-                                    CUSTO MO
+                            {usaDC && (
+                              <Td right className={fillCell}>
+                                {inlineFill ? (
+                                  <div className="flex flex-col items-end gap-0.5">
+                                    <span className="text-[8.5px] font-bold tracking-wide text-primary-7">
+                                      CUSTO MO
+                                    </span>
+                                    <FillInput
+                                      value={draft.mo}
+                                      onChange={(v) => setDraftField(def.baseId, "mo", v)}
+                                      onEnter={() => commitFill(rk, def.baseId)}
+                                      onEscape={() => closeFill(rk)}
+                                    />
+                                  </div>
+                                ) : ownPending ? (
+                                  <span className="text-neutral-gray-5">—</span>
+                                ) : (
+                                  <span className="font-semibold text-functional-success">
+                                    Créd. {fmtBRL(valUnit * comp.qtd)}
                                   </span>
-                                  <FillInput
-                                    value={draft.mo}
-                                    onChange={(v) => setDraftField(def.baseId, "mo", v)}
-                                    onEnter={() => commitFill(rk, def.baseId)}
-                                    onEscape={() => closeFill(rk)}
-                                  />
-                                </div>
-                              ) : ownPending ? (
-                                <span className="text-neutral-gray-5">—</span>
-                              ) : (
-                                <span className="font-semibold text-functional-success">
-                                  Créd. {fmtBRL(valUnit * comp.qtd)}
-                                </span>
-                              )}
-                            </Td>
+                                )}
+                              </Td>
+                            )}
                             <Td right className={cn(fillCell, "text-neutral-gray-5")}>
                               {inlineFill ? (
                                 <div className="flex justify-end gap-1">
@@ -1121,10 +1134,11 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                 cells={c}
                                 isLast={ci === padChildren.length - 1}
                                 cols={cols}
+                                usaDebitoCredito={usaDC}
                                 {...costRowHandlers(amb, comp, "padrao")}
                               />
                             ))}
-                          {ownPending && filling && pendingFill === "expandRow" && (
+                          {ownPending && filling && fillMode === "expandRow" && (
                             <tr>
                               <td
                                 colSpan={colCount}
@@ -1236,16 +1250,28 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                           <Td right className={cn(bg, "text-neutral-gray-7")}>
                             {r.pending ? "—" : fmtBRL(r.valUn)}
                           </Td>
-                          <Td right className={bg}>
-                            {r.pending ? (
-                              <span className="text-neutral-gray-5">—</span>
+                          {usaDC && (
+                            <Td right className={bg}>
+                              {r.pending ? (
+                                <span className="text-neutral-gray-5">—</span>
+                              ) : (
+                                <span className="font-semibold text-neutral-gray-8">
+                                  Custo {fmtBRL(r.line)}
+                                </span>
+                              )}
+                            </Td>
+                          )}
+                          {/* Sem Déb./Créd., o custo do registro passa a aparecer na
+                              coluna "Custo total". */}
+                          <Td right className={cn(bg, "text-neutral-gray-5")}>
+                            {usaDC || r.pending ? (
+                              "—"
                             ) : (
                               <span className="font-semibold text-neutral-gray-8">
                                 Custo {fmtBRL(r.line)}
                               </span>
                             )}
                           </Td>
-                          <Td right className={cn(bg, "text-neutral-gray-5")}>—</Td>
                           {cols.map((col) => (
                             <Td key={col.id} right className={cn(bg, "text-neutral-gray-5")}>
                               —
@@ -1283,7 +1309,9 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                         colSpan={colCount}
                         className="bg-[#fff7ed] px-3.5 py-1 text-[10px] font-bold uppercase tracking-[0.06em] text-[#c2410c]"
                       >
-                        Acabamentos personalizados — débito cobrado do cliente
+                        {usaDC
+                          ? "Acabamentos personalizados — débito cobrado do cliente"
+                          : "Acabamentos personalizados — custo cobrado do cliente"}
                       </td>
                     </tr>
                     {!hasUpgrade && (
@@ -1388,15 +1416,17 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                 <Td right className={cn(kitBg, "text-neutral-gray-7")}>
                                   —
                                 </Td>
-                                <Td right className={kitBg}>
-                                  {r && !pending ? (
-                                    <span className="font-semibold text-[#c2410c]">
-                                      Déb. {fmtBRL(r.debitoItem)}
-                                    </span>
-                                  ) : (
-                                    "—"
-                                  )}
-                                </Td>
+                                {usaDC && (
+                                  <Td right className={kitBg}>
+                                    {r && !pending ? (
+                                      <span className="font-semibold text-[#c2410c]">
+                                        Déb. {fmtBRL(r.debitoItem)}
+                                      </span>
+                                    ) : (
+                                      "—"
+                                    )}
+                                  </Td>
+                                )}
                                 <Td right className={cn(kitBg, "text-neutral-gray-8")}>
                                   {r && !pending ? (
                                     <span
@@ -1435,6 +1465,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                     cells={c}
                                     isLast={ci === kitChildren.length - 1}
                                     cols={cols}
+                                    usaDebitoCredito={usaDC}
                                     {...costRowHandlers(amb, comp, "upgrade")}
                                   />
                                 ))}
@@ -1461,7 +1492,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                         const rowBg = pending ? "bg-functional-warning-light" : "bg-white";
                         const cmts = commentThreads[rk] ?? [];
                         const filling = fillOpen.has(rk);
-                        const inlineFill = pending && filling && pendingFill === "inline";
+                        const inlineFill = pending && filling && fillMode === "inline";
                         const draft = fillDraft[opt.baseId] ?? { mat: "", mo: "" };
                         const fillCell = inlineFill ? "bg-primary-1" : rowBg;
                         // Componentes de custo do lado upgrade: entram no débito
@@ -1512,7 +1543,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                         </span>
                                       )}
                                     </div>
-                                    {ownPending && !inlineFill && !(filling && pendingFill === "expandRow") && (
+                                    {ownPending && !inlineFill && !(filling && fillMode === "expandRow") && (
                                       <button
                                         type="button"
                                         onClick={() => openFill(rk, opt.baseId)}
@@ -1569,27 +1600,29 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                   "—"
                                 )}
                               </Td>
-                              <Td right className={fillCell}>
-                                {inlineFill ? (
-                                  <div className="flex flex-col items-end gap-0.5">
-                                    <span className="text-[8.5px] font-bold tracking-wide text-primary-7">
-                                      CUSTO MO
+                              {usaDC && (
+                                <Td right className={fillCell}>
+                                  {inlineFill ? (
+                                    <div className="flex flex-col items-end gap-0.5">
+                                      <span className="text-[8.5px] font-bold tracking-wide text-primary-7">
+                                        CUSTO MO
+                                      </span>
+                                      <FillInput
+                                        value={draft.mo}
+                                        onChange={(v) => setDraftField(opt.baseId, "mo", v)}
+                                        onEnter={() => commitFill(rk, opt.baseId)}
+                                        onEscape={() => closeFill(rk)}
+                                      />
+                                    </div>
+                                  ) : r ? (
+                                    <span className="font-semibold text-[#c2410c]">
+                                      Déb. {fmtBRL(r.debitoItem)}
                                     </span>
-                                    <FillInput
-                                      value={draft.mo}
-                                      onChange={(v) => setDraftField(opt.baseId, "mo", v)}
-                                      onEnter={() => commitFill(rk, opt.baseId)}
-                                      onEscape={() => closeFill(rk)}
-                                    />
-                                  </div>
-                                ) : r ? (
-                                  <span className="font-semibold text-[#c2410c]">
-                                    Déb. {fmtBRL(r.debitoItem)}
-                                  </span>
-                                ) : (
-                                  "—"
-                                )}
-                              </Td>
+                                  ) : (
+                                    "—"
+                                  )}
+                                </Td>
+                              )}
                               <Td right className={cn(fillCell, "text-neutral-gray-8")}>
                                 {inlineFill ? (
                                   <div className="flex justify-end gap-1">
@@ -1662,10 +1695,11 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                   cells={c}
                                   isLast={ci === matChildren.length - 1}
                                   cols={cols}
+                                  usaDebitoCredito={usaDC}
                                   {...costRowHandlers(amb, comp, "upgrade")}
                                 />
                               ))}
-                            {pending && filling && pendingFill === "expandRow" && (
+                            {pending && filling && fillMode === "expandRow" && (
                               <tr>
                                 <td
                                   colSpan={colCount}
@@ -1723,7 +1757,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
 
                     <tr>
                       <td
-                        colSpan={6 + cols.length}
+                        colSpan={(usaDC ? 6 : 5) + cols.length}
                         className="border-b border-neutral-gray-4 border-t-2 border-t-neutral-gray-5 bg-neutral-gray-2 px-3.5 py-[9px] text-right text-xs font-bold text-neutral-gray-8"
                       >
                         Total — {amb.nome}
@@ -1742,7 +1776,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
             <tbody>
               <tr>
                 <td
-                  colSpan={6 + cols.length}
+                  colSpan={(usaDC ? 6 : 5) + cols.length}
                   className="px-3.5 py-3 text-right text-[13px] font-bold text-neutral-gray-11"
                 >
                   Total geral — {tip.nome}

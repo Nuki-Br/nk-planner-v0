@@ -325,6 +325,12 @@ export interface Project {
   publicadoEm?: string | null;
   totalItens: number;
   itensPreenchidos: number;
+  /**
+   * Empreendimento usa o fluxo de débito/crédito na aba "Preço final"?
+   * Ausente/true = sim (padrão). false = esconde a coluna "Déb./Créd." e o
+   * "Custo troca" vira "Custo total" (só o débito, sem subtrair o crédito).
+   */
+  usaDebitoCredito?: boolean;
   /** Fonte viva das taxas de formação de preço. */
   taxColumns?: BudgetColumn[];
 }

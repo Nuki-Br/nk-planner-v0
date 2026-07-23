@@ -211,7 +211,10 @@ export function calcBudgetRow(
   cols: BudgetColumn[],
   optionId: number | null,
   padraoOptionId: number | null,
-  rowOverrides: RowOverrides = {}
+  rowOverrides: RowOverrides = {},
+  // Empreendimentos que não usam débito/crédito zeram o lado do crédito: o
+  // "Custo total" vira só o débito estendido, sem subtrair o padrão.
+  usaDebitoCredito = true
 ): BudgetRowResult | null {
   if (!padraoMat || !upgradeMat) return null;
   const qtdComRT = comp.qtd * (1 + comp.rt / 100);
@@ -219,11 +222,15 @@ export function calcBudgetRow(
   const valUnPad = padraoMat.custoMat + padraoMat.custoMO;
 
   const satUpg = resolveSatellites(comp, "upgrade", valUnUpg, satelliteMats, optionId);
-  const satPad = resolveSatellites(comp, "padrao", valUnPad, satelliteMats, padraoOptionId);
+  // Sem crédito, os satélites do lado padrão não entram: não subtraem nem
+  // marcam a linha de upgrade como pendente por falta de custo do padrão.
+  const satPad = usaDebitoCredito
+    ? resolveSatellites(comp, "padrao", valUnPad, satelliteMats, padraoOptionId)
+    : [];
   const satellites = [...satUpg, ...satPad];
 
   const debitoItem = valUnUpg * qtdComRT;
-  const creditoItem = valUnPad * comp.qtd; // crédito sem RT
+  const creditoItem = usaDebitoCredito ? valUnPad * comp.qtd : 0; // crédito sem RT
   const debitoTotal = debitoItem + sumLines(satUpg);
   const creditoTotal = creditoItem + sumLines(satPad);
   const custoDeTroca = debitoTotal - creditoTotal;
@@ -260,7 +267,8 @@ export function calcKitRow(
   cols: BudgetColumn[],
   optionId: number | null,
   padraoOptionId: number | null,
-  rowOverrides: RowOverrides = {}
+  rowOverrides: RowOverrides = {},
+  usaDebitoCredito = true
 ): KitRowResult {
   const qtds = comp.kitQtds ?? {};
   const subItems: KitSubItemResult[] = [];
@@ -278,12 +286,14 @@ export function calcKitRow(
 
   // Para um kit, o "espelho" acompanha o total do kit — não há valor unitário.
   const satUpg = resolveSatellites(comp, "upgrade", kitTotal, satelliteMats, optionId);
-  const satPad = resolveSatellites(comp, "padrao", valUnPad, satelliteMats, padraoOptionId);
+  const satPad = usaDebitoCredito
+    ? resolveSatellites(comp, "padrao", valUnPad, satelliteMats, padraoOptionId)
+    : [];
   const satellites = [...satUpg, ...satPad];
 
   // O débito do "item" de um kit é a soma dos sub-itens: eles SÃO o item.
   const debitoItem = kitTotal;
-  const creditoItem = valUnPad * comp.qtd;
+  const creditoItem = usaDebitoCredito ? valUnPad * comp.qtd : 0;
   const debitoTotal = debitoItem + sumLines(satUpg);
   const creditoTotal = creditoItem + sumLines(satPad);
   const custoDeTroca = debitoTotal - creditoTotal;

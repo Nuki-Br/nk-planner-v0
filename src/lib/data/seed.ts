@@ -479,7 +479,7 @@ export function createSeed(): SeedData {
     { id: nid(), nome: "Jardins do Tietê", torre: "Torres A e B", incorporadora: "Grupo Axis", status: "publicado", enviadoEm: "12/03/2026", prazo: "28/03/2026", totalItens: 88, itensPreenchidos: 88 },
     { id: nid(), nome: "Residencial Serra Dourada", torre: "Torre 1", incorporadora: "Grupo Axis", status: "em_preenchimento", enviadoEm: "28/05/2026", prazo: "10/06/2026", totalItens: 52, itensPreenchidos: 31 },
     { id: nid(), nome: "Vila Olímpia Towers", torre: "Torres A, B, C", incorporadora: "Grupo Axis", status: "rascunho", enviadoEm: null, prazo: null, totalItens: 0, itensPreenchidos: 0 },
-    { id: nid(), nome: "Alameda Santos Prime", torre: "Torre Única", incorporadora: "Grupo Axis", status: "rascunho", enviadoEm: null, prazo: null, totalItens: 0, itensPreenchidos: 0 },
+    { id: nid(), nome: "Alameda Santos Prime", torre: "Torre Única", incorporadora: "Grupo Axis", status: "rascunho", enviadoEm: null, prazo: null, totalItens: 0, itensPreenchidos: 0, usaDebitoCredito: false },
   ];
 
   return { materiais, kits, tipologias, torres, unitGroups, versions, projects, comments, portalFills: {} };

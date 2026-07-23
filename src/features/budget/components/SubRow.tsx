@@ -60,13 +60,15 @@ function Td({
  * Sub-linha indentada sob uma linha mestre. Só qtd, valor unitário e o valor da
  * linha: colunas de taxa e total são da mestre — o satélite já está somado nela.
  */
-export function SubRow({ cells, isLast, cols, onEdit, onRemove }: {
+export function SubRow({ cells, isLast, cols, onEdit, onRemove, usaDebitoCredito = true }: {
   cells: SubRowCells;
   isLast: boolean;
   cols: BudgetColumn[];
   /** Só itens de custo são editáveis — sub-item de kit vem do catálogo. */
   onEdit?: (costItemId: number) => void;
   onRemove?: (costItemId: number) => void;
+  /** Empreendimento usa débito/crédito? false esconde a coluna Déb./Créd. */
+  usaDebitoCredito?: boolean;
 }) {
   const editable = cells.costItemId != null;
   return (
@@ -136,21 +138,23 @@ export function SubRow({ cells, isLast, cols, onEdit, onRemove }: {
       <Td right className="bg-white text-neutral-gray-7">
         {cells.pending ? "—" : fmtBRL(cells.valUn)}
       </Td>
-      <Td right className="bg-white">
-        {cells.pending ? (
-          <span className="text-neutral-gray-5">—</span>
-        ) : (
-          <span
-            className={cn(
-              "font-semibold",
-              cells.credito ? "text-functional-success" : "text-[#c2410c]"
-            )}
-          >
-            {cells.credito ? "Créd. " : "Déb. "}
-            {fmtBRL(cells.line)}
-          </span>
-        )}
-      </Td>
+      {usaDebitoCredito && (
+        <Td right className="bg-white">
+          {cells.pending ? (
+            <span className="text-neutral-gray-5">—</span>
+          ) : (
+            <span
+              className={cn(
+                "font-semibold",
+                cells.credito ? "text-functional-success" : "text-[#c2410c]"
+              )}
+            >
+              {cells.credito ? "Créd. " : "Déb. "}
+              {fmtBRL(cells.line)}
+            </span>
+          )}
+        </Td>
+      )}
       <Td right className="bg-white text-neutral-gray-5">—</Td>
       {cols.map((col) => (
         <Td key={col.id} right className="bg-white text-neutral-gray-5">
