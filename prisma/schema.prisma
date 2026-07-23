@@ -163,10 +163,11 @@ model Room {
   CreatedAt DateTime @default(now()) @db.Timestamptz()
   UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
 
-  Enterprise     Enterprise      @relation(fields: [EnterpriseId], references: [Id], onDelete: Cascade)
+  Enterprise     Enterprise         @relation(fields: [EnterpriseId], references: [Id], onDelete: Cascade)
   RoomComponents RoomComponent[]
   Materials      Material[]
   BlueprintRooms BlueprintRoom[]
+  CostRegistros  RoomCostRegistro[]
 
   @@index([EnterpriseId])
 }
@@ -224,7 +225,6 @@ model BlueprintRoomComponent {
   BlueprintRoom BlueprintRoom      @relation(fields: [BlueprintRoomId], references: [Id], onDelete: Cascade)
   RoomComponent RoomComponent      @relation(fields: [RoomComponentId], references: [Id], onDelete: Cascade)
   KitUsages     MaterialKitUsage[]
-  CostUsages    CostItemUsage[]
 
   @@unique([BlueprintRoomId, RoomComponentId])
   @@index([BlueprintRoomId])
@@ -254,6 +254,8 @@ model Material {
   Enterprise          Enterprise      @relation(fields: [EnterpriseId], references: [Id], onDelete: Cascade)
   BaseMaterial        BaseMaterial    @relation(fields: [BaseMaterialId], references: [Id], onDelete: Restrict)
   Comments            Comment[]
+  /// Itens de custo avulsos presos a esta opção (escopo do satélite).
+  ScopedCostItems     RoomComponentCostItem[] @relation("CostItemScope")
 
   @@unique([RoomComponentId, BaseMaterialId])
   @@index([RoomComponentId])
@@ -347,7 +349,10 @@ model MaterialKitUsage {
 // Espelha o par MaterialKitItem/MaterialKitUsage: definição compartilhada no
 // RoomComponent + quantitativo por planta.
 
-/// Definição do componente de custo — COMPARTILHADA entre plantas.
+/// Definição do componente de custo — COMPARTILHADA entre todas as plantas que
+/// usam o ambiente (definição E quantidade). O escopo é dado por MaterialId:
+/// NULL = vale para todas as opções do componente (upgrade) / linha padrão;
+/// preenchido = avulso, só para aquela opção.
 model RoomComponentCostItem {
   Id              Int          @id @default(autoincrement())
   RoomComponentId Int
@@ -356,34 +361,47 @@ model RoomComponentCostItem {
   Side            CostItemSide @default(upgrade)
   /// BaseMaterial quando Kind = fixo; NULL quando espelho (segue a opção).
   BaseMaterialId  Int?
+  /// Opção (Material) a que o item está preso. NULL = todas as opções.
+  MaterialId      Int?
   Unit            String
+  /// Quantitativo — compartilhado entre todas as plantas do ambiente.
+  UsageQuantity   Float        @default(0)
   Position        Int          @default(0)
 
   CreatedAt DateTime @default(now()) @db.Timestamptz()
   UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
 
-  RoomComponent RoomComponent   @relation(fields: [RoomComponentId], references: [Id], onDelete: Cascade)
+  RoomComponent RoomComponent @relation(fields: [RoomComponentId], references: [Id], onDelete: Cascade)
   /// Restrict: apagar um material usado como satélite zeraria o custo de troca
   /// de todas as opções do componente em silêncio.
-  BaseMaterial  BaseMaterial?   @relation("CostItemMaterial", fields: [BaseMaterialId], references: [Id], onDelete: Restrict)
-  Usages        CostItemUsage[]
+  BaseMaterial  BaseMaterial? @relation("CostItemMaterial", fields: [BaseMaterialId], references: [Id], onDelete: Restrict)
+  /// Cascade: apagar a opção apaga seus itens de custo avulsos.
+  Material      Material?     @relation("CostItemScope", fields: [MaterialId], references: [Id], onDelete: Cascade)
 
   @@index([RoomComponentId])
   @@index([BaseMaterialId])
+  @@index([MaterialId])
 }
 
-/// Quantitativo de componente de custo POR PLANTA (Componente.custoQtds).
-model CostItemUsage {
-  Id                       Int   @id @default(autoincrement())
-  BlueprintRoomComponentId Int
-  CostItemId               Int
-  UsageQuantity            Float
+/// Linha de custo avulsa (registro) do AMBIENTE — nome em texto livre, sem
+/// vínculo a componente. Só consta como custo; não é ofertada nem gera crédito.
+/// Compartilhada entre as plantas que usam o Room.
+model RoomCostRegistro {
+  Id            Int    @id @default(autoincrement())
+  RoomId        Int
+  Name          String
+  /// Valor unitário digitado (R$) — a linha é só registro, sem material.
+  UnitCost      Float  @default(0)
+  Unit          String
+  UsageQuantity Float  @default(0)
+  Position      Int    @default(0)
 
-  BlueprintRoomComponent BlueprintRoomComponent @relation(fields: [BlueprintRoomComponentId], references: [Id], onDelete: Cascade)
-  CostItem               RoomComponentCostItem  @relation(fields: [CostItemId], references: [Id], onDelete: Cascade)
+  CreatedAt DateTime @default(now()) @db.Timestamptz()
+  UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
 
-  @@unique([BlueprintRoomComponentId, CostItemId])
-  @@index([BlueprintRoomComponentId])
+  Room Room @relation(fields: [RoomId], references: [Id], onDelete: Cascade)
+
+  @@index([RoomId])
 }
 
 // ─── Features só do planner (re-escopadas a Enterprise, ids Int) ────────

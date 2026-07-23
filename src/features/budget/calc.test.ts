@@ -6,6 +6,7 @@ import type { Componente, MaterialOption } from "@/shared/types/domain";
 
 import {
   ambTotal,
+  ambienteRegistros,
   buildScopeRefs,
   calcAnyRow,
   effMaterial,
@@ -98,7 +99,8 @@ describe("pendência de item de custo", () => {
     for (const opt of hallPiso.options.filter((o) => !o.isDefault)) {
       expect(isOptionOwnPending(semRodape, opt)).toBe(false);
     }
-    expect(pendingCostItems(semRodape, hallPiso).map((c) => c.nome)).toEqual(["Rodapé"]);
+    const upg = hallPiso.options.find((o) => !o.isDefault)!;
+    expect(pendingCostItems(semRodape, hallPiso, upg.id).map((c) => c.nome)).toEqual(["Rodapé"]);
   });
 
   it("não vaza para outros componentes nem outros ambientes", () => {
@@ -106,7 +108,7 @@ describe("pendência de item de custo", () => {
     // marcar as opções dela como pendentes.
     const salaOpt = optByCodigo(salaPisoT1, "PP-6060-BI");
     expect(isOptionPending(semRodape, salaPisoT1, salaOpt)).toBe(false);
-    expect(pendingCostItems(semRodape, salaPisoT1)).toEqual([]);
+    expect(pendingCostItems(semRodape, salaPisoT1, salaOpt.id)).toEqual([]);
   });
 });
 
@@ -125,6 +127,25 @@ describe("ambTotal", () => {
       amb
     );
     expect(comCusto).toBeGreaterThan(semPendentes);
+  });
+});
+
+describe("ambienteRegistros", () => {
+  function findHall() {
+    for (const tip of seed.tipologias) {
+      const a = tip.ambientes.find((x) => x.nome === "Hall");
+      if (a) return a;
+    }
+    throw new Error("ambiente Hall não encontrado");
+  }
+
+  it("resolve a linha-registro do ambiente (Parede — Pintura látex)", () => {
+    const regs = ambienteRegistros(deps(), findHall());
+    expect(regs).toHaveLength(1);
+    expect(regs[0]!.registro.nome).toBe("Parede — Pintura látex");
+    expect(regs[0]!.valUn).toBe(60); // valor unitário digitado
+    expect(regs[0]!.line).toBeCloseTo(60 * 24, 6);
+    expect(regs[0]!.pending).toBe(false);
   });
 });
 

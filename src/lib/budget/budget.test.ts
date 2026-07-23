@@ -65,7 +65,6 @@ const plain = (qtd: number, rt: number): CompCalcInput => ({
   qtd,
   rt,
   custoComponentes: [],
-  custoQtds: {},
 });
 
 /** Materiais dos satélites "fixo" de um componente do seed. */
@@ -89,7 +88,7 @@ function sat(r: BudgetRowResult, nome: string) {
 describe("calcBudgetRow (material)", () => {
   // T-M1 — Sala/Living Piso: qtd 18.40, rt 15, padrão piso-001, upgrade piso-002
   it("T-M1: linha com colunas padrão do projeto (convenção estendida)", () => {
-    const r = mustCalc(calcBudgetRow(piso002, piso001, plain(18.4, 15), new Map(), cols));
+    const r = mustCalc(calcBudgetRow(piso002, piso001, plain(18.4, 15), new Map(), cols, null, null));
     expect(r.qtdComRT).toBeCloseTo(21.16, 10); // 18.4 * 1.15
     expect(r.valUnUpg).toBe(120);
     expect(r.valUnPad).toBe(84.5);
@@ -107,8 +106,8 @@ describe("calcBudgetRow (material)", () => {
 
   // T-M1b — a reserva técnica é perda do UPGRADE: só o débito a carrega
   it("T-M1b: crédito usa a quantidade líquida, débito usa a quantidade com RT", () => {
-    const semRT = mustCalc(calcBudgetRow(piso002, piso001, plain(18.4, 0), new Map(), cols));
-    const comRT = mustCalc(calcBudgetRow(piso002, piso001, plain(18.4, 15), new Map(), cols));
+    const semRT = mustCalc(calcBudgetRow(piso002, piso001, plain(18.4, 0), new Map(), cols, null, null));
+    const comRT = mustCalc(calcBudgetRow(piso002, piso001, plain(18.4, 15), new Map(), cols, null, null));
     expect(semRT.creditoTotal).toBeCloseTo(comRT.creditoTotal, 10); // crédito não muda com a RT
     expect(comRT.debitoTotal).toBeGreaterThan(semRT.debitoTotal); // débito muda
   });
@@ -126,7 +125,7 @@ describe("calcBudgetRow (material)", () => {
         visivel: true,
       },
     ];
-    const r = mustCalc(calcBudgetRow(piso002, piso001, plain(18.4, 15), new Map(), colsComp));
+    const r = mustCalc(calcBudgetRow(piso002, piso001, plain(18.4, 15), new Map(), colsComp, null, null));
     expect(col(r, 101).value).toBeCloseTo(127.972, 10); // 78.752 + 49.22
     expect(r.sumFree).toBeCloseTo(78.752 + 49.22 + 127.972, 10);
   });
@@ -139,7 +138,7 @@ describe("calcBudgetRow (material)", () => {
       { id: 202, nome: "Subtotal", expr: "=taxa_construtora + dobro", visivel: true },
       { id: 203, nome: "Mais um", expr: "=subtotal + 1", visivel: true },
     ];
-    const r = mustCalc(calcBudgetRow(piso002, piso001, plain(18.4, 15), new Map(), colsRef));
+    const r = mustCalc(calcBudgetRow(piso002, piso001, plain(18.4, 15), new Map(), colsRef, null, null));
     expect(col(r, 201).value).toBeCloseTo(157.504, 10); // 78.752 * 2
     expect(col(r, 202).value).toBeCloseTo(236.256, 10); // 78.752 + 157.504
     expect(col(r, 203).value).toBeCloseTo(237.256, 10); // subtotal + 1
@@ -148,7 +147,7 @@ describe("calcBudgetRow (material)", () => {
   // T-M4 — override por célula (keyed por String(col.id))
   it("T-M4: override por célula é um valor PLANO da linha, não por unidade", () => {
     const r = mustCalc(
-      calcBudgetRow(piso002, piso001, plain(18.4, 15), new Map(), cols, { [String(cols[0]!.id)]: "10" })
+      calcBudgetRow(piso002, piso001, plain(18.4, 15), new Map(), cols, null, null, { [String(cols[0]!.id)]: "10" })
     );
     expect(col(r, 1).value).toBe(10);
     expect(col(r, 1).overridden).toBe(true);
@@ -164,7 +163,7 @@ describe("calcBudgetRow (material)", () => {
       { id: 301, nome: "Quebrada", expr: "=inexistente * 2", visivel: true },
       { id: 302, nome: "Dependente", expr: "=quebrada + 1", visivel: true },
     ];
-    const r = mustCalc(calcBudgetRow(piso002, piso001, plain(18.4, 15), new Map(), colsErr));
+    const r = mustCalc(calcBudgetRow(piso002, piso001, plain(18.4, 15), new Map(), colsErr, null, null));
     expect(col(r, 301).error).toBe('coluna "inexistente" não encontrada');
     expect(col(r, 301).value).toBe(0);
     expect(col(r, 302).value).toBe(1); // quebrada = 0 no escopo
@@ -177,8 +176,8 @@ describe("calcBudgetRow (material)", () => {
     const nicho = findComp((c) => c.nome === "Nicho");
     expect(nicho.padrao).toBeNull();
     expect(padraoMat(nicho)).toBeUndefined();
-    expect(calcBudgetRow(piso002, padraoMat(nicho), nicho, new Map(), cols)).toBeNull();
-    expect(calcBudgetRow(undefined, piso001, plain(1, 0), new Map(), cols)).toBeNull();
+    expect(calcBudgetRow(piso002, padraoMat(nicho), nicho, new Map(), cols, null, null)).toBeNull();
+    expect(calcBudgetRow(undefined, piso001, plain(1, 0), new Map(), cols, null, null)).toBeNull();
   });
 });
 
@@ -193,7 +192,7 @@ describe("calcKitRow (kit)", () => {
 
   // T-K1 — agrega sub-itens e credita o padrão
   it("T-K1: agrega sub-itens e credita o padrão", () => {
-    const r = calcKitRow(bronze, metaisComp, padraoMat(metaisComp), new Map(), cols);
+    const r = calcKitRow(bronze, metaisComp, padraoMat(metaisComp), new Map(), cols, null, null);
     expect(r.debitoTotal).toBe(1240); // 170*2 + 520*1 + 280*1 + 100*1
     expect(r.qtdComRT).toBe(1);
     expect(r.creditoTotal).toBe(850); // met-001 (850) * 1
@@ -208,7 +207,7 @@ describe("calcKitRow (kit)", () => {
 
   // T-K2 — kit NÃO multiplica por qtdComRT (extensão já está nos sub-itens)
   it("T-K2: total do kit não é multiplicado por qtdComRT", () => {
-    const r = calcKitRow(barcelona, salaPisoT1, padraoMat(salaPisoT1), new Map(), cols);
+    const r = calcKitRow(barcelona, salaPisoT1, padraoMat(salaPisoT1), new Map(), cols, null, null);
     // piso-bcn 208 * 18.40 + sol-bcn 115 * 2 + rt-bcn (pendente, 0) * 1.84
     expect(r.debitoTotal).toBeCloseTo(4057.2, 10);
     expect(r.qtdComRT).toBeCloseTo(21.16, 10);
@@ -223,19 +222,19 @@ describe("calcKitRow (kit)", () => {
 
   // T-P1 — pendência é derivada do custo (custoMat <= 0), não mais de um Set
   it("T-P1: sub-item com custoMat <= 0 marca a linha como pendente", () => {
-    const r = calcKitRow(barcelona, salaPisoT1, padraoMat(salaPisoT1), new Map(), cols);
+    const r = calcKitRow(barcelona, salaPisoT1, padraoMat(salaPisoT1), new Map(), cols, null, null);
     const rtBcn = r.subItems.find((s) => s.item.nome === "Reserva Técnica Porcelanato Barcelona");
     expect(rtBcn?.item.custoMat).toBe(0);
     expect(rtBcn?.pending).toBe(true);
     expect(r.subItemPending).toBe(true);
 
     // kit todo precificado → sem pendência; zerar um sub-item reintroduz a pendência
-    expect(calcKitRow(bronze, metaisComp, padraoMat(metaisComp), new Map(), cols).subItemPending).toBe(false);
+    expect(calcKitRow(bronze, metaisComp, padraoMat(metaisComp), new Map(), cols, null, null).subItemPending).toBe(false);
     const bronzeZerado: Kit = {
       ...bronze,
       itens: bronze.itens.map((it, i) => (i === 0 ? { ...it, custoMat: 0 } : it)),
     };
-    const rz = calcKitRow(bronzeZerado, metaisComp, padraoMat(metaisComp), new Map(), cols);
+    const rz = calcKitRow(bronzeZerado, metaisComp, padraoMat(metaisComp), new Map(), cols, null, null);
     expect(rz.subItems[0]?.pending).toBe(true);
     expect(rz.subItemPending).toBe(true);
   });
@@ -255,7 +254,9 @@ describe("componentes de custo (Hall)", () => {
         padraoMat(hall),
         hall,
         mats,
-        cols
+        cols,
+        null,
+        null
       )
     );
   const bcn = calc(mat("MS-BCN-120").id);
@@ -316,6 +317,74 @@ describe("componentes de custo (Hall)", () => {
     }
     // com custo, nenhuma pendência
     for (const opt of upgrades) expect(calc(opt.baseId).satellitePending).toBe(false);
+  });
+});
+
+// Escopo do item de custo: avulso (materialOptionId) só entra na sua opção;
+// materialOptionId null vale para todas.
+describe("escopo do item de custo (avulso vs todas as opções)", () => {
+  const RODAPE_BASE = 999999; // baseId de fabricação, sem custo → fixo pendente
+  const item = (
+    materialOptionId: number | null,
+    tipo: "espelho" | "fixo",
+    lado: "padrao" | "upgrade" = "upgrade"
+  ): Componente["custoComponentes"][number] => ({
+    id: 1,
+    nome: tipo === "fixo" ? "RodapéAvulso" : "SoleiraAvulsa",
+    tipo,
+    baseId: tipo === "fixo" ? RODAPE_BASE : null,
+    materialOptionId,
+    unidade: "und",
+    lado,
+    qtd: 2,
+    ordem: 0,
+  });
+  const comp = (cc: Componente["custoComponentes"][number]): CompCalcInput => ({
+    qtd: 10,
+    rt: 0,
+    custoComponentes: [cc],
+  });
+  const OPT_A = 500;
+  const OPT_B = 700;
+
+  it("espelho avulso entra só na opção presa", () => {
+    // preso a OPT_A: aparece quando a linha é OPT_A…
+    const naOpcao = mustCalc(
+      calcBudgetRow(piso002, piso001, comp(item(OPT_A, "espelho")), new Map(), cols, OPT_A, null)
+    );
+    expect(naOpcao.satellites).toHaveLength(1);
+    // espelho: valUn = valUnUpg (120), qtd 2 → 240
+    expect(naOpcao.satellites[0]!.valUn).toBeCloseTo(naOpcao.valUnUpg, 10);
+    expect(naOpcao.satellites[0]!.line).toBeCloseTo(naOpcao.valUnUpg * 2, 10);
+    // …e some numa outra opção
+    const outraOpcao = mustCalc(
+      calcBudgetRow(piso002, piso001, comp(item(OPT_A, "espelho")), new Map(), cols, OPT_B, null)
+    );
+    expect(outraOpcao.satellites).toHaveLength(0);
+  });
+
+  it("materialOptionId null entra em qualquer opção", () => {
+    for (const optId of [OPT_A, OPT_B]) {
+      const r = mustCalc(
+        calcBudgetRow(piso002, piso001, comp(item(null, "espelho")), new Map(), cols, optId, null)
+      );
+      expect(r.satellites).toHaveLength(1);
+    }
+  });
+
+  it("fixo avulso pendente derruba SÓ a sua opção", () => {
+    const cc = item(OPT_A, "fixo"); // sem custo em satelliteMats → pendente
+    // na opção presa: presente e pendente
+    const naOpcao = mustCalc(
+      calcBudgetRow(piso002, piso001, comp(cc), new Map(), cols, OPT_A, null)
+    );
+    expect(naOpcao.satellitePending).toBe(true);
+    // em outra opção: nem aparece → não derruba a linha
+    const outraOpcao = mustCalc(
+      calcBudgetRow(piso002, piso001, comp(cc), new Map(), cols, OPT_B, null)
+    );
+    expect(outraOpcao.satellites).toHaveLength(0);
+    expect(outraOpcao.satellitePending).toBe(false);
   });
 });
 

@@ -104,7 +104,16 @@ export function PublishScreen() {
           const upgMat = resolve(opt.baseId);
           if (!upgMat) continue;
           if (upgMat.custoMat <= 0) continue; // pendência: fora do mín./máx.
-          const r = calcBudgetRow(upgMat, padMat, comp, satMats(comp), cols, {});
+          const r = calcBudgetRow(
+            upgMat,
+            padMat,
+            comp,
+            satMats(comp),
+            cols,
+            opt.id,
+            def?.id ?? null,
+            {}
+          );
           if (r) totals.push(r.total);
         }
       }

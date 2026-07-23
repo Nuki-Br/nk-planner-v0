@@ -269,7 +269,12 @@ export function OptionNode({
 }) {
   const { comp, optId, baseId, isPadrao, label, key, isKit, kit, isOpen } = node;
   const [hov, setHov] = React.useState(false);
-  const pending = optionPending(materiais, kits, node, comp);
+  const pending = optionPending(
+    materiais,
+    kits,
+    { id: node.optId, baseId: node.baseId, isKit: node.isKit },
+    comp
+  );
   const mat = isKit ? null : getMaterial(materiais, baseId);
   const kitCount = isKit && kit ? kit.itens.length : 0;
   const price = mat ? mat.custoMat + mat.custoMO : 0;

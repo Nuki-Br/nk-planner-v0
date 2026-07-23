@@ -122,7 +122,7 @@ describe("buildLayout — casos vazios", () => {
       descricao: "",
       unidades: 1,
       status: "incompleta",
-      ambientes: [{ id: 9002, blueprintRoomId: 9003, nome: "Sala", componentes: [] }],
+      ambientes: [{ id: 9002, blueprintRoomId: 9003, nome: "Sala", componentes: [], registros: [] }],
     };
     const layout = buildLayout(tip, none, seed.kits);
     expect(layout.placeholders).toHaveLength(1);

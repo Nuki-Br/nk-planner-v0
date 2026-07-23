@@ -15,9 +15,11 @@ import { useProject } from "@/lib/hooks/useProjects";
 import { useTipologias } from "@/lib/hooks/useTipologias";
 import {
   useAddCostComponent,
+  useAddCostRegistro,
   useRemoveCostComponent,
-  useSetCostQtds,
+  useRemoveCostRegistro,
   useUpdateCostComponent,
+  useUpdateCostRegistro,
 } from "@/lib/hooks/useTipologiaMutations";
 import { useCreateVersion, useRestoreVersion, useVersions } from "@/lib/hooks/useVersions";
 import { cn, fmtBRL, fmtNum } from "@/lib/utils";
@@ -31,6 +33,7 @@ import type {
   Componente,
   CostComponent,
   CostComponentSide,
+  CostRegistro,
 } from "@/shared/types/domain";
 
 import {
@@ -38,6 +41,7 @@ import {
   buildScopeRefs,
   calcAnyRow,
   emptyScopeRefs,
+  ambienteRegistros,
   isOptionOwnPending,
   isOptionPending,
   padraoSatellites,
@@ -54,6 +58,7 @@ import { CostBaseView } from "./CostBaseView";
 import { FormulaCellEditor } from "./FormulaCellEditor";
 import { PublishSplitButton } from "./PublishSplitButton";
 import { CostItemModal, type CostItemValue } from "./CostItemModal";
+import { RegistroModal, type RegistroValue } from "./RegistroModal";
 import { SubRow } from "./SubRow";
 import { VersionDrawer, VersionToast } from "./Versioning";
 
@@ -73,8 +78,22 @@ interface CostItemTarget {
   amb: Ambiente;
   comp: Componente;
   lado: CostComponentSide;
+  /** Opção clicada (alvo do escopo avulso); null quando não há opção específica. */
+  optionId: number | null;
   /** null = criando. */
   editing: CostComponent | null;
+}
+
+/** Alvo do modal de registro (linha de custo avulsa do ambiente). */
+interface RegistroTarget {
+  amb: Ambiente;
+  /** null = criando. */
+  editing: CostRegistro | null;
+}
+
+interface RegistroRemoveTarget {
+  amb: Ambiente;
+  item: CostRegistro;
 }
 
 interface CostRemoveTarget {
@@ -279,7 +298,9 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   const addCostMut = useAddCostComponent();
   const updateCostMut = useUpdateCostComponent();
   const removeCostMut = useRemoveCostComponent();
-  const setCostQtdsMut = useSetCostQtds();
+  const addRegistroMut = useAddCostRegistro();
+  const updateRegistroMut = useUpdateCostRegistro();
+  const removeRegistroMut = useRemoveCostRegistro();
 
   const [activeTipId, setActiveTipId] = React.useState<number | null>(null);
   const [view, setView] = React.useState<"preco" | "custos">("preco");
@@ -303,6 +324,8 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   const [convWarnDismissed, setConvWarnDismissed] = React.useState(false);
   const [costTarget, setCostTarget] = React.useState<CostItemTarget | null>(null);
   const [costRemove, setCostRemove] = React.useState<CostRemoveTarget | null>(null);
+  const [registroTarget, setRegistroTarget] = React.useState<RegistroTarget | null>(null);
+  const [registroRemove, setRegistroRemove] = React.useState<RegistroRemoveTarget | null>(null);
   const toastTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fireToast = (m: string) => {
@@ -330,8 +353,8 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
     [cols]
   );
 
-  // Item de custo: a definição vai numa mutação, a quantidade em outra — só a
-  // quantidade é local à tipologia.
+  // Item de custo: definição E quantidade vão numa única mutação (save atômico,
+  // tudo compartilhado entre as tipologias do ambiente).
   const saveCostItem = (v: CostItemValue) => {
     if (!costTarget || !tip) return;
     const path = {
@@ -346,12 +369,17 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
         {
           ...path,
           costItemId: editing.id,
-          patch: { nome: v.nome, tipo: v.tipo, baseId: v.baseId, unidade: v.unidade, lado: v.lado },
+          patch: {
+            nome: v.nome,
+            tipo: v.tipo,
+            baseId: v.baseId,
+            materialOptionId: v.materialOptionId,
+            unidade: v.unidade,
+            lado: v.lado,
+            qtd: v.qtd,
+          },
         },
-        {
-          onSuccess: () =>
-            setCostQtdsMut.mutate({ ...path, qtds: { [editing.id]: v.qtd } }, { onSuccess: close }),
-        }
+        { onSuccess: close }
       );
     } else {
       addCostMut.mutate({ ...path, input: v }, { onSuccess: close });
@@ -371,11 +399,40 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
     );
   };
 
+  // Registro (linha de custo avulsa do ambiente) — nível Room, uma mutação só.
+  const saveRegistro = (v: RegistroValue) => {
+    if (!registroTarget || !tip) return;
+    const path = { tipologiaId: tip.id, ambienteId: registroTarget.amb.blueprintRoomId };
+    const close = () => setRegistroTarget(null);
+    const editing = registroTarget.editing;
+    if (editing) {
+      updateRegistroMut.mutate(
+        { ...path, registroId: editing.id, patch: v },
+        { onSuccess: close }
+      );
+    } else {
+      addRegistroMut.mutate({ ...path, input: v }, { onSuccess: close });
+    }
+  };
+
+  const confirmRemoveRegistro = () => {
+    if (!registroRemove || !tip) return;
+    removeRegistroMut.mutate(
+      {
+        tipologiaId: tip.id,
+        ambienteId: registroRemove.amb.blueprintRoomId,
+        registroId: registroRemove.item.id,
+      },
+      { onSuccess: () => setRegistroRemove(null) }
+    );
+  };
+
   /** Handlers de edição/remoção passados às sub-linhas de item de custo. */
   const costRowHandlers = (amb: Ambiente, comp: Componente, lado: CostComponentSide) => ({
     onEdit: (costItemId: number) => {
       const item = comp.custoComponentes.find((c) => c.id === costItemId);
-      if (item) setCostTarget({ amb, comp, lado, editing: item });
+      if (item)
+        setCostTarget({ amb, comp, lado, optionId: item.materialOptionId, editing: item });
     },
     onRemove: (costItemId: number) => {
       const item = comp.custoComponentes.find((c) => c.id === costItemId);
@@ -838,8 +895,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                 <Th />
               </tr>
             </thead>
-            <tbody>
-              {tip.ambientes.map((amb, ambIdx) => {
+            {tip.ambientes.map((amb, ambIdx) => {
                 const total = ambTotals[ambIdx];
                 // Mesmas condições dos dois maps abaixo: um componente só
                 // aparece na seção padrão se tiver material padrão resolvido, e
@@ -848,11 +904,12 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                   const d = c.options.find((o) => o.id === c.padrao);
                   return Boolean(d && !d.isKit && getMaterial(materiais, d.baseId));
                 });
+                const hasRegistro = amb.registros.length > 0;
                 const hasUpgrade = amb.componentes.some((c) =>
                   c.options.some((o) => !o.isDefault)
                 );
                 return (
-                  <React.Fragment key={amb.id}>
+                  <tbody key={amb.id} className="group/amb">
                     <tr>
                       <td
                         colSpan={colCount}
@@ -870,7 +927,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                         Acabamentos padrão — crédito incluído no preço
                       </td>
                     </tr>
-                    {!hasPadrao && (
+                    {!hasPadrao && !hasRegistro && (
                       <EmptySectionRow
                         colSpan={colCount}
                         title="Nenhum material padrão definido"
@@ -919,7 +976,13 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                 </div>
                                 <AddCostItemBtn
                                   onClick={() =>
-                                    setCostTarget({ amb, comp, lado: "padrao", editing: null })
+                                    setCostTarget({
+                                      amb,
+                                      comp,
+                                      lado: "padrao",
+                                      optionId: null,
+                                      editing: null,
+                                    })
                                   }
                                 />
                               </div>
@@ -958,6 +1021,105 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                         </React.Fragment>
                       );
                     })}
+
+                    {/* Linhas de custo avulsas (registro) do AMBIENTE — nome em
+                        texto livre, sem vínculo a componente. Só custo, sem crédito. */}
+                    {ambienteRegistros(deps, amb).map((r) => {
+                      const bg = "bg-[#f4fffe]";
+                      return (
+                        <tr key={`reg-${r.registro.id}`} className="group/row">
+                          <Td sticky className={bg}>
+                            <div className="flex items-start gap-1.5">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span
+                                    className={cn(
+                                      "text-xs font-semibold",
+                                      r.pending ? "text-tint-amber-fg" : "text-neutral-gray-9"
+                                    )}
+                                  >
+                                    {r.registro.nome}
+                                  </span>
+                                  <span className="rounded bg-neutral-gray-3 px-1 py-px text-[9px] font-bold uppercase tracking-wide text-neutral-gray-7">
+                                    Item de custo
+                                  </span>
+                                </div>
+                                <div className="mt-px text-[11px] text-neutral-gray-6">
+                                  Registro de custo
+                                  {r.pending && (
+                                    <span className="ml-1.5 font-bold text-tint-orange-fg">
+                                      · aguardando valor
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover/row:opacity-100 focus-within:opacity-100">
+                                <button
+                                  type="button"
+                                  title="Editar registro de custo"
+                                  onClick={() => setRegistroTarget({ amb, editing: r.registro })}
+                                  className="rounded p-1 text-neutral-gray-6 hover:bg-neutral-gray-3 hover:text-neutral-gray-9"
+                                >
+                                  <Icon name="edit" size={12} />
+                                </button>
+                                <button
+                                  type="button"
+                                  title="Remover registro de custo"
+                                  onClick={() => setRegistroRemove({ amb, item: r.registro })}
+                                  className="rounded p-1 text-neutral-gray-6 hover:bg-functional-error-light hover:text-functional-error"
+                                >
+                                  <Icon name="trash" size={12} />
+                                </button>
+                              </div>
+                            </div>
+                          </Td>
+                          <Td right className={cn(bg, "text-neutral-gray-7")}>
+                            {fmtNum(r.registro.qtd, 2)} {r.registro.unidade}
+                          </Td>
+                          <Td right className={cn(bg, "text-neutral-gray-7")}>
+                            {r.pending ? "—" : fmtBRL(r.valUn)}
+                          </Td>
+                          <Td right className={bg}>
+                            {r.pending ? (
+                              <span className="text-neutral-gray-5">—</span>
+                            ) : (
+                              <span className="font-semibold text-neutral-gray-8">
+                                Custo {fmtBRL(r.line)}
+                              </span>
+                            )}
+                          </Td>
+                          <Td right className={cn(bg, "text-neutral-gray-5")}>—</Td>
+                          {cols.map((col) => (
+                            <Td key={col.id} right className={cn(bg, "text-neutral-gray-5")}>
+                              —
+                            </Td>
+                          ))}
+                          <Td className={bg} />
+                          <Td right className={cn(bg, "text-neutral-gray-5")}>—</Td>
+                          <Td right className={cn(bg, "text-neutral-gray-5")}>—</Td>
+                        </tr>
+                      );
+                    })}
+
+                    {/* Adicionar linha de custo avulsa (registro) — revelada ao
+                        passar o mouse na seção do ambiente. */}
+                    <tr>
+                      <td colSpan={colCount} className="bg-[#f4fffe] px-3.5">
+                        <div className="grid grid-rows-[0fr] opacity-0 transition-all duration-300 ease-out group-hover/amb:grid-rows-[1fr] group-hover/amb:opacity-100 focus-within:grid-rows-[1fr] focus-within:opacity-100">
+                          <div className="overflow-hidden">
+                            <div className="py-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setRegistroTarget({ amb, editing: null })}
+                                className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-neutral-gray-5 px-2.5 py-1 text-[11px] font-semibold text-neutral-gray-7 transition-colors hover:border-primary-7 hover:text-primary-7"
+                              >
+                                <Icon name="plus" size={12} /> Adicionar item de custo
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
 
                     <tr>
                       <td
@@ -1050,7 +1212,13 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                     )}
                                     <AddCostItemBtn
                                       onClick={() =>
-                                        setCostTarget({ amb, comp, lado: "upgrade", editing: null })
+                                        setCostTarget({
+                                          amb,
+                                          comp,
+                                          lado: "upgrade",
+                                          optionId: opt.id,
+                                          editing: null,
+                                        })
                                       }
                                     />
                                   </div>
@@ -1125,7 +1293,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                         // sai do total, mas ESTE material pode estar preenchido:
                         // acusar "aguardando custo" aqui seria mentira.
                         const ownPending = isOptionOwnPending(deps, opt);
-                        const faltandoCusto = pendingCostItems(deps, comp);
+                        const faltandoCusto = pendingCostItems(deps, comp, opt.id);
                         const pending = ownPending || faltandoCusto.length > 0;
                         // Calcula mesmo com item de custo pendente: qtd, valor
                         // unitário e débito DESTA opção são conhecidos e ajudam.
@@ -1202,7 +1370,13 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                   )}
                                   <AddCostItemBtn
                                     onClick={() =>
-                                      setCostTarget({ amb, comp, lado: "upgrade", editing: null })
+                                      setCostTarget({
+                                        amb,
+                                        comp,
+                                        lado: "upgrade",
+                                        optionId: opt.id,
+                                        editing: null,
+                                      })
                                     }
                                   />
                                 </div>
@@ -1404,10 +1578,11 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                       </td>
                       <td className="border-b border-neutral-gray-4 border-t-2 border-t-neutral-gray-5 bg-neutral-gray-2" />
                     </tr>
-                  </React.Fragment>
+                  </tbody>
                 );
               })}
 
+            <tbody>
               <tr>
                 <td
                   colSpan={6 + cols.length}
@@ -1542,18 +1717,24 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
         open={costTarget !== null}
         editing={costTarget?.editing ?? null}
         lado={costTarget?.lado ?? "upgrade"}
+        optionId={costTarget?.optionId ?? null}
         compNome={costTarget?.comp.nome ?? ""}
         ambNome={costTarget?.amb.nome ?? ""}
         nOpcoes={costTarget?.comp.options.filter((o) => !o.isDefault).length ?? 0}
-        qtdInicial={
-          costTarget?.editing
-            ? costTarget.comp.custoQtds[costTarget.editing.id] ?? 0
-            : 1
-        }
+        qtdInicial={costTarget?.editing?.qtd ?? 1}
         baseInicial={getMaterial(materiais, costTarget?.editing?.baseId) ?? null}
-        saving={addCostMut.isPending || updateCostMut.isPending || setCostQtdsMut.isPending}
+        saving={addCostMut.isPending || updateCostMut.isPending}
         onClose={() => setCostTarget(null)}
         onSave={saveCostItem}
+      />
+
+      <RegistroModal
+        open={registroTarget !== null}
+        editing={registroTarget?.editing ?? null}
+        ambNome={registroTarget?.amb.nome ?? ""}
+        saving={addRegistroMut.isPending || updateRegistroMut.isPending}
+        onClose={() => setRegistroTarget(null)}
+        onSave={saveRegistro}
       />
 
       <Modal
@@ -1575,6 +1756,31 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
           Remover <strong>{costRemove?.item.nome}</strong> do custo de{" "}
           <strong>{costRemove?.comp.nome}</strong>? Vale para todas as tipologias que usam &ldquo;
           {costRemove?.amb.nome}&rdquo;.
+        </p>
+      </Modal>
+
+      <Modal
+        open={registroRemove !== null}
+        onClose={() => setRegistroRemove(null)}
+        title="Remover item de custo"
+        actions={
+          <>
+            <Button variant="bordered" onPress={() => setRegistroRemove(null)}>
+              Cancelar
+            </Button>
+            <Button
+              variant="danger"
+              isLoading={removeRegistroMut.isPending}
+              onPress={confirmRemoveRegistro}
+            >
+              Remover
+            </Button>
+          </>
+        }
+      >
+        <p className="text-[13px] leading-relaxed text-neutral-gray-9">
+          Remover <strong>{registroRemove?.item.nome}</strong>? Vale para todas as tipologias que
+          usam &ldquo;{registroRemove?.amb.nome}&rdquo;.
         </p>
       </Modal>
 

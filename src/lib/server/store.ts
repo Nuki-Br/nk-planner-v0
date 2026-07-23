@@ -37,6 +37,7 @@ import type {
   CostComponent,
   CostComponentKind,
   CostComponentSide,
+  CostRegistro,
   FillLink,
   FillLinkCampos,
   Kit,
@@ -324,17 +325,16 @@ const ROOM_INCLUDE = {
   RoomComponents: {
     include: { Options: { include: { BaseMaterial: true } }, CostItems: true },
   },
+  CostRegistros: true,
 } satisfies Prisma.RoomInclude;
 
 /**
- * Include da instância por planta. Constante compartilhada de propósito: cada
- * `{ KitUsages: true }` solto que esquecesse CostUsages devolveria um Componente
- * sem quantitativos de satélite, sem erro nenhum — o custo de troca simplesmente
- * sairia errado. Aqui o compilador cobra.
+ * Include da instância por planta. Os quantitativos de item de custo agora vivem
+ * no próprio RoomComponentCostItem (compartilhados), então só os de kit ficam
+ * por planta aqui.
  */
 const BRC_INCLUDE = {
   KitUsages: true,
-  CostUsages: true,
 } satisfies Prisma.BlueprintRoomComponentInclude;
 
 const BLUEPRINT_INCLUDE = {
@@ -350,6 +350,7 @@ type BlueprintRoomRow = BlueprintRow["BlueprintRooms"][number];
 type RoomComponentRow = BlueprintRoomRow["Room"]["RoomComponents"][number];
 type OptionRow = RoomComponentRow["Options"][number];
 type CostItemRow = RoomComponentRow["CostItems"][number];
+type RegistroRow = BlueprintRoomRow["Room"]["CostRegistros"][number];
 type BrcRow = BlueprintRoomRow["Components"][number];
 
 function toMaterialOption(m: OptionRow, defaultMaterialId: number | null): MaterialOption {
@@ -368,8 +369,10 @@ function toCostComponent(ci: CostItemRow): CostComponent {
     nome: ci.Name,
     tipo: ci.Kind,
     baseId: ci.BaseMaterialId,
+    materialOptionId: ci.MaterialId,
     unidade: ci.Unit as Unidade,
     lado: ci.Side,
+    qtd: ci.UsageQuantity,
     ordem: ci.Position,
   };
 }
@@ -383,8 +386,6 @@ function toComponente(rc: RoomComponentRow, brc: BrcRow | undefined): Componente
     .map(toCostComponent);
   const kitQtds: Record<number, number> = {};
   if (brc) for (const ku of brc.KitUsages) kitQtds[ku.KitItemId] = ku.UsageQuantity;
-  const custoQtds: Record<number, number> = {};
-  if (brc) for (const cu of brc.CostUsages) custoQtds[cu.CostItemId] = cu.UsageQuantity;
   return {
     id: rc.Id,
     nome: rc.Name,
@@ -398,7 +399,17 @@ function toComponente(rc: RoomComponentRow, brc: BrcRow | undefined): Componente
     ordem: rc.Position,
     kitQtds,
     custoComponentes,
-    custoQtds,
+  };
+}
+
+function toCostRegistro(r: RegistroRow): CostRegistro {
+  return {
+    id: r.Id,
+    nome: r.Name,
+    valorUnitario: r.UnitCost,
+    unidade: r.Unit as Unidade,
+    qtd: r.UsageQuantity,
+    ordem: r.Position,
   };
 }
 
@@ -407,6 +418,9 @@ function toAmbiente(br: BlueprintRoomRow): Ambiente {
   const componentes = [...br.Room.RoomComponents]
     .sort((a, b) => a.Position - b.Position)
     .map((rc) => toComponente(rc, brcByRc.get(rc.Id)));
+  const registros = [...br.Room.CostRegistros]
+    .sort((a, b) => a.Position - b.Position)
+    .map(toCostRegistro);
   return {
     id: br.Room.Id,
     blueprintRoomId: br.Id,
@@ -414,6 +428,7 @@ function toAmbiente(br: BlueprintRoomRow): Ambiente {
     icon: br.Room.Icon ?? undefined,
     local: (br.Polygon as unknown as RoomShape | null) ?? null,
     componentes,
+    registros,
   };
 }
 
@@ -1189,23 +1204,23 @@ async function cloneBlueprintRoomInto(
     if (newDefaultId != null) {
       await prisma.roomComponent.update({ where: { Id: newRc.Id }, data: { DefaultMaterialId: newDefaultId } });
     }
-    // Componentes de custo: a definição é clonada junto e os ids novos entram
-    // no mapa para reapontar os quantitativos (CostItemUsage) abaixo.
-    const costIdMap = new Map<number, number>();
+    // Componentes de custo: definição + quantidade são clonadas junto; o escopo
+    // (MaterialId) é reapontado para a nova opção via optIdMap.
     for (const ci of [...rc.CostItems].sort((a, b) => a.Position - b.Position)) {
-      const created = await prisma.roomComponentCostItem.create({
+      await prisma.roomComponentCostItem.create({
         data: {
           RoomComponentId: newRc.Id,
           Name: ci.Name,
           Kind: ci.Kind,
           Side: ci.Side,
           BaseMaterialId: ci.BaseMaterialId,
+          MaterialId: ci.MaterialId != null ? optIdMap.get(ci.MaterialId) ?? null : null,
           Unit: ci.Unit,
+          UsageQuantity: ci.UsageQuantity,
           Position: ci.Position,
         },
         select: { Id: true },
       });
-      costIdMap.set(ci.Id, created.Id);
     }
     const srcBrc = brcByRc.get(rc.Id);
     if (srcBrc) {
@@ -1227,20 +1242,20 @@ async function cloneBlueprintRoomInto(
           })),
         });
       }
-      const costUsages = srcBrc.CostUsages.flatMap((cu) => {
-        const newId = costIdMap.get(cu.CostItemId);
-        return newId == null
-          ? []
-          : [{
-              BlueprintRoomComponentId: newBrc.Id,
-              CostItemId: newId,
-              UsageQuantity: cu.UsageQuantity,
-            }];
-      });
-      if (costUsages.length > 0) {
-        await prisma.costItemUsage.createMany({ data: costUsages });
-      }
     }
+  }
+  // Registros de custo do ambiente — clonados junto (Room novo, cópia morta).
+  if (br.Room.CostRegistros.length > 0) {
+    await prisma.roomCostRegistro.createMany({
+      data: br.Room.CostRegistros.map((r) => ({
+        RoomId: room.Id,
+        Name: r.Name,
+        UnitCost: r.UnitCost,
+        Unit: r.Unit,
+        UsageQuantity: r.UsageQuantity,
+        Position: r.Position,
+      })),
+    });
   }
 }
 
@@ -1654,17 +1669,20 @@ export async function setKitQtds(
 
 // ─── Componentes de custo (satélites) ───────────────────────────────────
 //
-// A DEFINIÇÃO é compartilhada (RoomComponentCostItem, vale para todas as
-// plantas que usam o ambiente); o QUANTITATIVO é por planta (CostItemUsage).
-// Mesmo split de options ⇄ kitQtds.
+// Definição E quantidade são COMPARTILHADAS entre todas as plantas que usam o
+// ambiente (RoomComponentCostItem) — nada é local à planta. `materialOptionId`
+// dá o escopo: null = todas as opções (upgrade) / linha padrão; preenchido =
+// avulso, só para aquela opção.
 
 export interface CostComponentInput {
   nome: string;
   tipo: CostComponentKind;
   baseId: number | null;
+  /** Opção (Material id) a que o item se prende; null = todas as opções. */
+  materialOptionId: number | null;
   unidade: Unidade;
   lado: CostComponentSide;
-  /** Quantitativo NESTA planta (grava o CostItemUsage já na criação). */
+  /** Quantitativo — compartilhado entre todas as plantas do ambiente. */
   qtd: number;
 }
 
@@ -1673,6 +1691,19 @@ function assertCostItemMaterial(tipo: CostComponentKind, baseId: number | null):
   if (tipo === "fixo" && baseId == null) {
     throw new Error("Item de custo fixo exige um material do catálogo.");
   }
+}
+
+/** A opção de escopo precisa pertencer ao componente (avulso preso a ela). */
+async function assertOptionInComponent(
+  materialOptionId: number | null,
+  componenteId: number
+): Promise<void> {
+  if (materialOptionId == null) return;
+  const opt = await prisma.material.findFirst({
+    where: { Id: materialOptionId, RoomComponentId: componenteId },
+    select: { Id: true },
+  });
+  if (!opt) throw new Error("Opção do item de custo não pertence ao componente.");
 }
 
 export async function addCostComponent(
@@ -1685,25 +1716,24 @@ export async function addCostComponent(
   assertCostItemMaterial(input.tipo, input.baseId);
   const ctx = await findBlueprintRoomCtx(organizationId, tipologiaId, blueprintRoomId);
   await assertComponentInRoom(componenteId, ctx.roomId);
+  await assertOptionInComponent(input.materialOptionId, componenteId);
   const agg = await prisma.roomComponentCostItem.aggregate({
     where: { RoomComponentId: componenteId },
     _max: { Position: true },
   });
-  const item = await prisma.roomComponentCostItem.create({
+  await prisma.roomComponentCostItem.create({
     data: {
       RoomComponentId: componenteId,
       Name: input.nome,
       Kind: input.tipo,
       Side: input.lado,
       BaseMaterialId: input.tipo === "fixo" ? input.baseId : null,
+      MaterialId: input.materialOptionId,
       Unit: input.unidade,
+      UsageQuantity: input.qtd,
       Position: await nextPosition(agg._max.Position),
     },
     select: { Id: true },
-  });
-  const brcId = await ensureBrc(ctx, componenteId);
-  await prisma.costItemUsage.create({
-    data: { BlueprintRoomComponentId: brcId, CostItemId: item.Id, UsageQuantity: input.qtd },
   });
   return reloadComponente(organizationId, blueprintRoomId, componenteId);
 }
@@ -1714,7 +1744,7 @@ export async function updateCostComponent(
   blueprintRoomId: number,
   componenteId: number,
   costItemId: number,
-  patch: Partial<Omit<CostComponentInput, "qtd">>
+  patch: Partial<CostComponentInput>
 ): Promise<Componente> {
   const ctx = await findBlueprintRoomCtx(organizationId, tipologiaId, blueprintRoomId);
   await assertComponentInRoom(componenteId, ctx.roomId);
@@ -1726,6 +1756,9 @@ export async function updateCostComponent(
   const tipo = patch.tipo ?? current.Kind;
   const baseId = patch.baseId !== undefined ? patch.baseId : current.BaseMaterialId;
   assertCostItemMaterial(tipo, baseId);
+  if (patch.materialOptionId !== undefined) {
+    await assertOptionInComponent(patch.materialOptionId, componenteId);
+  }
   await prisma.roomComponentCostItem.update({
     where: { Id: costItemId },
     data: {
@@ -1733,6 +1766,8 @@ export async function updateCostComponent(
       ...(patch.tipo !== undefined && { Kind: patch.tipo }),
       ...(patch.lado !== undefined && { Side: patch.lado }),
       ...(patch.unidade !== undefined && { Unit: patch.unidade }),
+      ...(patch.qtd !== undefined && { UsageQuantity: patch.qtd }),
+      ...(patch.materialOptionId !== undefined && { MaterialId: patch.materialOptionId }),
       // "espelho" não guarda material: segue a opção escolhida.
       BaseMaterialId: tipo === "fixo" ? baseId : null,
     },
@@ -1755,40 +1790,6 @@ export async function removeCostComponent(
   return reloadComponente(organizationId, blueprintRoomId, componenteId);
 }
 
-export async function setCostQtds(
-  organizationId: string,
-  tipologiaId: number,
-  blueprintRoomId: number,
-  componenteId: number,
-  qtds: Record<number, number>
-): Promise<Componente> {
-  const ctx = await findBlueprintRoomCtx(organizationId, tipologiaId, blueprintRoomId);
-  await assertComponentInRoom(componenteId, ctx.roomId);
-  const brcId = await ensureBrc(ctx, componenteId);
-  const entries = Object.entries(qtds);
-  if (entries.length > 0) {
-    await prisma.$transaction(
-      entries.map(([costItemId, q]) =>
-        prisma.costItemUsage.upsert({
-          where: {
-            BlueprintRoomComponentId_CostItemId: {
-              BlueprintRoomComponentId: brcId,
-              CostItemId: Number(costItemId),
-            },
-          },
-          update: { UsageQuantity: q },
-          create: {
-            BlueprintRoomComponentId: brcId,
-            CostItemId: Number(costItemId),
-            UsageQuantity: q,
-          },
-        })
-      )
-    );
-  }
-  return reloadComponente(organizationId, blueprintRoomId, componenteId);
-}
-
 export async function reorderCostComponents(
   organizationId: string,
   tipologiaId: number,
@@ -1807,6 +1808,91 @@ export async function reorderCostComponents(
     )
   );
   return reloadComponente(organizationId, blueprintRoomId, componenteId);
+}
+
+// ─── Registros de custo (linhas avulsas do AMBIENTE) ────────────────────
+//
+// Nível Room (compartilhado entre as plantas do ambiente); nome em texto livre,
+// sem vínculo a componente. Só custo — não gera crédito nem afeta o cálculo.
+
+export interface CostRegistroInput {
+  nome: string;
+  /** Valor unitário digitado (R$). */
+  valorUnitario: number;
+  unidade: Unidade;
+  qtd: number;
+}
+
+async function reloadAmbiente(blueprintRoomId: number): Promise<Ambiente> {
+  const br = await prisma.blueprintRoom.findUniqueOrThrow({
+    where: { Id: blueprintRoomId },
+    include: {
+      Room: { include: ROOM_INCLUDE },
+      Components: { include: BRC_INCLUDE },
+    },
+  });
+  return toAmbiente(br);
+}
+
+export async function addCostRegistro(
+  organizationId: string,
+  tipologiaId: number,
+  blueprintRoomId: number,
+  input: CostRegistroInput
+): Promise<Ambiente> {
+  const ctx = await findBlueprintRoomCtx(organizationId, tipologiaId, blueprintRoomId);
+  const agg = await prisma.roomCostRegistro.aggregate({
+    where: { RoomId: ctx.roomId },
+    _max: { Position: true },
+  });
+  await prisma.roomCostRegistro.create({
+    data: {
+      RoomId: ctx.roomId,
+      Name: input.nome,
+      UnitCost: input.valorUnitario,
+      Unit: input.unidade,
+      UsageQuantity: input.qtd,
+      Position: await nextPosition(agg._max.Position),
+    },
+    select: { Id: true },
+  });
+  return reloadAmbiente(blueprintRoomId);
+}
+
+export async function updateCostRegistro(
+  organizationId: string,
+  tipologiaId: number,
+  blueprintRoomId: number,
+  registroId: number,
+  patch: Partial<CostRegistroInput>
+): Promise<Ambiente> {
+  const ctx = await findBlueprintRoomCtx(organizationId, tipologiaId, blueprintRoomId);
+  const current = await prisma.roomCostRegistro.findFirst({
+    where: { Id: registroId, RoomId: ctx.roomId },
+    select: { Id: true },
+  });
+  if (!current) throw new Error("Registro de custo não encontrado.");
+  await prisma.roomCostRegistro.update({
+    where: { Id: registroId },
+    data: {
+      ...(patch.nome !== undefined && { Name: patch.nome }),
+      ...(patch.valorUnitario !== undefined && { UnitCost: patch.valorUnitario }),
+      ...(patch.unidade !== undefined && { Unit: patch.unidade }),
+      ...(patch.qtd !== undefined && { UsageQuantity: patch.qtd }),
+    },
+  });
+  return reloadAmbiente(blueprintRoomId);
+}
+
+export async function removeCostRegistro(
+  organizationId: string,
+  tipologiaId: number,
+  blueprintRoomId: number,
+  registroId: number
+): Promise<Ambiente> {
+  const ctx = await findBlueprintRoomCtx(organizationId, tipologiaId, blueprintRoomId);
+  await prisma.roomCostRegistro.deleteMany({ where: { Id: registroId, RoomId: ctx.roomId } });
+  return reloadAmbiente(blueprintRoomId);
 }
 
 // ─── Compartilhamento de ambientes (derivado de BlueprintRoom) ──────────
@@ -1897,17 +1983,8 @@ export async function linkAmbiente(
         })),
       });
     }
-    // O Room é COMPARTILHADO: a definição dos componentes de custo já vale para
-    // a nova planta. Só o quantitativo é por planta — copia o da origem.
-    if (srcBrc && srcBrc.CostUsages.length > 0) {
-      await prisma.costItemUsage.createMany({
-        data: srcBrc.CostUsages.map((cu) => ({
-          BlueprintRoomComponentId: newBrc.Id,
-          CostItemId: cu.CostItemId,
-          UsageQuantity: cu.UsageQuantity,
-        })),
-      });
-    }
+    // O Room é COMPARTILHADO: os componentes de custo (definição E quantidade)
+    // já valem para a nova planta — nada a copiar.
   }
   const created = await prisma.blueprintRoom.findUniqueOrThrow({
     where: { Id: newBr.Id },

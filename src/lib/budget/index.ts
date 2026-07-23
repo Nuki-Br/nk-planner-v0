@@ -74,7 +74,7 @@ export interface BaseRowResult {
 /** O que o motor precisa do Componente (mantém a assinatura livre de dados). */
 export type CompCalcInput = Pick<
   Componente,
-  "qtd" | "rt" | "custoComponentes" | "custoQtds"
+  "qtd" | "rt" | "custoComponentes"
 >;
 
 export interface BudgetRowResult extends BaseRowResult {
@@ -94,33 +94,41 @@ export interface CostSatelliteResult {
   pending: boolean;
 }
 
+/** Um item de custo se aplica a esta opção? Avulso → só à sua; null → todas. */
+export function costItemAppliesTo(cc: CostComponent, optionId: number | null): boolean {
+  return cc.materialOptionId == null || cc.materialOptionId === optionId;
+}
+
 /**
- * Resolve os componentes de custo de um lado. `espelho` usa o valor unitário da
- * opção daquele lado (a de upgrade no débito, a padrão no crédito); `fixo` usa
- * o material de catálogo, igual para todas as opções.
+ * Resolve os componentes de custo de um lado, para UMA opção. `espelho` usa o
+ * valor unitário da opção daquele lado (a de upgrade no débito, a padrão no
+ * crédito); `fixo` usa o material de catálogo, igual para todas as opções.
+ *
+ * Só entram os itens que se aplicam à opção (`optionId`): avulso aparece só na
+ * sua opção; item de escopo "todas" (materialOptionId null) aparece em todas.
  *
  * Um `fixo` sem custo (ou sem material) fica pendente — e como a linha entra no
- * débito de TODA opção do componente, contamina o componente inteiro, mesmo
- * critério do sub-item de kit.
+ * débito da opção, derruba a linha (mesmo critério do sub-item de kit).
  */
 export function resolveSatellites(
-  comp: Pick<Componente, "custoComponentes" | "custoQtds">,
+  comp: Pick<Componente, "custoComponentes">,
   lado: CostComponentSide,
   valUnEspelho: number,
-  satelliteMats: ReadonlyMap<number, Material>
+  satelliteMats: ReadonlyMap<number, Material>,
+  optionId: number | null
 ): CostSatelliteResult[] {
   const out: CostSatelliteResult[] = [];
   for (const cc of comp.custoComponentes ?? []) {
     if (cc.lado !== lado) continue;
-    const qtd = comp.custoQtds?.[cc.id] ?? 0;
+    if (!costItemAppliesTo(cc, optionId)) continue;
     const fixo = cc.baseId != null ? satelliteMats.get(cc.baseId) : undefined;
     const valUn = cc.tipo === "espelho" ? valUnEspelho : fixo ? fixo.custoMat + fixo.custoMO : 0;
     out.push({
       item: cc,
       nome: cc.tipo === "fixo" && fixo ? fixo.nome : cc.nome,
-      qtd,
+      qtd: cc.qtd,
       valUn,
-      line: valUn * qtd,
+      line: valUn * cc.qtd,
       pending: cc.tipo === "fixo" && (!fixo || fixo.custoMat <= 0),
     });
   }
@@ -201,6 +209,8 @@ export function calcBudgetRow(
   comp: CompCalcInput,
   satelliteMats: ReadonlyMap<number, Material>,
   cols: BudgetColumn[],
+  optionId: number | null,
+  padraoOptionId: number | null,
   rowOverrides: RowOverrides = {}
 ): BudgetRowResult | null {
   if (!padraoMat || !upgradeMat) return null;
@@ -208,8 +218,8 @@ export function calcBudgetRow(
   const valUnUpg = upgradeMat.custoMat + upgradeMat.custoMO;
   const valUnPad = padraoMat.custoMat + padraoMat.custoMO;
 
-  const satUpg = resolveSatellites(comp, "upgrade", valUnUpg, satelliteMats);
-  const satPad = resolveSatellites(comp, "padrao", valUnPad, satelliteMats);
+  const satUpg = resolveSatellites(comp, "upgrade", valUnUpg, satelliteMats, optionId);
+  const satPad = resolveSatellites(comp, "padrao", valUnPad, satelliteMats, padraoOptionId);
   const satellites = [...satUpg, ...satPad];
 
   const debitoItem = valUnUpg * qtdComRT;
@@ -248,6 +258,8 @@ export function calcKitRow(
   padraoMat: Material | undefined,
   satelliteMats: ReadonlyMap<number, Material>,
   cols: BudgetColumn[],
+  optionId: number | null,
+  padraoOptionId: number | null,
   rowOverrides: RowOverrides = {}
 ): KitRowResult {
   const qtds = comp.kitQtds ?? {};
@@ -265,8 +277,8 @@ export function calcKitRow(
   const valUnPad = padraoMat ? padraoMat.custoMat + padraoMat.custoMO : 0;
 
   // Para um kit, o "espelho" acompanha o total do kit — não há valor unitário.
-  const satUpg = resolveSatellites(comp, "upgrade", kitTotal, satelliteMats);
-  const satPad = resolveSatellites(comp, "padrao", valUnPad, satelliteMats);
+  const satUpg = resolveSatellites(comp, "upgrade", kitTotal, satelliteMats, optionId);
+  const satPad = resolveSatellites(comp, "padrao", valUnPad, satelliteMats, padraoOptionId);
   const satellites = [...satUpg, ...satPad];
 
   // O débito do "item" de um kit é a soma dos sub-itens: eles SÃO o item.

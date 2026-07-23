@@ -15,6 +15,7 @@ import type {
   CostComponent,
   CostComponentKind,
   CostComponentSide,
+  CostRegistro,
   Kit,
   KitItem,
   Material,
@@ -165,6 +166,8 @@ export function createSeed(): SeedData {
     baseKey: string | null;
     unidade: Unidade;
     lado: CostComponentSide;
+    /** Quantitativo — compartilhado entre plantas. */
+    qtd: number;
   }
   function comp(
     nome: string,
@@ -186,20 +189,43 @@ export function createSeed(): SeedData {
       nome: c.nome,
       tipo: c.tipo,
       baseId: c.baseKey ? ref(c.baseKey).baseId : null,
+      materialOptionId: null,
       unidade: c.unidade,
       lado: c.lado,
+      qtd: c.qtd,
       ordem: i,
     }));
     return { id: rcId, nome, unidade, padrao, options, ghost: false, ordem, custoComponentes };
+  }
+
+  /** Descrição de uma linha-registro do ambiente (valor unitário digitado). */
+  interface RegistroTpl {
+    nome: string;
+    valorUnitario: number;
+    unidade: Unidade;
+    qtd: number;
   }
 
   interface RoomTpl {
     id: number;
     nome: string;
     components: CompTpl[];
+    registros: CostRegistro[];
   }
-  function room(nome: string, components: CompTpl[]): RoomTpl {
-    return { id: nid(), nome, components };
+  function room(nome: string, components: CompTpl[], registros: RegistroTpl[] = []): RoomTpl {
+    return {
+      id: nid(),
+      nome,
+      components,
+      registros: registros.map((r, i) => ({
+        id: nid(),
+        nome: r.nome,
+        valorUnitario: r.valorUnitario,
+        unidade: r.unidade,
+        qtd: r.qtd,
+        ordem: i,
+      })),
+    };
   }
 
   /** Quantitativos de kit desta planta (keyed por KitItem id), alinhado à ordem do kit. */
@@ -212,21 +238,10 @@ export function createSeed(): SeedData {
     return out;
   }
 
-  /** Quantitativos dos componentes de custo desta planta, na ordem declarada. */
-  function costQty(tpl: CompTpl, qtys: number[]): Record<number, number> {
-    const out: Record<number, number> = {};
-    tpl.custoComponentes.forEach((cc, i) => {
-      const q = qtys[i];
-      if (q !== undefined) out[cc.id] = q;
-    });
-    return out;
-  }
-
   interface PerComp {
     qtd: number;
     rt: number;
     kitQtds?: Record<number, number>;
-    custoQtds?: Record<number, number>;
   }
   /** Instancia um Room numa planta (novo BlueprintRoom + BRC por componente). */
   function inst(tpl: RoomTpl, perComp: PerComp[]): Ambiente {
@@ -243,9 +258,8 @@ export function createSeed(): SeedData {
       ordem: ct.ordem,
       kitQtds: perComp[i]!.kitQtds ?? {},
       custoComponentes: ct.custoComponentes,
-      custoQtds: perComp[i]!.custoQtds ?? {},
     }));
-    return { id: tpl.id, blueprintRoomId: nid(), nome: tpl.nome, componentes };
+    return { id: tpl.id, blueprintRoomId: nid(), nome: tpl.nome, componentes, registros: tpl.registros };
   }
 
   // ── Sala/Living COMPARTILHADA (1 Room, 3 plantas) ──
@@ -283,16 +297,19 @@ export function createSeed(): SeedData {
     ["hall-piso-bcn", "hall-piso-avo", "hall-piso-brc"],
     0,
     [
-      { nome: "Soleira", tipo: "espelho", baseKey: null, unidade: "und", lado: "upgrade" },
-      { nome: "Rodapé", tipo: "fixo", baseKey: "hall-rod-pol", unidade: "ml", lado: "upgrade" },
-      { nome: "Rodapé Munari RS", tipo: "fixo", baseKey: "hall-rod-pad", unidade: "ml", lado: "padrao" },
-      { nome: "Soleiras Granito", tipo: "fixo", baseKey: "hall-ped-pad", unidade: "und", lado: "padrao" },
+      { nome: "Soleira", tipo: "espelho", baseKey: null, unidade: "und", lado: "upgrade", qtd: 1 },
+      { nome: "Rodapé", tipo: "fixo", baseKey: "hall-rod-pol", unidade: "ml", lado: "upgrade", qtd: 7.5 },
+      { nome: "Rodapé Munari RS", tipo: "fixo", baseKey: "hall-rod-pad", unidade: "ml", lado: "padrao", qtd: 5 },
+      { nome: "Soleiras Granito", tipo: "fixo", baseKey: "hall-ped-pad", unidade: "und", lado: "padrao", qtd: 2 },
     ]
   );
-  const hall = room("Hall", [hallPiso]);
-  const hallT1 = inst(hall, [
-    { qtd: 2.25, rt: 50, custoQtds: costQty(hallPiso, [1, 7.5, 5, 2]) },
+  // Linha-registro do ambiente: a incorporadora só quer registrar o custo da
+  // pintura da parede, sem ofertar ao cliente. Nome em texto livre, sem vínculo
+  // a componente — só consta como custo, não gera crédito.
+  const hall = room("Hall", [hallPiso], [
+    { nome: "Parede — Pintura látex", valorUnitario: 60, unidade: "m²", qtd: 24 },
   ]);
+  const hallT1 = inst(hall, [{ qtd: 2.25, rt: 50 }]);
 
   // ── Tipologia 1 — Planta A (86m²) ──
   const t1 = tipologia(nid(), "Planta A — 86m²", 86, "2 dormitórios, sala integrada, cozinha americana, 1 banheiro", 24, "completa", [

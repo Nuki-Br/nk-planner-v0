@@ -387,11 +387,13 @@ export async function setKitQtds(
 
 // ─── Componentes de custo (satélites) ────────────────────────────────
 
-/** Dados de um componente de custo novo (definição + quantitativo desta planta). */
+/** Dados de um componente de custo (definição + quantidade, compartilhadas). */
 export interface CostComponentInput {
   nome: string;
   tipo: CostComponentKind;
   baseId: number | null;
+  /** Opção (Material id) a que o item se prende; null = todas as opções. */
+  materialOptionId: number | null;
   unidade: Unidade;
   lado: CostComponentSide;
   qtd: number;
@@ -399,9 +401,8 @@ export interface CostComponentInput {
 
 type CustoBody =
   | ({ op: "add" } & CostComponentInput)
-  | { op: "update"; costItemId: number; patch: Partial<Omit<CostComponentInput, "qtd">> }
+  | { op: "update"; costItemId: number; patch: Partial<CostComponentInput> }
   | { op: "remove"; costItemId: number }
-  | { op: "setQtds"; qtds: Record<number, number> }
   | { op: "reorder"; orderedIds: number[] };
 
 function custoComponente(
@@ -426,13 +427,13 @@ export async function addCostComponent(
   return custoComponente(tipologiaId, ambienteId, componenteId, { op: "add", ...input });
 }
 
-/** Edita a DEFINIÇÃO — vale para todas as tipologias que usam o ambiente. */
+/** Edita o item — vale para todas as tipologias que usam o ambiente. */
 export async function updateCostComponent(
   tipologiaId: number,
   ambienteId: number,
   componenteId: number,
   costItemId: number,
-  patch: Partial<Omit<CostComponentInput, "qtd">>
+  patch: Partial<CostComponentInput>
 ): Promise<Componente> {
   return custoComponente(tipologiaId, ambienteId, componenteId, { op: "update", costItemId, patch });
 }
@@ -446,16 +447,6 @@ export async function removeCostComponent(
   return custoComponente(tipologiaId, ambienteId, componenteId, { op: "remove", costItemId });
 }
 
-/** Quantitativos desta planta (keyed por id de componente de custo). */
-export async function setCostQtds(
-  tipologiaId: number,
-  ambienteId: number,
-  componenteId: number,
-  qtds: Record<number, number>
-): Promise<Componente> {
-  return custoComponente(tipologiaId, ambienteId, componenteId, { op: "setQtds", qtds });
-}
-
 export async function reorderCostComponents(
   tipologiaId: number,
   ambienteId: number,
@@ -463,6 +454,58 @@ export async function reorderCostComponents(
   orderedIds: number[]
 ): Promise<Componente> {
   return custoComponente(tipologiaId, ambienteId, componenteId, { op: "reorder", orderedIds });
+}
+
+// ─── Registros de custo (linhas avulsas do ambiente) ─────────────────
+
+/** Dados de uma linha-registro (nome texto livre + valor unitário digitado). */
+export interface CostRegistroInput {
+  nome: string;
+  valorUnitario: number;
+  unidade: Unidade;
+  qtd: number;
+}
+
+type RegistroBody =
+  | ({ op: "add" } & CostRegistroInput)
+  | { op: "update"; registroId: number; patch: Partial<CostRegistroInput> }
+  | { op: "remove"; registroId: number };
+
+function costRegistro(
+  tipologiaId: number,
+  ambienteId: number,
+  body: RegistroBody
+): Promise<Ambiente> {
+  return httpSend<Ambiente, RegistroBody>(
+    `/api/tipologias/${tipologiaId}/ambientes/${ambienteId}/registros`,
+    "POST",
+    body
+  );
+}
+
+export async function addCostRegistro(
+  tipologiaId: number,
+  ambienteId: number,
+  input: CostRegistroInput
+): Promise<Ambiente> {
+  return costRegistro(tipologiaId, ambienteId, { op: "add", ...input });
+}
+
+export async function updateCostRegistro(
+  tipologiaId: number,
+  ambienteId: number,
+  registroId: number,
+  patch: Partial<CostRegistroInput>
+): Promise<Ambiente> {
+  return costRegistro(tipologiaId, ambienteId, { op: "update", registroId, patch });
+}
+
+export async function removeCostRegistro(
+  tipologiaId: number,
+  ambienteId: number,
+  registroId: number
+): Promise<Ambiente> {
+  return costRegistro(tipologiaId, ambienteId, { op: "remove", registroId });
 }
 
 // ─── Compartilhamento de ambientes entre tipologias ──────────────────

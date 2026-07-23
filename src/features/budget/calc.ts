@@ -5,6 +5,7 @@
 import {
   calcBudgetRow,
   calcKitRow,
+  costItemAppliesTo,
   resolveSatellites,
   rowKey,
   type BudgetRowResult,
@@ -20,6 +21,7 @@ import type {
   BudgetColumn,
   Componente,
   CostComponent,
+  CostRegistro,
   Kit,
   Material,
   MaterialOption,
@@ -82,10 +84,19 @@ export function satelliteMats(deps: BudgetDeps, comp: Componente): Map<number, M
   return out;
 }
 
-/** Itens de custo "fixo" do componente que estão sem preço. */
-export function pendingCostItems(deps: BudgetDeps, comp: Componente): CostComponent[] {
+/**
+ * Itens de custo "fixo" sem preço que se aplicam a uma opção. Um avulso só
+ * derruba a sua opção; um item de escopo "todas" (materialOptionId null)
+ * derruba todas. `optionId` null enumera os de escopo "todas" (uso no padrão).
+ */
+export function pendingCostItems(
+  deps: BudgetDeps,
+  comp: Componente,
+  optionId: number | null
+): CostComponent[] {
   return (comp.custoComponentes ?? []).filter((cc) => {
     if (cc.tipo !== "fixo") return false;
+    if (!costItemAppliesTo(cc, optionId)) return false;
     if (cc.baseId == null) return true; // fixo sem material = mal configurado
     const m = getMaterial(deps.materiais, cc.baseId);
     return !m || effCustoMat(deps.baseCosts, cc.baseId, m.custoMat) <= 0;
@@ -111,15 +122,15 @@ export function isOptionOwnPending(deps: BudgetDeps, opt: MaterialOption): boole
 
 /**
  * A linha sai dos totais: ou a própria opção está sem custo, ou algum item de
- * custo "fixo" do componente está — essa linha entra no débito de TODA opção,
- * então derruba o componente inteiro (mesmo critério do sub-item de kit).
+ * custo "fixo" que se aplica a ESTA opção está — um avulso derruba só a sua
+ * opção; um de escopo "todas", todas (mesmo critério do sub-item de kit).
  */
 export function isOptionPending(
   deps: BudgetDeps,
   comp: Componente,
   opt: MaterialOption
 ): boolean {
-  return pendingCostItems(deps, comp).length > 0 || isOptionOwnPending(deps, opt);
+  return pendingCostItems(deps, comp, opt.id).length > 0 || isOptionOwnPending(deps, opt);
 }
 
 /**
@@ -131,7 +142,28 @@ export function padraoSatellites(
   comp: Componente,
   valUnPad: number
 ): CostSatelliteResult[] {
-  return resolveSatellites(comp, "padrao", valUnPad, satelliteMats(deps, comp));
+  return resolveSatellites(comp, "padrao", valUnPad, satelliteMats(deps, comp), comp.padrao);
+}
+
+/** Linha de registro resolvida para exibição (custo = valor unitário × qtd). */
+export interface RegistroResult {
+  registro: CostRegistro;
+  valUn: number;
+  line: number;
+  pending: boolean;
+}
+
+/**
+ * Linhas de custo avulsas (registro) do ambiente, já resolvidas. São só custo —
+ * não entram em crédito/débito nem no total; a pendência é local à linha.
+ */
+export function ambienteRegistros(_deps: BudgetDeps, amb: Ambiente): RegistroResult[] {
+  return (amb.registros ?? []).map((r) => ({
+    registro: r,
+    valUn: r.valorUnitario,
+    line: r.valorUnitario * r.qtd,
+    pending: r.valorUnitario <= 0,
+  }));
 }
 
 export type AnyRowResult =
@@ -160,7 +192,16 @@ export function calcAnyRow(
     if (!kit) return null;
     return {
       kind: "kit",
-      result: calcKitRow(effKit(deps.baseCosts, kit), comp, padraoMat, sats, deps.cols, ovr),
+      result: calcKitRow(
+        effKit(deps.baseCosts, kit),
+        comp,
+        padraoMat,
+        sats,
+        deps.cols,
+        opt.id,
+        comp.padrao,
+        ovr
+      ),
     };
   }
   const upg = getMaterial(deps.materiais, opt.baseId);
@@ -171,6 +212,8 @@ export function calcAnyRow(
     comp,
     sats,
     deps.cols,
+    opt.id,
+    comp.padrao,
     ovr
   );
   return result ? { kind: "material", result } : null;

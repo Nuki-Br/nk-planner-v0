@@ -81,19 +81,20 @@ export type CostComponentSide = "padrao" | "upgrade";
 /**
  * Componente de custo ("satélite"): linha somada ao custo do componente que
  * NUNCA é ofertada ao cliente na personalização — SOLEIRA, RODAPÉ, RESERVA
- * TÉCNICA. Reproduz o agrupamento da planilha do cliente:
+ * TÉCNICA, ou apenas um registro de custo.
  *
- *   H51 = SUM(G51 + G52 + $G$57) − $H$41
- *          mestre  espelho  fixo    crédito do grupo
- *
+ * Origem do preço:
  *  - "espelho": preço unitário = o da opção do SEU lado (a de upgrade, no lado
- *    upgrade; a padrão, no lado padrão). Quantidade e unidade próprias.
- *    Ex.: SOLEIRA acompanha o porcelanato escolhido.
- *  - "fixo": preço unitário = um BaseMaterial específico, igual para todas as
- *    opções — a referência ABSOLUTA da planilha. Ex.: RODAPÉ.
+ *    upgrade; a padrão, no lado padrão). Ex.: SOLEIRA acompanha o porcelanato.
+ *  - "fixo": preço unitário = um BaseMaterial do catálogo, igual em toda linha —
+ *    a referência ABSOLUTA da planilha. Ex.: RODAPÉ de poliestireno.
  *
- * Definição COMPARTILHADA (RoomComponentCostItem); a quantidade por planta vive
- * em Componente.custoQtds — mesmo split de options ⇄ kitQtds.
+ * Escopo (materialOptionId):
+ *  - null: vale para TODAS as opções do componente (upgrade) / linha padrão.
+ *  - preenchido: avulso — só para aquela opção (Material id).
+ *
+ * Definição E quantidade são COMPARTILHADAS entre todas as plantas que usam o
+ * ambiente (RoomComponentCostItem) — nada é local à planta.
  */
 export interface CostComponent {
   /** RoomComponentCostItem id. */
@@ -102,8 +103,12 @@ export interface CostComponent {
   tipo: CostComponentKind;
   /** BaseMaterial quando tipo = "fixo"; null quando "espelho". */
   baseId: number | null;
+  /** Opção (Material id) a que o item está preso; null = todas as opções. */
+  materialOptionId: number | null;
   unidade: Unidade;
   lado: CostComponentSide;
+  /** Quantitativo — compartilhado entre plantas do ambiente. */
+  qtd: number;
   ordem: number;
 }
 
@@ -144,10 +149,8 @@ export interface Componente {
   ordem: number;
   /** kitItemId → quantitativo do sub-item, nesta planta (era kitQtds). */
   kitQtds: Record<number, number>;
-  /** Componentes de custo (satélites) — definição compartilhada. */
+  /** Componentes de custo (satélites) — definição e quantidade compartilhadas. */
   custoComponentes: CostComponent[];
-  /** costComponentId → quantitativo do satélite, nesta planta. */
-  custoQtds: Record<number, number>;
 }
 
 /** Posição de um ambiente na planta (rect/poly). */
@@ -180,8 +183,30 @@ export interface Ambiente {
   blueprintRoomId: number;
   nome: string;
   componentes: Componente[];
+  /** Linhas de custo avulsas (registro) do ambiente — ver CostRegistro. */
+  registros: CostRegistro[];
   icon?: string;
   local?: RoomShape | null;
+}
+
+/**
+ * Linha de REGISTRO de custo: item avulso do AMBIENTE, com nome em texto livre
+ * (não vinculado a nenhum componente). Só consta como custo na tabela — não é
+ * ofertado ao cliente, não gera crédito nem afeta o custo de troca. Ex.: parede
+ * com "Pintura látex" que a incorporadora só quer registrar. Compartilhado entre
+ * as tipologias que usam o ambiente.
+ */
+export interface CostRegistro {
+  /** RoomCostRegistro id. */
+  id: number;
+  /** Nome em texto livre (ex.: "Parede — Pintura látex"). */
+  nome: string;
+  /** Valor unitário digitado (R$). */
+  valorUnitario: number;
+  unidade: Unidade;
+  /** Quantitativo — compartilhado entre plantas do ambiente. */
+  qtd: number;
+  ordem: number;
 }
 
 export type TipologiaStatus = "completa" | "incompleta";

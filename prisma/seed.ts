@@ -101,7 +101,6 @@ async function main(): Promise<void> {
   // ── Catálogo: BaseMaterial single + kit (+ KitItems) ──
   const catalogMap = new Map<number, number>(); // seed catalog id → db BaseMaterial id
   const kitItemMap = new Map<number, number>(); // seed KitItem id → db MaterialKitItem id
-  const costItemMap = new Map<number, number>(); // seed CostComponent id → db RoomComponentCostItem id
   for (const m of seed.materiais) {
     const row = await prisma.baseMaterial.create({
       data: {
@@ -238,22 +237,37 @@ async function main(): Promise<void> {
           if (defaultDbId != null) {
             await prisma.roomComponent.update({ where: { Id: rc.Id }, data: { DefaultMaterialId: defaultDbId } });
           }
-          // Componentes de custo (satélites) — definição compartilhada.
+          // Componentes de custo (satélites) — definição E quantidade compartilhadas.
           for (const cc of c.custoComponentes) {
-            const ci = await prisma.roomComponentCostItem.create({
+            await prisma.roomComponentCostItem.create({
               data: {
                 RoomComponentId: rc.Id,
                 Name: cc.nome,
                 Kind: cc.tipo,
                 Side: cc.lado,
                 BaseMaterialId: cc.baseId != null ? catalogMap.get(cc.baseId)! : null,
+                MaterialId: cc.materialOptionId != null ? optMap.get(cc.materialOptionId)! : null,
                 Unit: cc.unidade,
+                UsageQuantity: cc.qtd,
                 Position: cc.ordem,
               },
               select: { Id: true },
             });
-            costItemMap.set(cc.id, ci.Id);
           }
+        }
+        // Registros de custo do ambiente (linhas avulsas, nível Room).
+        for (const r of amb.registros) {
+          await prisma.roomCostRegistro.create({
+            data: {
+              RoomId: dbRoom.Id,
+              Name: r.nome,
+              UnitCost: r.valorUnitario,
+              Unit: r.unidade,
+              UsageQuantity: r.qtd,
+              Position: r.ordem,
+            },
+            select: { Id: true },
+          });
         }
         cache = { dbRoomId: dbRoom.Id, compMap };
         roomCache.set(amb.id, cache);
@@ -278,16 +292,6 @@ async function main(): Promise<void> {
             data: kitEntries.map(([kitItemSeedId, q]) => ({
               BlueprintRoomComponentId: brc.Id,
               KitItemId: kitItemMap.get(Number(kitItemSeedId))!,
-              UsageQuantity: q,
-            })),
-          });
-        }
-        const costEntries = Object.entries(c.custoQtds);
-        if (costEntries.length > 0) {
-          await prisma.costItemUsage.createMany({
-            data: costEntries.map(([costItemSeedId, q]) => ({
-              BlueprintRoomComponentId: brc.Id,
-              CostItemId: costItemMap.get(Number(costItemSeedId))!,
               UsageQuantity: q,
             })),
           });

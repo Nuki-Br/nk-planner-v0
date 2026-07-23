@@ -86,7 +86,6 @@ const EMPTY_COMP: Componente = {
   ordem: 1,
   kitQtds: {},
   custoComponentes: [],
-  custoQtds: {},
 };
 
 // Tela 4 — Visualizador editável (protótipo: TypologyCanvasScreen).
