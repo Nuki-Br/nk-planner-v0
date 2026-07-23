@@ -111,7 +111,7 @@ function AddCostItemBtn({ onClick }: { onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      title="Adicionar item de custo (soleira, rodapé, reserva técnica…)"
+      title="Adicionar item de custo"
       className="shrink-0 rounded p-1 text-neutral-gray-5 opacity-0 transition-opacity hover:bg-neutral-gray-3 hover:text-primary-7 group-hover/row:opacity-100 focus:opacity-100"
     >
       <Icon name="plus" size={13} />
@@ -1111,7 +1111,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                               <button
                                 type="button"
                                 onClick={() => setRegistroTarget({ amb, editing: null })}
-                                className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-neutral-gray-5 px-2.5 py-1 text-[11px] font-semibold text-neutral-gray-7 transition-colors hover:border-primary-7 hover:text-primary-7"
+                                className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-semibold text-neutral-gray-7 transition-colors hover:border-primary-7 hover:text-primary-7"
                               >
                                 <Icon name="plus" size={12} /> Adicionar item de custo
                               </button>
