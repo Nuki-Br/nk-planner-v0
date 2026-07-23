@@ -14,6 +14,8 @@ export interface CostRowRef {
   /** Só a opção tem linha Material — e portanto thread de comentário. */
   optionId: number | null;
   origem: "opcao" | "componente-custo";
+  /** true quando a opção é o material padrão (default) do componente. */
+  isDefault: boolean;
 }
 
 /**
@@ -29,7 +31,9 @@ export function enumerateCostRefs(amb: Ambiente): CostRowRef[] {
 
   for (const comp of amb.componentes) {
     for (const opt of comp.options) {
-      if (opt.isKit || opt.isDefault) continue;
+      // Kits não têm material único a precificar aqui; o material padrão (default)
+      // entra igual às opções de upgrade — ele também precisa de custo.
+      if (opt.isKit) continue;
       seen.add(opt.baseId);
       refs.push({
         key: String(opt.id),
@@ -37,6 +41,7 @@ export function enumerateCostRefs(amb: Ambiente): CostRowRef[] {
         compNome: comp.nome,
         optionId: opt.id,
         origem: "opcao",
+        isDefault: opt.isDefault,
       });
     }
   }
@@ -53,6 +58,7 @@ export function enumerateCostRefs(amb: Ambiente): CostRowRef[] {
         compNome: `${comp.nome} · ${cc.nome}`,
         optionId: null,
         origem: "componente-custo",
+        isDefault: false,
       });
     }
   }

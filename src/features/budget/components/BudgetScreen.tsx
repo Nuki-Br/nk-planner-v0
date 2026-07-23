@@ -40,6 +40,7 @@ import {
   ambTotal,
   buildScopeRefs,
   calcAnyRow,
+  effMaterial,
   emptyScopeRefs,
   ambienteRegistros,
   isOptionOwnPending,
@@ -936,14 +937,30 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                     )}
                     {amb.componentes.map((comp) => {
                       const def = comp.options.find((o) => o.id === comp.padrao);
-                      const padMat =
+                      const rawPadMat =
                         def && !def.isKit ? getMaterial(materiais, def.baseId) : undefined;
-                      if (!padMat) return null;
+                      if (!def || !rawPadMat) return null;
+                      // Custo base da sessão sobrepõe o catálogo — preencher o
+                      // custo do padrão reflete no crédito na hora (mesma regra
+                      // que padraoMaterial usa nos cálculos das opções de upgrade).
+                      const padMat = effMaterial(deps.baseCosts, rawPadMat);
                       // O crédito é o material que a construtora deixaria de
                       // instalar, na quantidade LÍQUIDA: a reserva técnica é
                       // perda extra do upgrade, não do padrão.
                       const valUnit = padMat.custoMat + padMat.custoMO;
                       const bg = "bg-[#f4fffe]";
+                      // O material padrão também precisa de custo — igual ao
+                      // upgrade, quando pendente a linha destaca e oferece o
+                      // preenchimento (inline/expandRow), reutilizando o mesmo
+                      // estado de fill. Chave por rowKey(def.id): não colide com
+                      // o padKey (colapso) nem com a seção de upgrade.
+                      const ownPending = isOptionOwnPending(deps, def);
+                      const rk = rowKey(def.id);
+                      const filling = fillOpen.has(rk);
+                      const inlineFill = ownPending && filling && pendingFill === "inline";
+                      const draft = fillDraft[def.baseId] ?? { mat: "", mo: "" };
+                      const rowBg = ownPending ? "bg-functional-warning-light" : bg;
+                      const fillCell = inlineFill ? "bg-primary-1" : rowBg;
                       // A coluna mostra o crédito DESTE item; cada satélite tem
                       // sua própria sub-linha. A soma (H41 da planilha) entra no
                       // custo de troca das opções, não aqui.
@@ -954,7 +971,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                       return (
                         <React.Fragment key={padKey}>
                           <tr className="group/row">
-                            <Td sticky className={bg}>
+                            <Td sticky className={rowBg}>
                               <div className="flex items-start gap-1.5">
                                 {padChildren.length > 0 && (
                                   <button
@@ -967,13 +984,40 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                   </button>
                                 )}
                                 <div className="flex-1">
-                                  <div className="text-xs font-semibold text-neutral-gray-9">
+                                  <div
+                                    className={cn(
+                                      "text-xs font-semibold",
+                                      ownPending ? "text-tint-amber-fg" : "text-neutral-gray-9"
+                                    )}
+                                  >
                                     {padMat.nome}
                                   </div>
-                                  <div className="mt-px text-[11px] text-neutral-gray-6">
+                                  <div
+                                    className={cn(
+                                      "mt-px text-[11px]",
+                                      ownPending ? "text-[#b45309]" : "text-neutral-gray-6"
+                                    )}
+                                  >
                                     {comp.nome} · {padMat.fabricante}
+                                    {ownPending && (
+                                      <span className="ml-1.5 font-bold text-tint-orange-fg">
+                                        · Aguardando custo
+                                      </span>
+                                    )}
                                   </div>
+                                  {ownPending && !inlineFill && !(filling && pendingFill === "expandRow") && (
+                                    <button
+                                      type="button"
+                                      onClick={() => openFill(rk, def.baseId)}
+                                      className="mt-1.5 inline-flex items-center gap-[5px] rounded-full border border-primary-7 bg-white px-2.5 py-1 text-[11px] font-bold text-primary-7"
+                                    >
+                                      <Icon name="plus" size={12} /> Preencher custo base
+                                    </button>
+                                  )}
                                 </div>
+                                {ownPending && (
+                                  <Icon name="warning" size={13} className="text-tint-orange-fg" />
+                                )}
                                 <AddCostItemBtn
                                   onClick={() =>
                                     setCostTarget({
@@ -987,26 +1031,88 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                 />
                               </div>
                             </Td>
-                            <Td right className={cn(bg, "text-neutral-gray-7")}>
-                              {fmtNum(comp.qtd, 2)} {comp.unidade}
+                            <Td right className={cn(fillCell, "text-neutral-gray-7")}>
+                              {inlineFill ? (
+                                <span className="text-[9.5px] font-bold uppercase tracking-wide text-primary-7">
+                                  Custo base →
+                                </span>
+                              ) : (
+                                `${fmtNum(comp.qtd, 2)} ${comp.unidade}`
+                              )}
                             </Td>
-                            <Td right className={cn(bg, "text-neutral-gray-7")}>
-                              {fmtBRL(valUnit)}
+                            <Td right className={cn(fillCell, "text-neutral-gray-7")}>
+                              {inlineFill ? (
+                                <div className="flex flex-col items-end gap-0.5">
+                                  <span className="text-[8.5px] font-bold tracking-wide text-primary-7">
+                                    CUSTO MAT.
+                                  </span>
+                                  <FillInput
+                                    autoFocus
+                                    value={draft.mat}
+                                    onChange={(v) => setDraftField(def.baseId, "mat", v)}
+                                    onEnter={() => commitFill(rk, def.baseId)}
+                                    onEscape={() => closeFill(rk)}
+                                  />
+                                </div>
+                              ) : ownPending ? (
+                                "—"
+                              ) : (
+                                fmtBRL(valUnit)
+                              )}
                             </Td>
-                            <Td right className={bg}>
-                              <span className="font-semibold text-functional-success">
-                                Créd. {fmtBRL(valUnit * comp.qtd)}
-                              </span>
+                            <Td right className={fillCell}>
+                              {inlineFill ? (
+                                <div className="flex flex-col items-end gap-0.5">
+                                  <span className="text-[8.5px] font-bold tracking-wide text-primary-7">
+                                    CUSTO MO
+                                  </span>
+                                  <FillInput
+                                    value={draft.mo}
+                                    onChange={(v) => setDraftField(def.baseId, "mo", v)}
+                                    onEnter={() => commitFill(rk, def.baseId)}
+                                    onEscape={() => closeFill(rk)}
+                                  />
+                                </div>
+                              ) : ownPending ? (
+                                <span className="text-neutral-gray-5">—</span>
+                              ) : (
+                                <span className="font-semibold text-functional-success">
+                                  Créd. {fmtBRL(valUnit * comp.qtd)}
+                                </span>
+                              )}
                             </Td>
-                            <Td right className={cn(bg, "text-neutral-gray-5")}>—</Td>
+                            <Td right className={cn(fillCell, "text-neutral-gray-5")}>
+                              {inlineFill ? (
+                                <div className="flex justify-end gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => commitFill(rk, def.baseId)}
+                                    title="Salvar"
+                                    className="rounded bg-primary-7 px-[9px] py-1 text-[11px] font-bold text-white"
+                                  >
+                                    ✓
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => closeFill(rk)}
+                                    title="Cancelar"
+                                    className="rounded border border-neutral-gray-5 px-[7px] py-1 text-[11px] text-neutral-gray-7"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ) : (
+                                "—"
+                              )}
+                            </Td>
                             {cols.map((col) => (
-                              <Td key={col.id} right className={cn(bg, "text-neutral-gray-5")}>
+                              <Td key={col.id} right className={cn(rowBg, "text-neutral-gray-5")}>
                                 —
                               </Td>
                             ))}
-                            <Td className={bg} />
-                            <Td right className={cn(bg, "text-neutral-gray-5")}>—</Td>
-                            <Td right className={cn(bg, "text-neutral-gray-5")}>—</Td>
+                            <Td className={rowBg} />
+                            <Td right className={cn(rowBg, "text-neutral-gray-5")}>—</Td>
+                            <Td right className={cn(rowBg, "text-neutral-gray-5")}>—</Td>
                           </tr>
                           {padExpanded &&
                             padChildren.map((c, ci) => (
@@ -1018,6 +1124,57 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                 {...costRowHandlers(amb, comp, "padrao")}
                               />
                             ))}
+                          {ownPending && filling && pendingFill === "expandRow" && (
+                            <tr>
+                              <td
+                                colSpan={colCount}
+                                className="border-b border-neutral-gray-4 bg-[#fffdf5] p-0"
+                              >
+                                <div className="flex items-end gap-[18px] border-l-[3px] border-functional-warning px-[18px] py-3.5">
+                                  <div className="shrink-0">
+                                    <div className="mb-[3px] text-[10.5px] font-bold uppercase tracking-wider text-tint-amber-fg">
+                                      Preencher custo base
+                                    </div>
+                                    <div className="max-w-[220px] text-xs text-neutral-gray-7">
+                                      {padMat.nome} · {comp.nome}
+                                    </div>
+                                  </div>
+                                  <label className="flex flex-col gap-1">
+                                    <span className="text-[10px] font-bold uppercase tracking-wide text-neutral-gray-7">
+                                      Custo material (R$)
+                                    </span>
+                                    <FillInput
+                                      autoFocus
+                                      big
+                                      value={draft.mat}
+                                      onChange={(v) => setDraftField(def.baseId, "mat", v)}
+                                      onEnter={() => commitFill(rk, def.baseId)}
+                                      onEscape={() => closeFill(rk)}
+                                    />
+                                  </label>
+                                  <label className="flex flex-col gap-1">
+                                    <span className="text-[10px] font-bold uppercase tracking-wide text-neutral-gray-7">
+                                      Custo mão de obra (R$)
+                                    </span>
+                                    <FillInput
+                                      big
+                                      value={draft.mo}
+                                      onChange={(v) => setDraftField(def.baseId, "mo", v)}
+                                      onEnter={() => commitFill(rk, def.baseId)}
+                                      onEscape={() => closeFill(rk)}
+                                    />
+                                  </label>
+                                  <div className="flex-1" />
+                                  <Button variant="bordered" size="sm" onPress={() => closeFill(rk)}>
+                                    Cancelar
+                                  </Button>
+                                  <Button size="sm" icon="check" onPress={() => commitFill(rk, def.baseId)}>
+                                    Salvar custo base
+                                  </Button>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
                         </React.Fragment>
                       );
                     })}

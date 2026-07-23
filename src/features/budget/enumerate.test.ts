@@ -43,10 +43,14 @@ describe("enumerateCostRefs", () => {
     expect(doCusto.some((r) => r.compNome.endsWith("· Soleiras Granito"))).toBe(true);
   });
 
-  it("lista as opções de upgrade normalmente", () => {
+  it("lista as opções, incluindo o material padrão", () => {
     const opcoes = refs.filter((r) => r.origem === "opcao");
-    expect(opcoes).toHaveLength(3); // Barcelona, Aeterna, Breccia
+    expect(opcoes).toHaveLength(4); // padrão + Barcelona, Aeterna, Breccia
     expect(opcoes.every((r) => r.optionId !== null)).toBe(true);
+    // O material padrão também precisa de custo → entra na enumeração, igual
+    // às opções de upgrade (é o que destrava preenchê-lo na aba Custo base).
+    expect(opcoes.filter((r) => r.isDefault)).toHaveLength(1);
+    expect(opcoes.filter((r) => !r.isDefault)).toHaveLength(3);
   });
 
   it("não duplica um baseId que já está como opção do mesmo ambiente", () => {

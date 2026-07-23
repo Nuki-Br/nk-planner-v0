@@ -177,6 +177,11 @@ export function CostBaseView({
                             )}
                           >
                             {ref.compNome} · {m.fabricante}
+                            {ref.isDefault && (
+                              <span className="ml-1.5 rounded bg-functional-success-light px-1 py-px text-[9px] font-bold uppercase tracking-wide text-functional-success">
+                                Padrão
+                              </span>
+                            )}
                             {ref.origem === "componente-custo" && (
                               <span className="ml-1.5 rounded bg-neutral-gray-3 px-1 py-px text-[9px] font-bold uppercase tracking-wide text-neutral-gray-7">
                                 Item de custo
