@@ -7,6 +7,7 @@
 // banco) e pelos testes. Valores verbatim do protótipo; premium sem custo (=0)
 // = pendente (aguardando cotação da construtora).
 import { TAX_COLUMNS_DEFAULT } from "@/shared/constants/budget";
+import { EMPTY_PRICING } from "@/shared/types/domain";
 import type {
   Ambiente,
   BudgetVersion,
@@ -16,6 +17,7 @@ import type {
   CostComponentKind,
   CostComponentSide,
   CostRegistro,
+  CustosBase,
   Kit,
   KitItem,
   Material,
@@ -27,11 +29,17 @@ import type {
 } from "@/shared/types/domain";
 
 /**
- * Material do seed com `unidade`: o domínio não tem mais unidade no Material,
- * mas o prisma/seed.ts ainda grava BaseMaterial.Unit (fallback de exibição de
- * kits antigos) e os sub-itens de kit herdam a unidade daqui.
+ * Material do seed com `unidade` e custo: nenhum dos dois vive no Material do
+ * domínio (unidade vem do componente, custo vem do empreendimento), mas o seed
+ * precisa deles — o prisma/seed.ts grava BaseMaterial.Unit e semeia o
+ * EnterpriseMaterialCost do empreendimento âncora a partir do custo daqui.
  */
-export type SeedMaterial = Material & { unidade: Unidade };
+export type SeedMaterial = Material & {
+  unidade: Unidade;
+  /** Custo base a semear no empreendimento âncora. 0 = pendente. */
+  custoMat: number;
+  custoMO: number;
+};
 
 export interface SeedData {
   materiais: SeedMaterial[];
@@ -46,6 +54,8 @@ export interface SeedData {
   comments: Record<string, Comment[]>;
   /** String(baseMaterialId) → custos/comentário do terceiro. */
   portalFills: Record<string, PortalFill>;
+  /** Custo base do empreendimento âncora (baseId → mat/MO), derivado de materiais. */
+  custosBase: CustosBase;
 }
 
 /** Retorna uma estrutura NOVA a cada chamada (sem referências compartilhadas). */
@@ -128,8 +138,6 @@ export function createSeed(): SeedData {
         nome: src.nome,
         fabricante: src.fabricante,
         unidade: src.unidade,
-        custoMat: src.custoMat,
-        custoMO: src.custoMO,
       };
     });
     const k2: Kit = { id: nid(), codigo, nome, categoria, itens };
@@ -181,7 +189,17 @@ export function createSeed(): SeedData {
     const optionKeys = padraoKey ? [padraoKey, ...upgradeKeys] : upgradeKeys;
     const options: MaterialOption[] = optionKeys.map((k, i) => {
       const r = ref(k);
-      return { id: nid(), baseId: r.baseId, isKit: r.isKit, isDefault: k === padraoKey, ordem: i };
+      return {
+        id: nid(),
+        baseId: r.baseId,
+        isKit: r.isKit,
+        isDefault: k === padraoKey,
+        ordem: i,
+        // O seed nasce sem rascunho e sem publicação: é o estado de um
+        // empreendimento recém-criado, antes de qualquer edição de preço.
+        pricing: { ...EMPTY_PRICING, colunas: {} },
+        publicado: null,
+      };
     });
     const padrao = options.find((o) => o.isDefault)?.id ?? null;
     const custoComponentes: CostComponent[] = costItems.map((c, i) => ({
@@ -482,7 +500,26 @@ export function createSeed(): SeedData {
     { id: nid(), nome: "Alameda Santos Prime", torre: "Torre Única", incorporadora: "Grupo Axis", status: "rascunho", enviadoEm: null, prazo: null, totalItens: 0, itensPreenchidos: 0, usaDebitoCredito: false },
   ];
 
-  return { materiais, kits, tipologias, torres, unitGroups, versions, projects, comments, portalFills: {} };
+  // Custo base do empreendimento âncora, derivado do catálogo do seed: no
+  // modelo novo o custo não mora no material, mas o demo precisa começar com os
+  // mesmos valores do protótipo (0 = pendente, aguardando a construtora).
+  const custosBase: CustosBase = {};
+  for (const m of materiais) {
+    custosBase[m.id] = { baseId: m.id, custoMat: m.custoMat, custoMO: m.custoMO };
+  }
+
+  return {
+    materiais,
+    kits,
+    tipologias,
+    torres,
+    unitGroups,
+    versions,
+    projects,
+    comments,
+    portalFills: {},
+    custosBase,
+  };
 }
 
 /** Helper local para montar uma Tipologia com id/dados básicos. */

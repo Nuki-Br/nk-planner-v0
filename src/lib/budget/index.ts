@@ -1,8 +1,9 @@
-// Motor de cálculo do Construtor de Preço — puro (sem React/DOM/dados). No
-// modelo normalizado, o CHAMADOR resolve as opções (padrão + upgrade) para suas
-// entidades de catálogo e passa-as prontas; o kit traz seus sub-itens inline
-// (KitItem) e a quantidade/pendência vêm da linha por planta. Pendência é
-// derivada do custo (custo 0 = pendente), não mais de um Set externo.
+// Motor de cálculo do Construtor de Preço — puro (sem React/DOM/dados). O
+// CHAMADOR resolve TUDO antes de chamar: valor unitário efetivo, quantidade e
+// reserva técnica de cada lado (RowSide) e o preço de cada BaseMaterial
+// referenciado (PricedEntity). O motor não conhece catálogo, custo base do
+// empreendimento nem override de aplicação — só aritmética e fórmulas. Ver
+// features/budget/resolve.ts para a cadeia de resolução.
 //
 // CONVENÇÃO ESTENDIDA (alinhada à planilha do cliente): todas as colunas
 // monetárias já são o TOTAL da linha, não valores por unidade.
@@ -21,8 +22,42 @@ import type {
   CostComponentSide,
   Kit,
   KitItem,
-  Material,
 } from "@/shared/types/domain";
+
+/**
+ * Um BaseMaterial já precificado para o motor. `valUn` é o custo unitário
+ * EFETIVO (custo base do empreendimento, ou o override da aplicação) — o motor
+ * nunca soma material + mão de obra, isso é da alçada do resolvedor.
+ */
+export interface PricedEntity {
+  nome: string;
+  /** R$/unidade efetivo. */
+  valUn: number;
+  /** Sem custo preenchido → a linha sai dos totais. */
+  pending: boolean;
+}
+
+/** baseId (BaseMaterial) → preço efetivo. */
+export type PriceLookup = ReadonlyMap<number, PricedEntity>;
+
+/**
+ * Um lado do cálculo (upgrade ou padrão) com tudo resolvido. Quantidade e RT
+ * são POR LADO porque cada aplicação pode sobrepor as suas — o padrão e o
+ * upgrade de um mesmo componente não precisam mais compartilhar quantitativo.
+ */
+export interface RowSide {
+  /** R$/unidade efetivo. */
+  valUn: number;
+  /** Quantidade efetiva (líquida, sem RT). */
+  qtd: number;
+  /** Reserva técnica efetiva (%). */
+  rt: number;
+  /** Sem custo preenchido. */
+  pending: boolean;
+}
+
+/** Lado de um KIT: o valor unitário é a soma dos sub-itens, não um campo. */
+export type KitSide = Pick<RowSide, "qtd" | "rt">;
 
 export interface ColResult {
   value: number;
@@ -44,14 +79,16 @@ export interface BaseRowResult {
   /** R$/un. do upgrade (kit: total do kit) — exibição. */
   valUnUpg: number;
   /**
-   * Débito do ITEM: valor unitário × qtd com RT. É `G51` na planilha — a coluna
-   * "Déb./Créd." mostra ISTO, não o total com satélites: cada satélite tem sua
-   * própria linha com seu próprio débito, e a soma acontece no custo de troca.
+   * Débito do ITEM: valor unitário × qtd com RT. É `G51` na planilha. Só o
+   * material; a coluna "Déb./Créd." exibe `debitoTotal` (item + satélites).
    */
   debitoItem: number;
   /** Crédito do ITEM padrão: valor unitário × qtd líquida (sem RT). */
   creditoItem: number;
-  /** debitoItem + Σ satélites do lado upgrade. */
+  /**
+   * debitoItem + Σ satélites do lado upgrade. A coluna "Déb./Créd." da linha-pai
+   * mostra ISTO — o subtotal do grupo; cada satélite mantém sua sub-linha.
+   */
   debitoTotal: number;
   /** creditoItem + Σ satélites do lado padrão — o `H41` da planilha. */
   creditoTotal: number;
@@ -71,11 +108,11 @@ export interface BaseRowResult {
   total: number;
 }
 
-/** O que o motor precisa do Componente (mantém a assinatura livre de dados). */
-export type CompCalcInput = Pick<
-  Componente,
-  "qtd" | "rt" | "custoComponentes"
->;
+/**
+ * O que o motor precisa do Componente. Quantidade e RT NÃO entram aqui: vêm
+ * resolvidas por lado em RowSide, porque cada aplicação pode sobrepô-las.
+ */
+export type CompCalcInput = Pick<Componente, "custoComponentes">;
 
 export interface BudgetRowResult extends BaseRowResult {
   /** R$/un. do padrão — exibição. */
@@ -114,22 +151,22 @@ export function resolveSatellites(
   comp: Pick<Componente, "custoComponentes">,
   lado: CostComponentSide,
   valUnEspelho: number,
-  satelliteMats: ReadonlyMap<number, Material>,
+  prices: PriceLookup,
   optionId: number | null
 ): CostSatelliteResult[] {
   const out: CostSatelliteResult[] = [];
   for (const cc of comp.custoComponentes ?? []) {
     if (cc.lado !== lado) continue;
     if (!costItemAppliesTo(cc, optionId)) continue;
-    const fixo = cc.baseId != null ? satelliteMats.get(cc.baseId) : undefined;
-    const valUn = cc.tipo === "espelho" ? valUnEspelho : fixo ? fixo.custoMat + fixo.custoMO : 0;
+    const fixo = cc.baseId != null ? prices.get(cc.baseId) : undefined;
+    const valUn = cc.tipo === "espelho" ? valUnEspelho : (fixo?.valUn ?? 0);
     out.push({
       item: cc,
       nome: cc.tipo === "fixo" && fixo ? fixo.nome : cc.nome,
       qtd: cc.qtd,
       valUn,
       line: valUn * cc.qtd,
-      pending: cc.tipo === "fixo" && (!fixo || fixo.custoMat <= 0),
+      pending: cc.tipo === "fixo" && (!fixo || fixo.pending),
     });
   }
   return out;
@@ -199,15 +236,15 @@ function baseScope(
 }
 
 /**
- * Cálculo por linha (upgrade de MATERIAL). Recebe as entidades já resolvidas
- * (upgrade + padrão). Null quando falta padrão ou upgrade. A exclusão de itens
- * pendentes dos totais é contrato do CHAMADOR.
+ * Cálculo por linha (upgrade de MATERIAL). Recebe os dois lados já resolvidos —
+ * valor unitário, quantidade e RT efetivos de cada um. Null quando falta o lado
+ * padrão. A exclusão de itens pendentes dos totais é contrato do CHAMADOR.
  */
 export function calcBudgetRow(
-  upgradeMat: Material | undefined,
-  padraoMat: Material | undefined,
+  upg: RowSide,
+  pad: RowSide | null,
   comp: CompCalcInput,
-  satelliteMats: ReadonlyMap<number, Material>,
+  prices: PriceLookup,
   cols: BudgetColumn[],
   optionId: number | null,
   padraoOptionId: number | null,
@@ -216,21 +253,23 @@ export function calcBudgetRow(
   // "Custo total" vira só o débito estendido, sem subtrair o padrão.
   usaDebitoCredito = true
 ): BudgetRowResult | null {
-  if (!padraoMat || !upgradeMat) return null;
-  const qtdComRT = comp.qtd * (1 + comp.rt / 100);
-  const valUnUpg = upgradeMat.custoMat + upgradeMat.custoMO;
-  const valUnPad = padraoMat.custoMat + padraoMat.custoMO;
+  if (!pad) return null;
+  const qtdComRT = upg.qtd * (1 + upg.rt / 100);
+  const valUnUpg = upg.valUn;
+  const valUnPad = pad.valUn;
 
-  const satUpg = resolveSatellites(comp, "upgrade", valUnUpg, satelliteMats, optionId);
+  const satUpg = resolveSatellites(comp, "upgrade", valUnUpg, prices, optionId);
   // Sem crédito, os satélites do lado padrão não entram: não subtraem nem
   // marcam a linha de upgrade como pendente por falta de custo do padrão.
   const satPad = usaDebitoCredito
-    ? resolveSatellites(comp, "padrao", valUnPad, satelliteMats, padraoOptionId)
+    ? resolveSatellites(comp, "padrao", valUnPad, prices, padraoOptionId)
     : [];
   const satellites = [...satUpg, ...satPad];
 
   const debitoItem = valUnUpg * qtdComRT;
-  const creditoItem = usaDebitoCredito ? valUnPad * comp.qtd : 0; // crédito sem RT
+  // Crédito sem RT e na quantidade DO PADRÃO: a reserva técnica é perda extra do
+  // upgrade, e o padrão pode ter quantitativo próprio (override da aplicação).
+  const creditoItem = usaDebitoCredito ? valUnPad * pad.qtd : 0;
   const debitoTotal = debitoItem + sumLines(satUpg);
   const creditoTotal = creditoItem + sumLines(satPad);
   const custoDeTroca = debitoTotal - creditoTotal;
@@ -262,8 +301,9 @@ export function calcBudgetRow(
 export function calcKitRow(
   kit: Kit,
   comp: Componente,
-  padraoMat: Material | undefined,
-  satelliteMats: ReadonlyMap<number, Material>,
+  upg: KitSide,
+  pad: RowSide | null,
+  prices: PriceLookup,
   cols: BudgetColumn[],
   optionId: number | null,
   padraoOptionId: number | null,
@@ -274,26 +314,26 @@ export function calcKitRow(
   const subItems: KitSubItemResult[] = [];
   for (const item of kit.itens) {
     const subQtd = qtds[item.id] ?? 0;
-    const valUn = item.custoMat + item.custoMO;
+    const priced = prices.get(item.materialId);
+    const valUn = priced?.valUn ?? 0;
     const line = valUn * subQtd;
-    const pending = item.custoMat <= 0;
-    subItems.push({ item, subQtd, valUn, line, pending });
+    subItems.push({ item, subQtd, valUn, line, pending: !priced || priced.pending });
   }
 
-  const qtdComRT = comp.qtd * (1 + comp.rt / 100);
+  const qtdComRT = upg.qtd * (1 + upg.rt / 100);
   const kitTotal = subItems.reduce((a, s) => a + s.line, 0);
-  const valUnPad = padraoMat ? padraoMat.custoMat + padraoMat.custoMO : 0;
+  const valUnPad = pad?.valUn ?? 0;
 
   // Para um kit, o "espelho" acompanha o total do kit — não há valor unitário.
-  const satUpg = resolveSatellites(comp, "upgrade", kitTotal, satelliteMats, optionId);
+  const satUpg = resolveSatellites(comp, "upgrade", kitTotal, prices, optionId);
   const satPad = usaDebitoCredito
-    ? resolveSatellites(comp, "padrao", valUnPad, satelliteMats, padraoOptionId)
+    ? resolveSatellites(comp, "padrao", valUnPad, prices, padraoOptionId)
     : [];
   const satellites = [...satUpg, ...satPad];
 
   // O débito do "item" de um kit é a soma dos sub-itens: eles SÃO o item.
   const debitoItem = kitTotal;
-  const creditoItem = usaDebitoCredito ? valUnPad * comp.qtd : 0;
+  const creditoItem = usaDebitoCredito && pad ? valUnPad * pad.qtd : 0;
   const debitoTotal = debitoItem + sumLines(satUpg);
   const creditoTotal = creditoItem + sumLines(satPad);
   const custoDeTroca = debitoTotal - creditoTotal;

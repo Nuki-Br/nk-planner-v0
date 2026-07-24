@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 
 import { fail, publicRoute } from "@/lib/api/handler";
 import {
+  getEnterpriseCostMap,
   getFillLinkByToken,
   getPortalFills,
   getPortalMaterialIds,
@@ -36,14 +37,16 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
         campos: link.campos,
         tipologias: [],
         materiais: [],
+        custosBase: {},
         fills: {},
       };
     }
-    const [tipologias, materiais, fills, scopedIds] = await Promise.all([
+    const [tipologias, materiais, fills, scopedIds, custosBase] = await Promise.all([
       listTipologias(organizationId, enterpriseId),
       listMateriais(organizationId),
       getPortalFills(organizationId, enterpriseId),
       getPortalMaterialIds(organizationId, link.tipologiaIds),
+      getEnterpriseCostMap(enterpriseId),
     ]);
     // Escopo do link: só as tipologias liberadas e os BaseMaterials preenchíveis
     // que elas referenciam (opções + sub-itens de kit) — não expõe o catálogo inteiro.
@@ -55,6 +58,9 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
       campos: link.campos,
       tipologias: scopedTipologias,
       materiais: materiais.filter((m) => scopedIds.has(m.id)),
+      custosBase: Object.fromEntries(
+        Object.entries(custosBase).filter(([id]) => scopedIds.has(Number(id)))
+      ),
       fills: Object.fromEntries(Object.entries(fills).filter(([id]) => scopedIds.has(Number(id)))),
     };
   });

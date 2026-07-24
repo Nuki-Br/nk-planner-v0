@@ -2,15 +2,24 @@
 
 import React from "react";
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { AlertModal, Button, EmptyState, Icon, Modal, PageHeader, Textarea } from "@/components/ui";
 import { columnsAffectedByExtendedConvention, rowKey } from "@/lib/budget";
 import { getKit, getMaterial } from "@/lib/data/entities";
 import { useBudgetColumns, useUpdateBudgetColumns } from "@/lib/hooks/useBudgetColumns";
 import { useCommentThreads } from "@/lib/hooks/useComments";
+import { flushDiff } from "@/lib/hooks/diffRefresh";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { useCustosBase, useSaveCustoBase, toCustosBaseMap } from "@/lib/hooks/useCustosBase";
 import { useKits } from "@/lib/hooks/useKits";
-import { useMateriais, useUpdateMaterial } from "@/lib/hooks/useMateriais";
+import { useMateriais } from "@/lib/hooks/useMateriais";
+import {
+  usePricing,
+  usePricingDiff,
+  usePublishBudget,
+  useSavePricing,
+} from "@/lib/hooks/useMaterialPricing";
 import { useProject } from "@/lib/hooks/useProjects";
 import { useTipologias } from "@/lib/hooks/useTipologias";
 import {
@@ -21,7 +30,7 @@ import {
   useUpdateCostComponent,
   useUpdateCostRegistro,
 } from "@/lib/hooks/useTipologiaMutations";
-import { useCreateVersion, useRestoreVersion, useVersions } from "@/lib/hooks/useVersions";
+import { useRestoreVersion, useVersions } from "@/lib/hooks/useVersions";
 import { cn, fmtBRL, fmtNum } from "@/lib/utils";
 import { useRequireActiveProject } from "@/lib/hooks/useRequireActiveProject";
 import { CommentThreadPanel, type ThreadRow } from "@/features/construtor-shared/CommentThreadPanel";
@@ -40,17 +49,24 @@ import {
   ambTotal,
   buildScopeRefs,
   calcAnyRow,
-  effMaterial,
+  custoBaseOf,
   emptyScopeRefs,
   ambienteRegistros,
   isOptionOwnPending,
   isOptionPending,
   padraoSatellites,
   pendingCostItems,
-  type BaseCosts,
+  pricingOf,
+  qtdOf,
+  rtOf,
+  unidadeOf,
+  valUnOf,
   type BudgetDeps,
-  type CellOverrides,
 } from "../calc";
+import { PricingStatusBadge } from "./PricingStatusBadge";
+import { PublishDiffList } from "./PublishDiffList";
+import { QtyPopover, type QtyValue } from "./QtyPopover";
+import { UnitCostCell } from "./UnitCostCell";
 import { kitSubRow, satelliteRowsFor, satelliteSubRow } from "../subRows";
 import { AddColumnTh, ColHeaderCell } from "./ColHeaderCell";
 import { BudgetScreenSkeleton } from "./BudgetScreenSkeleton";
@@ -64,6 +80,9 @@ import { SubRow } from "./SubRow";
 import { VersionDrawer, VersionToast } from "./Versioning";
 
 type PendingFillMode = "inline" | "expandRow";
+
+/** baseId → custo digitado no preenchimento inline (strings de input). */
+type FillDraft = Record<number, { mat: string; mo: string }>;
 
 interface EditingCell {
   rowKey: string;
@@ -294,10 +313,15 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   const { data: cols = [] } = useBudgetColumns(projectId);
   const { data: versions = [] } = useVersions(projectId);
   const { data: commentThreads = {} } = useCommentThreads(projectId);
+  const { data: custoRows = [] } = useCustosBase(projectId);
+  const { data: pricings = {} } = usePricing(projectId);
+  const { data: diff } = usePricingDiff(projectId);
   const updateCols = useUpdateBudgetColumns();
-  const updateMaterial = useUpdateMaterial();
-  const createVersion = useCreateVersion(projectId ?? 0);
+  const saveCustoBase = useSaveCustoBase(projectId);
+  const savePricing = useSavePricing(projectId);
+  const publishBudget = usePublishBudget(projectId);
   const restoreVersion = useRestoreVersion(projectId ?? 0);
+  const queryClient = useQueryClient();
   const addCostMut = useAddCostComponent();
   const updateCostMut = useUpdateCostComponent();
   const removeCostMut = useRemoveCostComponent();
@@ -307,11 +331,11 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
 
   const [activeTipId, setActiveTipId] = React.useState<number | null>(null);
   const [view, setView] = React.useState<"preco" | "custos">("preco");
-  const [baseCosts, setBaseCosts] = React.useState<BaseCosts>({});
   const [fillOpen, setFillOpen] = React.useState<Set<string>>(new Set());
-  const [fillDraft, setFillDraft] = React.useState<BaseCosts>({});
+  // Rascunho do preenchimento inline de custo pendente (baseId → strings do
+  // input). Vive entre abrir o campo e o Enter/✓; o valor real está no servidor.
+  const [fillDraft, setFillDraft] = React.useState<FillDraft>({});
   const [openThread, setOpenThread] = React.useState<ThreadRow | null>(null);
-  const [overrides, setOverrides] = React.useState<CellOverrides>({});
   const [editingCell, setEditingCell] = React.useState<EditingCell | null>(null);
   const [columnModal, setColumnModal] = React.useState<ColumnModalState>(null);
   const [deleteCol, setDeleteCol] = React.useState<BudgetColumn | null>(null);
@@ -346,6 +370,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   const tip = tipologias.find((t) => t.id === activeTipId) ?? tipologias[0] ?? null;
   const currentVersion = versions.find((v) => v.isCurrent) ?? versions[0] ?? null;
 
+  const custosBase = React.useMemo(() => toCustosBaseMap(custoRows), [custoRows]);
   const usaDC = project?.usaDebitoCredito !== false;
   // Sem débito/crédito a coluna Déb./Créd. some, e é ela que hospeda o input de
   // "Custo MO" no preenchimento inline — então caímos no painel expandRow (full
@@ -353,8 +378,8 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   const fillMode = usaDC ? pendingFill : "expandRow";
 
   const deps = React.useMemo<BudgetDeps>(
-    () => ({ materiais, kits, cols, overrides, baseCosts, usaDebitoCredito: usaDC }),
-    [materiais, kits, cols, overrides, baseCosts, usaDC]
+    () => ({ materiais, kits, cols, custosBase, pricings, usaDebitoCredito: usaDC }),
+    [materiais, kits, cols, custosBase, pricings, usaDC]
   );
 
   const affectedCols = React.useMemo(
@@ -486,17 +511,11 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
     else addColumn(draft);
     setColumnModal(null);
   };
+  // Os overrides de célula da coluna são limpos no SERVIDOR, dentro do mesmo
+  // update (updateBudgetColumns faz `ColumnOverrides - id`): limpar só no
+  // cliente deixaria a chave órfã no Json de todo Material do empreendimento.
   const deleteColumn = (id: number) => {
     persistCols(cols.filter((c) => c.id !== id));
-    setOverrides((prev) => {
-      const next: CellOverrides = {};
-      for (const rk of Object.keys(prev)) {
-        const row = { ...prev[rk] };
-        delete row[id];
-        next[rk] = row;
-      }
-      return next;
-    });
     if (editingCell?.colId === id) setEditingCell(null);
   };
   const reorder = (fromId: number | null, toId: number) => {
@@ -531,28 +550,33 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
     return emptyScopeRefs(cols, colIdx);
   })();
 
-  // ── overrides por célula ──
-  const setOverride = (rowKey: string, colId: number, expr: string) =>
-    setOverrides((prev) => ({ ...prev, [rowKey]: { ...prev[rowKey], [colId]: expr } }));
-  const clearOverride = (rowKey: string, colId: number) =>
-    setOverrides((prev) => {
-      const next = { ...prev };
-      const row = { ...next[rowKey] };
-      delete row[colId];
-      next[rowKey] = row;
-      return next;
-    });
+  // ── overrides por célula (persistidos em MaterialPricing.colunas) ──
+  const saveColunas = (optionId: number, colunas: Record<string, string>) =>
+    savePricing.mutate({ optionId, colunas });
+  const setOverride = (optionId: number, colId: number, expr: string) =>
+    saveColunas(optionId, { ...pricingOf(deps, optionId).colunas, [colId]: expr });
+  const clearOverride = (optionId: number, colId: number) => {
+    const next = { ...pricingOf(deps, optionId).colunas };
+    delete next[colId];
+    saveColunas(optionId, next);
+  };
 
-  // ── preenchimento de custo pendente ──
+  // ── overrides de valor unitário e quantidade (MaterialPricing) ──
+  const saveValorUnitario = (optionId: number, valorUnitario: number | null) =>
+    savePricing.mutate({ optionId, valorUnitario });
+  const saveQtd = (optionId: number, v: QtyValue) =>
+    savePricing.mutate({ optionId, qtd: v.qtd, rt: v.rt, unidade: v.unidade });
+
+  // ── preenchimento de custo pendente (grava no custo base do empreendimento) ──
   const openFill = (rowKey: string, baseId: number) => {
-    const m = getMaterial(materiais, baseId);
+    const c = custosBase[baseId];
     setFillDraft((p) => ({
       ...p,
       [baseId]:
         p[baseId] ??
         {
-          mat: m && m.custoMat > 0 ? String(m.custoMat) : "",
-          mo: m && m.custoMO > 0 ? String(m.custoMO) : "",
+          mat: c && c.custoMat > 0 ? String(c.custoMat) : "",
+          mo: c && c.custoMO > 0 ? String(c.custoMO) : "",
         },
     }));
     setFillOpen((prev) => new Set(prev).add(rowKey));
@@ -565,20 +589,20 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
     });
   const setDraftField = (baseId: number, fld: "mat" | "mo", val: string) =>
     setFillDraft((p) => ({ ...p, [baseId]: { ...(p[baseId] ?? { mat: "", mo: "" }), [fld]: val } }));
-  // Persiste o custo base digitado no material (custoMat/custoMO) — o servidor
-  // remove a pendência quando custoMat > 0, então o item deixa de aparecer como
-  // "sem custo" no catálogo, na revisão de custos e nas tipologias.
+  /**
+   * Grava o custo base DO EMPREENDIMENTO — vale para todas as aplicações deste
+   * material aqui, e some da lista de pendências da aba "Custos base".
+   */
   const persistBaseCost = (baseId: number, matStr: string, moStr: string) => {
     const custoMat = parseFloat(String(matStr).replace(",", ".")) || 0;
     const custoMO = parseFloat(String(moStr).replace(",", ".")) || 0;
     if (custoMat <= 0) return;
-    const m = materiais.find((x) => x.id === baseId);
-    if (m && m.custoMat === custoMat && m.custoMO === custoMO) return;
-    updateMaterial.mutate({ id: baseId, patch: { custoMat, custoMO } });
+    const c = custosBase[baseId];
+    if (c && c.custoMat === custoMat && c.custoMO === custoMO) return;
+    saveCustoBase.mutate({ baseId, custoMat, custoMO });
   };
   const commitFill = (rowKey: string, baseId: number) => {
     const d = fillDraft[baseId] ?? { mat: "", mo: "" };
-    setBaseCosts((p) => ({ ...p, [baseId]: { mat: d.mat, mo: d.mo } }));
     closeFill(rowKey);
     persistBaseCost(baseId, d.mat, d.mo);
   };
@@ -594,18 +618,21 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
       return next;
     });
 
-  // ── versões ──
-  // Publicar salva uma versão do estado atual e segue para a publicação — os
-  // dois passos foram unificados (não há mais "Salvar versão" separado).
+  // ── publicar ──
+  // O diff/badge é reconciliado com debounce (~700ms após a última edição). Ao
+  // abrir o modal, forçar o refetch AGORA para o preview não ficar atrás do que
+  // será publicado.
+  const openPublishModal = () => {
+    if (projectId) flushDiff(queryClient, projectId);
+    setShowPublishModal(true);
+  };
+  // CONGELA o rascunho no Material (preço + snapshot) e cria a versão. Até aqui
+  // nada do que o usuário editou na tabela afetava o preço que está valendo.
   const handlePublish = () => {
     const summary = publishSummary.trim();
     if (!summary) return;
-    createVersion.mutate(
-      {
-        summary,
-        createdBy: currentUser.name,
-        changes: { materiais: [], custos: [], taxas: [], tipologias: [] },
-      },
+    publishBudget.mutate(
+      { summary, createdBy: currentUser.name },
       {
         onSuccess: () => {
           setShowPublishModal(false);
@@ -643,14 +670,17 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
     }
   }
 
-  // célula de coluna configurável (compartilhada entre linha de material e de kit)
+  // Célula de coluna configurável (compartilhada entre linha de material e de
+  // kit). O override é gravado em MaterialPricing.colunas — daí a célula ser
+  // endereçada pelo optionId, não por uma rowKey de string.
   const renderConfigCell = (
     col: BudgetColumn,
     colIdx: number,
     r: ReturnType<typeof calcAnyRow>,
-    rowKey: string,
+    optionId: number,
     rowBgClass: string
   ) => {
+    const rk = rowKey(optionId);
     if (!r) {
       return (
         <Td key={col.id} right className={cn(rowBgClass, "text-neutral-gray-5")}>
@@ -660,12 +690,12 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
     }
     const result = r.result;
     const cr = result.colResults[col.id];
-    const isEditing = editingCell?.rowKey === rowKey && editingCell.colId === col.id;
+    const isEditing = editingCell?.rowKey === rk && editingCell.colId === col.id;
     const ovr = cr?.overridden ?? false;
 
     if (isEditing) {
       const { scope, refs } = buildScopeRefs(cols, result, colIdx);
-      const current = overrides[rowKey]?.[col.id] ?? col.expr;
+      const current = pricingOf(deps, optionId).colunas[String(col.id)] ?? col.expr;
       return (
         <Td key={col.id} right className="relative bg-primary-1 !px-[7px] !py-[5px]">
           <FormulaCellEditor
@@ -674,11 +704,11 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
             refs={refs}
             canReset={ovr}
             onSave={(v) => {
-              setOverride(rowKey, col.id, v);
+              setOverride(optionId, col.id, v);
               setEditingCell(null);
             }}
             onReset={() => {
-              clearOverride(rowKey, col.id);
+              clearOverride(optionId, col.id);
               setEditingCell(null);
             }}
             onCancel={() => setEditingCell(null)}
@@ -692,11 +722,11 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
         <div
           role="button"
           tabIndex={0}
-          onClick={() => setEditingCell({ rowKey, colId: col.id })}
+          onClick={() => setEditingCell({ rowKey: rk, colId: col.id })}
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === " ") {
               e.preventDefault();
-              setEditingCell({ rowKey, colId: col.id });
+              setEditingCell({ rowKey: rk, colId: col.id });
             }
           }}
           title="Clique para editar valor ou fórmula"
@@ -735,7 +765,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
               Gerar link de preenchimento
             </Button>
             <PublishSplitButton
-              onPublish={() => setShowPublishModal(true)}
+              onPublish={openPublishModal}
               onOpenVersions={() => setShowDrawer(true)}
               versionLabel={currentVersion?.label ?? "—"}
             />
@@ -779,6 +809,13 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
             ? "Colunas e fórmulas sobre os custos base"
             : "Edite custo de material e mão de obra de cada item"}
         </span>
+        <div className="ml-auto">
+          <PricingStatusBadge
+            diff={diff}
+            versionLabel={currentVersion?.label ?? ""}
+            onClick={openPublishModal}
+          />
+        </div>
       </div>
 
       {/* Barra de ajuda de fórmula */}
@@ -822,7 +859,9 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
         </div>
       )}
 
-      {/* Abas de tipologia */}
+      {/* Abas de tipologia — só na aba "Preço final": o custo base é do
+          EMPREENDIMENTO, e uma aba de tipologia ali sugeriria o contrário. */}
+      {view === "preco" && (
       <div className="flex border-b-2 border-neutral-gray-4 mb-2">
         {tipologias.map((t) => (
           <button
@@ -846,16 +885,12 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
           </button>
         ))}
       </div>
+      )}
 
       {view === "custos" && (
         <CostBaseView
-          tip={tip}
-          materiais={materiais}
-          baseCosts={baseCosts}
-          setBaseCosts={setBaseCosts}
-          comments={commentThreads}
-          onOpenThread={setOpenThread}
-          onPersist={persistBaseCost}
+          rows={custoRows}
+          onPersist={(baseId, patch) => saveCustoBase.mutate({ baseId, ...patch })}
         />
       )}
 
@@ -948,17 +983,16 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                     )}
                     {amb.componentes.map((comp) => {
                       const def = comp.options.find((o) => o.id === comp.padrao);
-                      const rawPadMat =
+                      const padMat =
                         def && !def.isKit ? getMaterial(materiais, def.baseId) : undefined;
-                      if (!def || !rawPadMat) return null;
-                      // Custo base da sessão sobrepõe o catálogo — preencher o
-                      // custo do padrão reflete no crédito na hora (mesma regra
-                      // que padraoMaterial usa nos cálculos das opções de upgrade).
-                      const padMat = effMaterial(deps.baseCosts, rawPadMat);
-                      // O crédito é o material que a construtora deixaria de
-                      // instalar, na quantidade LÍQUIDA: a reserva técnica é
-                      // perda extra do upgrade, não do padrão.
-                      const valUnit = padMat.custoMat + padMat.custoMO;
+                      if (!def || !padMat) return null;
+                      // Valor unitário EFETIVO do padrão: o override da aplicação
+                      // vence o custo base do empreendimento. O crédito é o
+                      // material que a construtora deixaria de instalar, na
+                      // quantidade LÍQUIDA — a RT é perda extra do upgrade.
+                      const valUnit = valUnOf(deps, def);
+                      const padQtd = qtdOf(deps, comp, def.id);
+                      const padPricing = pricingOf(deps, def.id);
                       const bg = "bg-[#f4fffe]";
                       // O material padrão também precisa de custo — igual ao
                       // upgrade, quando pendente a linha destaca e oferece o
@@ -972,11 +1006,14 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                       const draft = fillDraft[def.baseId] ?? { mat: "", mo: "" };
                       const rowBg = ownPending ? "bg-functional-warning-light" : bg;
                       const fillCell = inlineFill ? "bg-primary-1" : rowBg;
-                      // A coluna mostra o crédito DESTE item; cada satélite tem
-                      // sua própria sub-linha. A soma (H41 da planilha) entra no
-                      // custo de troca das opções, não aqui.
+                      // A coluna mostra o crédito do GRUPO: o crédito deste item
+                      // + a soma dos itens de custo do lado padrão (H41 da
+                      // planilha). Cada satélite mantém sua própria sub-linha com
+                      // o seu crédito individual; a linha-pai é o subtotal.
                       const padSats = padraoSatellites(deps, comp, valUnit);
                       const padChildren = padSats.map(satelliteSubRow);
+                      const creditoGrupo =
+                        valUnit * padQtd + padSats.reduce((a, s) => a + s.line, 0);
                       const padKey = `pad-${comp.id}`;
                       const padExpanded = !collapsedRows.has(padKey);
                       return (
@@ -1048,7 +1085,21 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                   Custo base →
                                 </span>
                               ) : (
-                                `${fmtNum(comp.qtd, 2)} ${comp.unidade}`
+                                <QtyPopover
+                                  qtd={padQtd}
+                                  rt={rtOf(deps, comp, def.id)}
+                                  unidade={unidadeOf(deps, comp, def.id)}
+                                  herdado={{ qtd: comp.qtd, rt: comp.rt, unidade: comp.unidade }}
+                                  overridden={
+                                    padPricing.qtd != null ||
+                                    padPricing.rt != null ||
+                                    padPricing.unidade != null
+                                  }
+                                  // O crédito é calculado sem RT, então mostrar a
+                                  // qtd com RT aqui não bateria com a coluna ao lado.
+                                  comRT={false}
+                                  onSave={(v) => saveQtd(def.id, v)}
+                                />
                               )}
                             </Td>
                             <Td right className={cn(fillCell, "text-neutral-gray-7")}>
@@ -1065,10 +1116,14 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                     onEscape={() => closeFill(rk)}
                                   />
                                 </div>
-                              ) : ownPending ? (
-                                "—"
                               ) : (
-                                fmtBRL(valUnit)
+                                <UnitCostCell
+                                  value={valUnit}
+                                  base={custoBaseOf(custosBase, def.baseId)}
+                                  overridden={padPricing.valorUnitario != null}
+                                  pending={ownPending}
+                                  onSave={(v) => saveValorUnitario(def.id, v)}
+                                />
                               )}
                             </Td>
                             {usaDC && (
@@ -1089,7 +1144,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                   <span className="text-neutral-gray-5">—</span>
                                 ) : (
                                   <span className="font-semibold text-functional-success">
-                                    Créd. {fmtBRL(valUnit * comp.qtd)}
+                                    Créd. {fmtBRL(creditoGrupo)}
                                   </span>
                                 )}
                               </Td>
@@ -1342,6 +1397,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                           const kitBg = pending ? "bg-functional-warning-light" : "bg-[#fbf6ff]";
                           // Sub-itens do kit e componentes de custo são irmãos:
                           // o isLast do conector corre sobre a concatenação.
+                          const kitPricing = pricingOf(deps, opt.id);
                           const kitChildren = [
                             ...(r?.subItems ?? []).map(kitSubRow),
                             ...satelliteRowsFor(r?.satellites ?? [], "upgrade"),
@@ -1409,18 +1465,31 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                   </div>
                                 </Td>
                                 <Td right className={cn(kitBg, "text-neutral-gray-7")}>
-                                  {kit.itens.length} itens
+                                  <QtyPopover
+                                    qtd={qtdOf(deps, comp, opt.id)}
+                                    rt={rtOf(deps, comp, opt.id)}
+                                    unidade={unidadeOf(deps, comp, opt.id)}
+                                    herdado={{ qtd: comp.qtd, rt: comp.rt, unidade: comp.unidade }}
+                                    overridden={
+                                      kitPricing.qtd != null ||
+                                      kitPricing.rt != null ||
+                                      kitPricing.unidade != null
+                                    }
+                                    comRT
+                                    onSave={(v) => saveQtd(opt.id, v)}
+                                  />
                                 </Td>
-                                {/* Kit não tem valor unitário: é um conjunto. O
-                                    total do kit é o próprio débito, na coluna ao lado. */}
+                                {/* Kit não tem valor unitário editável: o custo é
+                                    a soma dos sub-itens, cada um com seu custo
+                                    base. Sobrescrever aqui esconderia essa conta. */}
                                 <Td right className={cn(kitBg, "text-neutral-gray-7")}>
-                                  —
+                                  {kit.itens.length} itens
                                 </Td>
                                 {usaDC && (
                                   <Td right className={kitBg}>
                                     {r && !pending ? (
                                       <span className="font-semibold text-[#c2410c]">
-                                        Déb. {fmtBRL(r.debitoItem)}
+                                        Déb. {fmtBRL(r.debitoTotal)}
                                       </span>
                                     ) : (
                                       "—"
@@ -1444,7 +1513,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                   )}
                                 </Td>
                                 {cols.map((col, colIdx) =>
-                                  renderConfigCell(col, colIdx, pending ? null : rr, rk, kitBg)
+                                  renderConfigCell(col, colIdx, pending ? null : rr, opt.id, kitBg)
                                 )}
                                 <Td className={kitBg} />
                                 <Td right className={r && !pending ? "bg-primary-1" : kitBg}>
@@ -1481,6 +1550,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                         // sai do total, mas ESTE material pode estar preenchido:
                         // acusar "aguardando custo" aqui seria mentira.
                         const ownPending = isOptionOwnPending(deps, opt);
+                        const optPricing = pricingOf(deps, opt.id);
                         const faltandoCusto = pendingCostItems(deps, comp, opt.id);
                         const pending = ownPending || faltandoCusto.length > 0;
                         // Calcula mesmo com item de custo pendente: qtd, valor
@@ -1574,10 +1644,20 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                   <span className="text-[9.5px] font-bold uppercase tracking-wide text-primary-7">
                                     Custo base →
                                   </span>
-                                ) : r ? (
-                                  `${fmtNum(r.qtdComRT, 2)} ${comp.unidade}`
                                 ) : (
-                                  "—"
+                                  <QtyPopover
+                                    qtd={qtdOf(deps, comp, opt.id)}
+                                    rt={rtOf(deps, comp, opt.id)}
+                                    unidade={unidadeOf(deps, comp, opt.id)}
+                                    herdado={{ qtd: comp.qtd, rt: comp.rt, unidade: comp.unidade }}
+                                    overridden={
+                                      optPricing.qtd != null ||
+                                      optPricing.rt != null ||
+                                      optPricing.unidade != null
+                                    }
+                                    comRT
+                                    onSave={(v) => saveQtd(opt.id, v)}
+                                  />
                                 )}
                               </Td>
                               <Td right className={cn(fillCell, "text-neutral-gray-7")}>
@@ -1594,10 +1674,14 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                       onEscape={() => closeFill(rk)}
                                     />
                                   </div>
-                                ) : r ? (
-                                  fmtBRL(r.valUnUpg)
                                 ) : (
-                                  "—"
+                                  <UnitCostCell
+                                    value={valUnOf(deps, opt)}
+                                    base={custoBaseOf(custosBase, opt.baseId)}
+                                    overridden={optPricing.valorUnitario != null}
+                                    pending={ownPending}
+                                    onSave={(v) => saveValorUnitario(opt.id, v)}
+                                  />
                                 )}
                               </Td>
                               {usaDC && (
@@ -1616,7 +1700,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                     </div>
                                   ) : r ? (
                                     <span className="font-semibold text-[#c2410c]">
-                                      Déb. {fmtBRL(r.debitoItem)}
+                                      Déb. {fmtBRL(r.debitoTotal)}
                                     </span>
                                   ) : (
                                     "—"
@@ -1661,7 +1745,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                 )}
                               </Td>
                               {cols.map((col, colIdx) =>
-                                renderConfigCell(col, colIdx, pending ? null : rr, rk, rowBg)
+                                renderConfigCell(col, colIdx, pending ? null : rr, opt.id, rowBg)
                               )}
                               <Td className={rowBg} />
                               {/* O total depende do custo de troca; com item de
@@ -1829,7 +1913,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
               icon="upload"
               onPress={handlePublish}
               isDisabled={publishSummary.trim() === ""}
-              isLoading={createVersion.isPending}
+              isLoading={publishBudget.isPending}
             >
               Publicar orçamento
             </Button>
@@ -1838,9 +1922,10 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
       >
         <div className="flex flex-col gap-3.5">
           <p className="text-[13px] text-neutral-gray-7">
-            Publicar salva uma nova versão do estado atual (ponto de restauração) e segue para a
-            publicação.
+            Os preços abaixo passam a valer e ficam congelados: editar custo ou fórmula depois
+            disso não muda mais o que foi publicado, até a próxima publicação.
           </p>
+          <PublishDiffList diff={diff} />
           <Textarea
             label="Resumo das alterações *"
             value={publishSummary}

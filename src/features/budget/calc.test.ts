@@ -9,10 +9,12 @@ import {
   ambienteRegistros,
   buildScopeRefs,
   calcAnyRow,
-  effMaterial,
   isOptionOwnPending,
   isOptionPending,
   pendingCostItems,
+  qtdOf,
+  unidadeOf,
+  valUnOf,
   type BudgetDeps,
 } from "./calc";
 
@@ -21,9 +23,15 @@ const deps = (extra?: Partial<BudgetDeps>): BudgetDeps => ({
   materiais: seed.materiais,
   kits: seed.kits,
   cols: TAX_COLUMNS_DEFAULT,
-  overrides: {},
-  baseCosts: {},
+  custosBase: seed.custosBase,
+  pricings: {},
   ...extra,
+});
+
+/** Custo base do empreendimento com um material sobrescrito. */
+const comCusto = (baseId: number, custoMat: number, custoMO: number) => ({
+  ...seed.custosBase,
+  [baseId]: { baseId, custoMat, custoMO },
 });
 
 const t1 = seed.tipologias[0]!;
@@ -42,19 +50,61 @@ function optByCodigo(comp: Componente, codigo: string): MaterialOption {
   return opt;
 }
 
-describe("effMaterial / isOptionPending", () => {
-  it("custo base preenchido sobrepõe o catálogo e tira a pendência", () => {
-    const base = { [piso004.id]: { mat: "310", mo: "50" } };
-    const eff = effMaterial(base, piso004);
-    expect(eff.custoMat).toBe(310);
-    expect(eff.custoMO).toBe(50);
-
+describe("custo base do empreendimento", () => {
+  it("preencher o custo tira a pendência da opção", () => {
     const optPiso004 = optByCodigo(salaPisoT1, "MC-NAT-CA");
-    expect(isOptionPending(deps(), salaPisoT1, optPiso004)).toBe(true); // custoMat 0 no catálogo
-    expect(isOptionPending(deps({ baseCosts: base }), salaPisoT1, optPiso004)).toBe(false); // custo base cobre
+    expect(isOptionPending(deps(), salaPisoT1, optPiso004)).toBe(true); // sem custo no projeto
+    expect(
+      isOptionPending(deps({ custosBase: comCusto(piso004.id, 310, 50) }), salaPisoT1, optPiso004)
+    ).toBe(false);
 
     const optPiso002 = optByCodigo(salaPisoT1, "PP-6060-BI");
-    expect(isOptionPending(deps(), salaPisoT1, optPiso002)).toBe(false); // material precificado
+    expect(isOptionPending(deps(), salaPisoT1, optPiso002)).toBe(false); // já precificado
+  });
+
+  it("valor unitário efetivo é material + mão de obra do empreendimento", () => {
+    const opt = optByCodigo(salaPisoT1, "PP-6060-BI"); // 98,00 + 22,00
+    expect(valUnOf(deps(), opt)).toBeCloseTo(120, 10);
+  });
+});
+
+describe("override de precificação (MaterialPricing)", () => {
+  const optPiso002 = optByCodigo(salaPisoT1, "PP-6060-BI");
+
+  it("valor unitário sobrescrito vence o custo base e resolve a pendência", () => {
+    const optPiso004 = optByCodigo(salaPisoT1, "MC-NAT-CA"); // pendente no seed
+    const d = deps({ pricings: { [optPiso004.id]: { valorUnitario: 400, qtd: null, rt: null, unidade: null, colunas: {} } } });
+    expect(valUnOf(d, optPiso004)).toBe(400);
+    // Um preço digitado direto na tabela é preço: não faz sentido a linha
+    // continuar "aguardando custo" depois disso.
+    expect(isOptionOwnPending(d, optPiso004)).toBe(false);
+  });
+
+  it("override de qtd/unidade vale nas DUAS tipologias que compartilham o ambiente", () => {
+    // A Sala é o MESMO Room em t1 e t3 (compartilhado), com qtds diferentes por
+    // planta. O override é da aplicação, então vence nas duas.
+    expect(qtdOf(deps(), salaPisoT1, optPiso002.id)).not.toBe(qtdOf(deps(), salaPisoT3, optPiso002.id));
+    const d = deps({ pricings: { [optPiso002.id]: { valorUnitario: null, qtd: 99, rt: null, unidade: "ml", colunas: {} } } });
+    expect(qtdOf(d, salaPisoT1, optPiso002.id)).toBe(99);
+    expect(qtdOf(d, salaPisoT3, optPiso002.id)).toBe(99);
+    expect(unidadeOf(d, salaPisoT1, optPiso002.id)).toBe("ml");
+  });
+
+  it("campo null herda: zerar o override devolve a qtd da planta", () => {
+    const d = deps({ pricings: { [optPiso002.id]: { valorUnitario: 500, qtd: null, rt: null, unidade: null, colunas: {} } } });
+    expect(qtdOf(d, salaPisoT1, optPiso002.id)).toBe(salaPisoT1.qtd);
+    expect(unidadeOf(d, salaPisoT1, optPiso002.id)).toBe(salaPisoT1.unidade);
+  });
+
+  it("override de qtd muda o total da linha", () => {
+    const semOvr = calcAnyRow(deps(), salaPisoT1, optPiso002);
+    const dobro = calcAnyRow(
+      deps({ pricings: { [optPiso002.id]: { valorUnitario: null, qtd: salaPisoT1.qtd * 2, rt: null, unidade: null, colunas: {} } } }),
+      salaPisoT1,
+      optPiso002
+    );
+    if (semOvr?.kind !== "material" || dobro?.kind !== "material") throw new Error("esperava material");
+    expect(dobro.result.debitoItem).toBeCloseTo(semOvr.result.debitoItem * 2, 6);
   });
 });
 
@@ -83,11 +133,7 @@ describe("pendência de item de custo", () => {
   const hallPiso = hall.componentes[0]!;
   const rodape = seed.materiais.find((m) => m.codigo === "RDP-466-SL")!;
   /** Zera o custo do rodapé (satélite fixo do Hall) no catálogo. */
-  const semRodape = deps({
-    materiais: seed.materiais.map((m) =>
-      m.id === rodape.id ? { ...m, custoMat: 0, custoMO: 0 } : m
-    ),
-  });
+  const semRodape = deps({ custosBase: comCusto(rodape.id, 0, 0) });
 
   it("derruba todas as opções do componente afetado", () => {
     for (const opt of hallPiso.options.filter((o) => !o.isDefault)) {
@@ -122,11 +168,8 @@ describe("ambTotal", () => {
   it("linha pendente fica fora do total e volta ao preencher custo base", () => {
     const amb = t3.ambientes[0]!; // Sala t3: piso-004 pendente entra ao ganhar custo base
     const semPendentes = ambTotal(deps(), amb);
-    const comCusto = ambTotal(
-      deps({ baseCosts: { [piso004.id]: { mat: "310", mo: "50" } } }),
-      amb
-    );
-    expect(comCusto).toBeGreaterThan(semPendentes);
+    const preenchido = ambTotal(deps({ custosBase: comCusto(piso004.id, 310, 50) }), amb);
+    expect(preenchido).toBeGreaterThan(semPendentes);
   });
 });
 

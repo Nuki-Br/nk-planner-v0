@@ -2,18 +2,10 @@
 // nome e conversão de linhas cruas em MaterialInput validado. O parsing do
 // arquivo em si é do PapaParse (no modal); aqui não há DOM.
 import type { MaterialInput } from "@/lib/data/store";
-import { parseBR } from "@/lib/utils";
 import { normName } from "@/lib/formula";
 
 /** Campo Nuki alvo de uma coluna do CSV ("" = ignorar). */
-export type CsvField =
-  | ""
-  | "codigo"
-  | "nome"
-  | "fabricante"
-  | "categoria"
-  | "custoMat"
-  | "custoMO";
+export type CsvField = "" | "codigo" | "nome" | "fabricante" | "categoria";
 
 export const CSV_FIELD_OPTS: { value: CsvField; label: string }[] = [
   { value: "", label: "Ignorar coluna" },
@@ -21,16 +13,15 @@ export const CSV_FIELD_OPTS: { value: CsvField; label: string }[] = [
   { value: "nome", label: "Especificação completa" },
   { value: "fabricante", label: "Fabricante" },
   { value: "categoria", label: "Categoria" },
-  { value: "custoMat", label: "Custo material (R$/unid)" },
-  { value: "custoMO", label: "Custo mão de obra (R$/unid)" },
 ];
 
 /** rowKey = nome da coluna no CSV → campo Nuki. */
 export type CsvMapping = Record<string, CsvField>;
 
 // Sinônimos aceitos no auto-mapeamento (chaves já normalizadas via normName).
-// Material não tem unidade de medida (ela vem do componente ou do kit), então
-// colunas "unidade"/"und" caem no "Ignorar".
+// Material não tem unidade de medida (ela vem do componente ou do kit) nem
+// CUSTO (que é por empreendimento, preenchido na aba "Custos base"), então
+// colunas "unidade"/"custo"/"preço" caem todas no "Ignorar".
 const HEADER_ALIASES: Record<string, CsvField> = {
   codigo: "codigo",
   codigo_de_referencia: "codigo",
@@ -47,15 +38,6 @@ const HEADER_ALIASES: Record<string, CsvField> = {
   fornecedor: "fabricante",
   categoria: "categoria",
   tipo: "categoria",
-  custo_mat: "custoMat",
-  custo_material: "custoMat",
-  custo: "custoMat",
-  preco: "custoMat",
-  valor: "custoMat",
-  custo_mo: "custoMO",
-  mo: "custoMO",
-  mao_de_obra: "custoMO",
-  custo_mao_de_obra: "custoMO",
 };
 
 /** Sugere o mapeamento inicial a partir dos cabeçalhos detectados. */
@@ -72,13 +54,6 @@ export function guessMapping(headers: string[]): CsvMapping {
     }
   }
   return mapping;
-}
-
-function parseCusto(raw: string): number {
-  const cleaned = raw.trim();
-  if (cleaned === "" || cleaned === "—" || cleaned === "-") return 0;
-  const n = parseBR(cleaned.replace(/^R\$\s*/i, ""));
-  return n < 0 ? 0 : n;
 }
 
 export interface CsvConversion {
@@ -121,8 +96,6 @@ export function convertRows(
       nome,
       fabricante: get(row, "fabricante"),
       categoria,
-      custoMat: parseCusto(get(row, "custoMat")),
-      custoMO: parseCusto(get(row, "custoMO")),
     });
   });
 

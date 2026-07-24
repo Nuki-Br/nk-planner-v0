@@ -5,12 +5,12 @@ import { createSeed } from "./seed";
 
 const seed = createSeed();
 // Ids são atribuídos por contador — buscamos por campos estáveis.
-const piso001 = seed.materiais.find((m) => m.codigo === "PO-6060-CR")!; // custoMat 62.5
+const piso001 = seed.materiais.find((m) => m.codigo === "PO-6060-CR")!;
 const kitPB = seed.kits.find((k) => k.codigo === "KIT-PB")!; // Piso Barcelona + Soleira + RT
 
 describe("getMaterial / getKit", () => {
   it("encontra material por id", () => {
-    expect(getMaterial(seed.materiais, piso001.id)?.custoMat).toBe(62.5);
+    expect(getMaterial(seed.materiais, piso001.id)?.codigo).toBe("PO-6060-CR");
   });
 
   it("encontra kit por id", () => {
@@ -33,7 +33,7 @@ describe("getOptionEntity", () => {
     expect(e?.isKit).toBe(false);
     if (e && !e.isKit) {
       expect(e.codigo).toBe("PO-6060-CR");
-      expect(e.custoMat).toBe(62.5);
+      expect(e.fabricante).toBe("Eliane");
     }
   });
 

@@ -3,14 +3,11 @@
 import React from "react";
 
 import { EmptyState, Icon, StatusBadge } from "@/components/ui";
-import { getMaterial } from "@/lib/data/entities";
-
-import { enumerateCostRefs } from "../enumerate";
 import { cn, fmtBRL } from "@/lib/utils";
-import type { ThreadRow } from "@/features/construtor-shared/CommentThreadPanel";
-import type { Comment, Material, Tipologia } from "@/shared/types/domain";
+import type { CustoBaseRow } from "@/shared/types/domain";
 
-import type { BaseCosts } from "../calc";
+/** Campo de custo em edição — "" enquanto o usuário limpa para redigitar. */
+type Draft = Record<number, { mat?: string; mo?: string }>;
 
 function CostField({
   value,
@@ -21,7 +18,7 @@ function CostField({
   value: string;
   isPending: boolean;
   onChange: (v: string) => void;
-  onCommit?: (v: string) => void;
+  onCommit: (v: string) => void;
 }) {
   const filledNow = value !== "" && parseFloat(value) > 0;
   return (
@@ -35,7 +32,7 @@ function CostField({
         value={value}
         placeholder="0,00"
         onChange={(e) => onChange(e.target.value)}
-        onBlur={(e) => onCommit?.(e.target.value)}
+        onBlur={(e) => onCommit(e.target.value)}
         className={cn(
           "h-[34px] w-[118px] rounded-md border py-0 pl-[26px] pr-2 text-right text-[12.5px] outline-none",
           isPending && !filledNow
@@ -50,42 +47,62 @@ function CostField({
 }
 
 interface CostBaseViewProps {
-  tip: Tipologia;
-  materiais: Material[];
-  baseCosts: BaseCosts;
-  setBaseCosts: React.Dispatch<React.SetStateAction<BaseCosts>>;
-  comments: Record<string, Comment[]>;
-  onOpenThread: (row: ThreadRow) => void;
-  /** Persiste o custo no material ao sair do campo (blur) — keyed por baseId. */
-  onPersist: (baseId: number, mat: string, mo: string) => void;
+  /** Todo material que precisa de custo NESTE empreendimento (todas as tipologias). */
+  rows: CustoBaseRow[];
+  /** Persiste no blur. Campo omitido = não mexe (a grade grava um por vez). */
+  onPersist: (baseId: number, patch: { custoMat?: number; custoMO?: number }) => void;
 }
 
-// Visão Custos base — grade editável de custo mat/MO por item. Preencher e sair
-// do campo (blur) persiste o custo no material via onPersist (e some a pendência).
-export function CostBaseView({
-  tip,
-  materiais,
-  baseCosts,
-  setBaseCosts,
-  comments,
-  onOpenThread,
-  onPersist,
-}: CostBaseViewProps) {
-  const setField = (baseId: number, fld: "mat" | "mo", val: string) =>
-    setBaseCosts((p) => {
-      const cur = p[baseId] ?? { mat: "", mo: "" };
-      return { ...p, [baseId]: { ...cur, [fld]: val } };
-    });
+/**
+ * Visão "Custos base" — grade editável de custo material/MO POR EMPREENDIMENTO.
+ *
+ * Lista plana e de-duplicada: um material usado em cinco componentes aparece uma
+ * vez só, porque o custo é um só. Antes esta grade era por tipologia e repetia o
+ * mesmo material em cada ambiente, dando a impressão de que dava para cobrar
+ * preços diferentes — não dá, e não deveria dar.
+ *
+ * SEM coluna de comentários, ao contrário da versão por tipologia: a thread é
+ * por APLICAÇÃO (Material), e aqui uma linha pode ser cinco aplicações. Um
+ * contador somado abriria uma thread escolhida a esmo. Os comentários seguem na
+ * aba "Preço final", onde cada linha é uma aplicação só.
+ */
+export function CostBaseView({ rows, onPersist }: CostBaseViewProps) {
+  // Só o que está sendo digitado: o valor de verdade vem do servidor. Guardar a
+  // grade inteira em estado local traria de volta o bug de custo que sumia no
+  // reload — o rascunho aqui vive entre o keystroke e o blur, mais nada.
+  const [draft, setDraft] = React.useState<Draft>({});
 
-  const valOf = (baseId: number, m: Material, fld: "mat" | "mo"): string => {
-    const f = baseCosts[baseId];
-    const filled = f?.[fld];
-    if (filled !== undefined && filled !== "") return filled;
-    const orig = fld === "mat" ? m.custoMat : m.custoMO;
-    return orig > 0 ? String(orig) : "";
+  const setField = (baseId: number, fld: "mat" | "mo", val: string) =>
+    setDraft((p) => ({ ...p, [baseId]: { ...p[baseId], [fld]: val } }));
+
+  const valOf = (row: CustoBaseRow, fld: "mat" | "mo"): string => {
+    const d = draft[row.baseId]?.[fld];
+    if (d !== undefined) return d;
+    const v = fld === "mat" ? row.custoMat : row.custoMO;
+    return v > 0 ? String(v) : "";
   };
 
-  const TH = ({ children, right = false, teal = false }: { children?: React.ReactNode; right?: boolean; teal?: boolean }) => (
+  const commit = (row: CustoBaseRow, fld: "mat" | "mo", raw: string) => {
+    const n = parseFloat(raw.replace(",", ".")) || 0;
+    const atual = fld === "mat" ? row.custoMat : row.custoMO;
+    // Sai do campo sem ter mudado nada → nenhum request.
+    if (n !== atual) onPersist(row.baseId, fld === "mat" ? { custoMat: n } : { custoMO: n });
+    setDraft((p) => {
+      const next = { ...p };
+      delete next[row.baseId];
+      return next;
+    });
+  };
+
+  const TH = ({
+    children,
+    right = false,
+    teal = false,
+  }: {
+    children?: React.ReactNode;
+    right?: boolean;
+    teal?: boolean;
+  }) => (
     <th
       className={cn(
         "whitespace-nowrap px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider",
@@ -97,169 +114,139 @@ export function CostBaseView({
     </th>
   );
 
-  if (tip.ambientes.length === 0) {
+  if (rows.length === 0) {
     return (
       <div className="mb-6 rounded-b-lg border border-t-0 border-neutral-gray-4 bg-white">
         <EmptyState
           icon="layers"
-          title="Nenhum ambiente nesta tipologia"
-          subtitle="Cadastre os ambientes e seus componentes para preencher os custos base."
+          title="Nenhum material aplicado neste empreendimento"
+          subtitle="Cadastre as tipologias e seus componentes para preencher os custos base."
         />
       </div>
     );
   }
 
+  const pendentes = rows.filter((r) => r.custoMat <= 0).length;
+
   return (
-    <div className="mb-6 overflow-x-auto rounded-b-lg border border-t-0 border-neutral-gray-4 bg-white">
+    <div className="mb-6 overflow-x-auto rounded-b-lg border border-neutral-gray-4 bg-white">
       <div className="flex items-center gap-2 border-b border-neutral-gray-4 bg-neutral-gray-2 px-4 py-[9px]">
         <Icon name="edit" size={13} className="text-primary-7" />
         <span className="text-xs font-semibold text-primary-7">
-          Preencha os custos base de material e mão de obra — usados como ponto de partida do preço
+          Custo de material e mão de obra deste empreendimento — vale para todas as tipologias
+        </span>
+        <span className="ml-auto text-[11px] text-neutral-gray-7">
+          {rows.length} {rows.length === 1 ? "material" : "materiais"}
+          {pendentes > 0 && (
+            <strong className="ml-1.5 font-bold text-tint-orange-fg">
+              · {pendentes} sem custo
+            </strong>
+          )}
         </span>
       </div>
       <table className="w-full border-collapse">
         <thead>
           <tr className="border-b-2 border-neutral-gray-4 bg-neutral-gray-2">
             <TH>Especificação</TH>
+            <TH>Onde é usado</TH>
             <TH right teal>Custo mat.</TH>
             <TH right teal>Custo MO</TH>
             <TH right>Total base</TH>
             <TH>Status</TH>
-            <th className="w-11 px-2 py-2.5" />
           </tr>
         </thead>
         <tbody>
-          {tip.ambientes.map((amb) => (
-            <React.Fragment key={amb.id}>
-              <tr>
+          {rows.map((row) => {
+            const matV = valOf(row, "mat");
+            const moV = valOf(row, "mo");
+            const matN = parseFloat(matV) || 0;
+            const moN = parseFloat(moV) || 0;
+            const isPending = row.custoMat <= 0 && !(matN > 0);
+            return (
+              <tr
+                key={row.baseId}
+                className={cn(
+                  "border-b border-neutral-gray-4",
+                  isPending
+                    ? "bg-functional-warning-light"
+                    : matN > 0
+                      ? "bg-[#f7fffe]"
+                      : "bg-white"
+                )}
+              >
+                <td className="min-w-[240px] px-3.5 py-[9px]">
+                  <div
+                    className={cn(
+                      "text-xs font-semibold",
+                      isPending ? "text-tint-amber-fg" : "text-neutral-gray-11"
+                    )}
+                  >
+                    {row.nome}
+                  </div>
+                  <div
+                    className={cn(
+                      "mt-px text-[11px]",
+                      isPending ? "text-[#b45309]" : "text-neutral-gray-6"
+                    )}
+                  >
+                    {row.fabricante || "sem fabricante"}
+                    {row.categoria && ` · ${row.categoria}`}
+                    {/* Não é uma opção ofertada ao cliente: entra no custo por
+                        dentro (sub-item de kit ou item de custo), e por isso não
+                        aparece como linha própria na aba "Preço final". */}
+                    {row.somenteIndireto && (
+                      <span className="ml-1.5 rounded bg-neutral-gray-3 px-1 py-px text-[9px] font-bold uppercase tracking-wide text-neutral-gray-7">
+                        Item de custo
+                      </span>
+                    )}
+                    {isPending && (
+                      <span className="ml-1.5 font-bold text-tint-orange-fg">
+                        · Aguardando custo
+                      </span>
+                    )}
+                  </div>
+                </td>
+                <td className="min-w-[200px] px-3.5 py-[9px] text-[11px] text-neutral-gray-7">
+                  {/* Três já dizem "é usado em vários lugares"; a lista inteira
+                      vira parede de texto numa grade densa. */}
+                  {row.usadoEm.slice(0, 3).join(", ")}
+                  {row.usadoEm.length > 3 && (
+                    <span className="text-neutral-gray-6">
+                      {" "}
+                      +{row.usadoEm.length - 3}
+                    </span>
+                  )}
+                </td>
+                <td className="px-3 py-[5px] text-right">
+                  <CostField
+                    value={matV}
+                    isPending={isPending}
+                    onChange={(v) => setField(row.baseId, "mat", v)}
+                    onCommit={(v) => commit(row, "mat", v)}
+                  />
+                </td>
+                <td className="px-3 py-[5px] text-right">
+                  <CostField
+                    value={moV}
+                    isPending={isPending}
+                    onChange={(v) => setField(row.baseId, "mo", v)}
+                    onCommit={(v) => commit(row, "mo", v)}
+                  />
+                </td>
                 <td
-                  colSpan={6}
-                  className="bg-neutral-gray-11 px-3.5 py-[7px] text-[11px] font-bold uppercase tracking-[0.08em] text-white"
+                  className={cn(
+                    "whitespace-nowrap px-3 py-[9px] text-right text-xs font-bold",
+                    matN + moN > 0 ? "text-neutral-gray-11" : "text-neutral-gray-5"
+                  )}
                 >
-                  {amb.nome}
+                  {matN + moN > 0 ? fmtBRL(matN + moN) : "—"}
+                </td>
+                <td className="px-3 py-[9px]">
+                  <StatusBadge status={isPending ? "pendente" : "preenchido"} />
                 </td>
               </tr>
-              {enumerateCostRefs(amb).map((ref) => {
-                    const m = getMaterial(materiais, ref.baseId);
-                    if (!m) return null;
-                    const rk = ref.key;
-                    const matV = valOf(ref.baseId, m, "mat");
-                    const moV = valOf(ref.baseId, m, "mo");
-                    const matN = parseFloat(matV) || 0;
-                    const moN = parseFloat(moV) || 0;
-                    const isPending = m.custoMat <= 0 && !(matN > 0);
-                    const cmts = comments[rk] ?? [];
-                    return (
-                      <tr
-                        key={rk}
-                        className={cn(
-                          "border-b border-neutral-gray-4",
-                          isPending
-                            ? "bg-functional-warning-light"
-                            : matN > 0
-                              ? "bg-[#f7fffe]"
-                              : "bg-white"
-                        )}
-                      >
-                        <td className="min-w-[240px] px-3.5 py-[9px]">
-                          <div
-                            className={cn(
-                              "text-xs font-semibold",
-                              isPending ? "text-tint-amber-fg" : "text-neutral-gray-11"
-                            )}
-                          >
-                            {m.nome}
-                          </div>
-                          <div
-                            className={cn(
-                              "mt-px text-[11px]",
-                              isPending ? "text-[#b45309]" : "text-neutral-gray-6"
-                            )}
-                          >
-                            {ref.compNome} · {m.fabricante}
-                            {ref.isDefault && (
-                              <span className="ml-1.5 rounded bg-functional-success-light px-1 py-px text-[9px] font-bold uppercase tracking-wide text-functional-success">
-                                Padrão
-                              </span>
-                            )}
-                            {ref.origem === "componente-custo" && (
-                              <span className="ml-1.5 rounded bg-neutral-gray-3 px-1 py-px text-[9px] font-bold uppercase tracking-wide text-neutral-gray-7">
-                                Item de custo
-                              </span>
-                            )}
-                            {isPending && (
-                              <span className="ml-1.5 font-bold text-tint-orange-fg">
-                                · Aguardando custo
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-3 py-[5px] text-right">
-                          <CostField
-                            value={matV}
-                            isPending={isPending}
-                            onChange={(v) => setField(ref.baseId, "mat", v)}
-                            onCommit={(v) => onPersist(ref.baseId, v, moV)}
-                          />
-                        </td>
-                        <td className="px-3 py-[5px] text-right">
-                          <CostField
-                            value={moV}
-                            isPending={isPending}
-                            onChange={(v) => setField(ref.baseId, "mo", v)}
-                            onCommit={(v) => onPersist(ref.baseId, matV, v)}
-                          />
-                        </td>
-                        <td
-                          className={cn(
-                            "whitespace-nowrap px-3 py-[9px] text-right text-xs font-bold",
-                            matN + moN > 0 ? "text-neutral-gray-11" : "text-neutral-gray-5"
-                          )}
-                        >
-                          {matN + moN > 0 ? fmtBRL(matN + moN) : "—"}
-                        </td>
-                        <td className="px-3 py-[9px]">
-                          <StatusBadge status={isPending ? "pendente" : "preenchido"} />
-                        </td>
-                        <td className="px-2 py-2 text-center">
-                          {/* Componente de custo não tem linha Material, logo
-                              não tem thread — só opções comentam. */}
-                          {ref.origem === "opcao" && (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                onOpenThread({
-                                  key: rk,
-                                  especificacao: m.nome,
-                                  ambiente: amb.nome,
-                                  componente: ref.compNome,
-                                })
-                              }
-                              className={cn(
-                                "inline-flex items-center gap-[3px] rounded px-1.5 py-1",
-                                cmts.length > 0 ? "bg-functional-warning-light" : ""
-                              )}
-                            >
-                              <Icon
-                                name="chat"
-                                size={14}
-                                className={
-                                  cmts.length > 0 ? "text-functional-warning" : "text-neutral-gray-5"
-                                }
-                              />
-                              {cmts.length > 0 && (
-                                <span className="text-[10px] font-bold text-functional-warning">
-                                  {cmts.length}
-                                </span>
-                              )}
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-            </React.Fragment>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>

@@ -13,7 +13,7 @@
 ## Decisões travadas (Fase 4, 2026-07-06)
 | Tema | Decisão |
 |------|---------|
-| Custos no cadastro de material | **Sem custos no modal** (fiel ao protótipo): só identificação (código, categoria, especificação, fabricante, unidade). Material nasce com `custoMat`/`custoMO` = 0 e conta como pendente até a Revisão de custos (Fase 8) ou o preenchimento via link. |
+| Custos no cadastro de material | **Sem custos no modal** (fiel ao protótipo): só identificação (código, categoria, especificação, fabricante, unidade). ⚠️ *Superada em 2026-07-23 (ver bloco Precificação): o material não tem mais campo de custo nenhum — o custo é por empreendimento, e a pendência também.* |
 | Importação CSV | **Real com PapaParse**: upload de arquivo .csv, mapeamento de colunas auto-sugerido (sinônimos PT-BR), pré-visualização com linhas descartadas e motivo, gravação em lote no store. Linhas sem especificação ou com categoria desconhecida são descartadas; unidade desconhecida vira `und`; custos vazios viram 0 (pendentes). |
 | Backend | **Colocalizado no Next.js** (route handlers `/api/*` + Prisma/Supabase na Fase 10). Sem repositório separado para o backend do MVP. |
 
@@ -29,6 +29,20 @@ O contrato espelhado é `nk-api-customization/docs/media-center-frontend-integra
 | Superfície | **Só modal**, sem rota `/midia` e sem entrada na sidebar — igual ao admin. Alcançável pelos pontos de imagem (ImagePickerField). |
 | Otimização WebP | `PublicOptimizedUrl` existe no DTO mas fica **sempre null** no v0 — sem `sharp` (binário nativo, atrito de deploy) e sem Image Transformation (plano pago). O front já faz `optimized ?? public` e o `next/image` otimiza o grid, que é o que pesa na UX. |
 | Migrations | **Baseline + migrations reais.** O banco vinha de `db push` com histórico vazio; o schema atual foi congelado como `0_init` e marcado aplicado. Daqui pra frente toda mudança é um SQL revisável e o deploy é `migrate deploy`. Feito antes do primeiro beta, enquanto ainda era barato. |
+
+## Decisões travadas (Precificação, 2026-07-23)
+Split de responsabilidades entre catálogo, custo e preço. Regras completas em
+`docs/features/pricing.md`.
+
+| Tema | Decisão |
+|------|---------|
+| **Granularidade do preço** | **Uma referência por Material (a aplicação), não por tipologia.** Ambiente compartilhado compartilha *tudo*, inclusive preço: editar o preço pela aba de qualquer tipologia muda para todas que usam aquele ambiente. Não existe versão de preço por planta. |
+| **Rascunho × publicado** | Rascunho em **`MaterialPricing`** (1:1 com `Material`, editável à vontade); publicado no próprio **`Material`** (`PriceInCents` + `PublishedSnapshot` congelados). O diff é a comparação dos dois; o histórico segue no JSON de `BudgetVersion`. Mexer no custo base depois de publicar **não** move o preço publicado. |
+| **Custo no catálogo** | **Dropadas** `BaseMaterial.CostMaterialInCents`/`CostLaborInCents`. O `BaseMaterial` vira template puro (identidade); o custo passa a ser **por empreendimento** (`EnterpriseMaterialCost`), porque o mesmo material custa diferente em obras diferentes. Catálogo e importação CSV deixam de pedir custo, e o portal do terceiro grava no custo do empreendimento. |
+| **Override de qtd/RT/unidade** | Editáveis na aba "Preço final" e, quando preenchidos, **vencem `BlueprintRoomComponent`/`RoomComponent` em TODAS as tipologias** — coerente com a decisão de granularidade. A qtd por planta continua sendo o valor herdado. Ambiente compartilhado com qtds diferentes e sem override publica pela tipologia de menor ordem, avisando no diff. |
+| **Revisão de custos** | Tela `/revisao-custos` e o feature `cost-review` **removidos** — redundantes com a aba "Custos base", que passou a ser por empreendimento (lista plana e de-duplicada) em vez de por tipologia. `EditableCell` e `features/budget/enumerate.ts` foram junto (sem consumidores). |
+| **Publicar × concluir** | Continuam sendo **marcos separados**: "Publicar orçamento" (Construtor de Preço) congela preços e pode acontecer N vezes; "Concluir planejamento" (tela de Publicação) marca o empreendimento como `publicado` e avisa a Nuki. |
+| **Onde o diff é calculado** | **No servidor** (`lib/server/pricing.ts`), percorrendo o mesmo resolvedor que a publicação usa — o que o modal promete é o que o publish grava. |
 
 ## Questões em aberto (do módulo doc §7 — resolver quando pesarem)
 | # | Questão | Impacto | Resolver em |

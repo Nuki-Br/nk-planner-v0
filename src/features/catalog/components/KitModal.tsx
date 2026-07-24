@@ -66,8 +66,6 @@ export function KitModal({ open, onClose, kit, materiais }: KitModalProps) {
               nome: m.nome,
               fabricante: m.fabricante,
               unidade: "und",
-              custoMat: m.custoMat,
-              custoMO: m.custoMO,
             },
           ]
     );

@@ -15,7 +15,9 @@ import {
   StatusBadge,
 } from "@/components/ui";
 import { MaterialImageModal } from "@/features/catalog";
+import { custoBaseOf, isBasePending } from "@/features/budget/resolve";
 import { getMaterial, getOptionEntity } from "@/lib/data/entities";
+import { useCustosBase, toCustosBaseMap } from "@/lib/hooks/useCustosBase";
 import { useKits } from "@/lib/hooks/useKits";
 import { useMateriais } from "@/lib/hooks/useMateriais";
 import { useProject } from "@/lib/hooks/useProjects";
@@ -75,6 +77,10 @@ export function MaterialsConfigScreen({
   const { data: materiais = [] } = useMateriais();
   const { data: kits = [] } = useKits();
   const activeProjectId = useRequireActiveProject();
+  // Custo é do empreendimento, não do catálogo: a mesma opção pode estar
+  // precificada aqui e pendente em outra obra.
+  const { data: custoRows } = useCustosBase(activeProjectId);
+  const custosBase = React.useMemo(() => toCustosBaseMap(custoRows), [custoRows]);
   const { data: project } = useProject(activeProjectId);
 
   const setPadraoMut = useSetPadrao();
@@ -252,15 +258,15 @@ export function MaterialsConfigScreen({
             </div>
             <div className="text-right">
               <p className="text-xs text-primary-8">
-                {fmtBRL(padrao.custoMat)}/{comp.unidade}
+                {fmtBRL(custoBaseOf(custosBase, padrao.id))}/{comp.unidade}
               </p>
-              {padrao.custoMO > 0 && (
+              {(custosBase[padrao.id]?.custoMO ?? 0) > 0 && (
                 <p className="mt-0.5 text-[11px] text-primary-7">
-                  MO: {fmtBRL(padrao.custoMO)}/{comp.unidade}
+                  MO: {fmtBRL(custosBase[padrao.id]?.custoMO ?? 0)}/{comp.unidade}
                 </p>
               )}
             </div>
-            <StatusBadge status="preenchido" />
+            <StatusBadge status={isBasePending(custosBase, padrao.id) ? "pendente" : "preenchido"} />
           </div>
         )}
         {padrao && padrao.isKit && (
@@ -423,21 +429,23 @@ export function MaterialsConfigScreen({
                       {ent.fabricante}
                     </td>
                     <td className="px-3 py-2.5 text-[13px] font-semibold text-neutral-gray-11">
-                      {ent.custoMat > 0 ? (
-                        fmtBRL(ent.custoMat)
+                      {(custosBase[ent.id]?.custoMat ?? 0) > 0 ? (
+                        fmtBRL(custosBase[ent.id]?.custoMat ?? 0)
                       ) : (
                         <span className="font-normal text-neutral-gray-5">Aguardando</span>
                       )}
                     </td>
                     <td className="px-3 py-2.5 text-[13px] text-neutral-gray-11">
-                      {ent.custoMO > 0 ? (
-                        fmtBRL(ent.custoMO)
+                      {(custosBase[ent.id]?.custoMO ?? 0) > 0 ? (
+                        fmtBRL(custosBase[ent.id]?.custoMO ?? 0)
                       ) : (
                         <span className="text-neutral-gray-5">—</span>
                       )}
                     </td>
                     <td className="px-3 py-2.5">
-                      <StatusBadge status={ent.custoMat > 0 ? "preenchido" : "pendente"} />
+                      <StatusBadge
+                        status={isBasePending(custosBase, ent.id) ? "pendente" : "preenchido"}
+                      />
                     </td>
                     <td className="px-3 py-2.5">
                       <Button

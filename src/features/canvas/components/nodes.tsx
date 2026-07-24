@@ -7,7 +7,8 @@ import { getMaterial, getOptionEntity } from "@/lib/data/entities";
 import { CV, NODE_TRANSITION, type AmbNode as AmbNodeT, type CompNode as CompNodeT, type OptNode as OptNodeT, type SubNode as SubNodeT } from "@/lib/canvas/buildLayout";
 import { cn, fmtBRL, fmtNum } from "@/lib/utils";
 import { AmbIcon } from "@/features/typologies/components/AmbIcon";
-import type { Ambiente, Componente, Kit, Material } from "@/shared/types/domain";
+import { custoBaseOf } from "@/features/budget/resolve";
+import type { Ambiente, Componente, CustosBase, Kit, Material } from "@/shared/types/domain";
 
 import { optionPending, subitemPending } from "../pending";
 import { MaterialSwatch } from "./MaterialSwatch";
@@ -256,6 +257,7 @@ export function OptionNode({
   node,
   materiais,
   kits,
+  custosBase,
   onToggleKit,
   act,
   detailed,
@@ -263,6 +265,8 @@ export function OptionNode({
   node: OptNodeT;
   materiais: Material[];
   kits: Kit[];
+  /** Custo base do empreendimento — fonte da pendência e do valor exibido. */
+  custosBase: CustosBase;
   onToggleKit: (key: string) => void;
   act: CanvasActions;
   detailed: boolean;
@@ -272,12 +276,13 @@ export function OptionNode({
   const pending = optionPending(
     materiais,
     kits,
+    custosBase,
     { id: node.optId, baseId: node.baseId, isKit: node.isKit },
     comp
   );
   const mat = isKit ? null : getMaterial(materiais, baseId);
   const kitCount = isKit && kit ? kit.itens.length : 0;
-  const price = mat ? mat.custoMat + mat.custoMO : 0;
+  const price = mat ? custoBaseOf(custosBase, mat.id) : 0;
 
   return (
     <div
@@ -382,13 +387,15 @@ export function OptionNode({
 export function SubItemNode({
   node,
   materiais,
+  custosBase,
 }: {
   node: SubNodeT;
   materiais: Material[];
+  custosBase: CustosBase;
 }) {
   const { item, cy } = node;
   const m = getMaterial(materiais, item.materialId);
-  const pending = subitemPending(item);
+  const pending = subitemPending(custosBase, item);
   return (
     <div
       style={{ left: CV.x4, top: cy - 16, width: CV.w4, height: 32, transition: NODE_TRANSITION }}

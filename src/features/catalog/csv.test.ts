@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 import { convertRows, guessMapping, type CsvMapping } from "./csv";
 
 describe("guessMapping", () => {
-  it("mapeia os cabeçalhos do CSV de exemplo do protótipo (Und é ignorada)", () => {
+  it("mapeia os cabeçalhos de identidade; Und e as colunas de custo são ignoradas", () => {
+    // Custo saiu do catálogo (é por empreendimento), então "Custo mat"/"MO" não
+    // têm mais campo alvo — cair no "Ignorar" é o comportamento correto, não um
+    // buraco no auto-mapeamento.
     expect(
       guessMapping(["Código", "Descrição", "Marca", "Tipo", "Und", "Custo mat", "MO"])
     ).toEqual({
@@ -12,8 +15,8 @@ describe("guessMapping", () => {
       Marca: "fabricante",
       Tipo: "categoria",
       Und: "",
-      "Custo mat": "custoMat",
-      MO: "custoMO",
+      "Custo mat": "",
+      MO: "",
     });
   });
 
@@ -32,11 +35,11 @@ describe("convertRows", () => {
     "Descrição": "nome",
     Marca: "fabricante",
     Tipo: "categoria",
-    "Custo mat": "custoMat",
-    MO: "custoMO",
+    "Custo mat": "",
+    MO: "",
   };
 
-  it("converte linhas válidas com vírgula decimal e travessão", () => {
+  it("converte linhas válidas ignorando as colunas de custo", () => {
     const { materiais, descartadas } = convertRows(
       [
         { "Código": "PT-NV-6060", "Descrição": "Porcelanato Natural 60×60", Marca: "Portobello", Tipo: "Piso", "Custo mat": "54,00", MO: "22,00" },
@@ -46,27 +49,26 @@ describe("convertRows", () => {
     );
     expect(descartadas).toEqual([]);
     expect(materiais).toEqual([
-      { codigo: "PT-NV-6060", nome: "Porcelanato Natural 60×60", fabricante: "Portobello", categoria: "Piso", custoMat: 54, custoMO: 22 },
-      { codigo: "GR-NG-POL", nome: "Granito Negro São Gabriel", fabricante: "Minaspedras", categoria: "Pedra", custoMat: 290, custoMO: 0 },
+      { codigo: "PT-NV-6060", nome: "Porcelanato Natural 60×60", fabricante: "Portobello", categoria: "Piso" },
+      { codigo: "GR-NG-POL", nome: "Granito Negro São Gabriel", fabricante: "Minaspedras", categoria: "Pedra" },
     ]);
   });
 
-  it("aceita categoria nova (criada no servidor) e preços com R$", () => {
+  it("aceita categoria nova (criada no servidor)", () => {
     const { materiais, descartadas } = convertRows(
-      [{ "Código": "Y", "Descrição": "Tomada teste", Marca: "", Tipo: "Elétrica", "Custo mat": "R$ 10,50", MO: "" }],
+      [{ "Código": "Y", "Descrição": "Tomada teste", Marca: "", Tipo: "Elétrica" }],
       mapping
     );
     expect(descartadas).toEqual([]);
     expect(materiais[0]?.categoria).toBe("Elétrica");
-    expect(materiais[0]?.custoMat).toBe(10.5);
   });
 
   it("descarta linha sem nome e sem categoria, com motivo", () => {
     const { materiais, descartadas } = convertRows(
       [
-        { "Código": "A", "Descrição": "", Marca: "", Tipo: "Piso", "Custo mat": "", MO: "" },
-        { "Código": "B", "Descrição": "Válido", Marca: "", Tipo: "", "Custo mat": "", MO: "" },
-        { "Código": "C", "Descrição": "Ok", Marca: "", Tipo: "Metal", "Custo mat": "", MO: "" },
+        { "Código": "A", "Descrição": "", Marca: "", Tipo: "Piso" },
+        { "Código": "B", "Descrição": "Válido", Marca: "", Tipo: "" },
+        { "Código": "C", "Descrição": "Ok", Marca: "", Tipo: "Metal" },
       ],
       mapping
     );
@@ -88,8 +90,6 @@ describe("convertRows", () => {
       nome: "Só nome",
       fabricante: "",
       categoria: "Metal",
-      custoMat: 0,
-      custoMO: 0,
     });
   });
 });

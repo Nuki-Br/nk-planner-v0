@@ -25,17 +25,19 @@ export interface CategoriaCatalogo {
 export interface KitItem {
   /** MaterialKitItem id. */
   id: number;
-  /** BaseMaterial filho (o material do sub-item). */
+  /** BaseMaterial filho (o material do sub-item) — chave do custo base. */
   materialId: number;
   nome: string;
   fabricante: string;
   unidade: Unidade;
-  /** Custo do sub-material (R$/unidade; 0 = pendente). */
-  custoMat: number;
-  custoMO: number;
 }
 
-/** Material avulso do catálogo (BaseMaterial Type="single"). */
+/**
+ * Material avulso do catálogo (BaseMaterial Type="single") — TEMPLATE.
+ *
+ * Só identidade: o custo é do empreendimento (ver CustoBase), não do catálogo.
+ * Um mesmo porcelanato custa diferente em obras diferentes.
+ */
 export interface Material {
   id: number;
   codigo: string;
@@ -43,16 +45,45 @@ export interface Material {
   fabricante: string;
   /** Nome da categoria ("" = sem categoria). */
   categoria: string;
-  /** Custo de material (R$/unidade; 0 = pendente = custo NULL no banco). */
-  custoMat: number;
-  /** Custo de mão de obra (R$/unidade; 0 = pendente). */
-  custoMO: number;
   /**
    * Imagem do material (BaseMaterial.ImagePreviewUrl / MediaFileId).
    * Opcional: MaterialInput = Omit<Material,"id"> e o import de CSV usa esse
    * mesmo tipo — exigir imagem quebraria a importação em lote.
    */
   imagem?: ImagemVinculada | null;
+}
+
+// ─── Custo base (EnterpriseMaterialCost) ────────────────────────────────
+
+/**
+ * Custo base de um BaseMaterial DENTRO de um empreendimento — compartilhado por
+ * todas as aplicações dele ali. Uma aplicação pode sobrepor o valor final na
+ * coluna "Valor un." do Construtor de Preço (ver MaterialPricing.valorUnitario).
+ */
+export interface CustoBase {
+  /** BaseMaterial (material avulso ou sub-item de kit). */
+  baseId: number;
+  /** Custo de material (R$/unidade; 0 = pendente = NULL no banco). */
+  custoMat: number;
+  /** Custo de mão de obra (R$/unidade; 0 = pendente). */
+  custoMO: number;
+}
+
+/** baseId → custo base do empreendimento. Ausente = nunca preenchido. */
+export type CustosBase = Record<number, CustoBase>;
+
+/** Linha da aba "Custos base": o custo + a identidade e onde é usado. */
+export interface CustoBaseRow extends CustoBase {
+  nome: string;
+  fabricante: string;
+  /** Nome da categoria ("" = sem categoria). */
+  categoria: string;
+  /** Quantas aplicações no empreendimento dependem deste custo. */
+  usos: number;
+  /** Rótulos "Ambiente · Componente" das aplicações (para o subtítulo da linha). */
+  usadoEm: string[];
+  /** Aparece só como sub-item de kit ou item de custo, nunca como opção. */
+  somenteIndireto: boolean;
 }
 
 /** Kit do catálogo (BaseMaterial Type="kit"); custo = soma dos sub-itens. */
@@ -112,16 +143,75 @@ export interface CostComponent {
   ordem: number;
 }
 
+// ─── Precificação: rascunho (MaterialPricing) × publicado (Material) ────
+
+/**
+ * Rascunho de precificação de UMA aplicação (Material). O usuário edita isto
+ * livremente na aba "Preço final"; nada aqui afeta o preço publicado até o
+ * "Publicar orçamento".
+ *
+ * Todo campo é um OVERRIDE: `null` = herda a fonte padrão (custo base do
+ * empreendimento, qtd/RT da planta, unidade do componente, expressão da coluna).
+ * Preenchido, vale em TODAS as tipologias que usam o ambiente — ambiente
+ * compartilhado compartilha o preço (ver docs/features/pricing.md).
+ */
+export interface MaterialPricing {
+  /** Sobrepõe o custo base final (custoMat + custoMO) desta aplicação (R$). */
+  valorUnitario: number | null;
+  /** Sobrepõe a quantidade da planta (Componente.qtd). */
+  qtd: number | null;
+  /** Sobrepõe a reserva técnica da planta (Componente.rt, em %). */
+  rt: number | null;
+  /** Sobrepõe a unidade do componente (Componente.unidade). */
+  unidade: Unidade | null;
+  /** colId (String(BudgetColumn.id)) → expressão de override da célula. */
+  colunas: Record<string, string>;
+}
+
+/** Rascunho vazio — tudo herdado. Use em vez de espalhar literais. */
+export const EMPTY_PRICING: MaterialPricing = {
+  valorUnitario: null,
+  qtd: null,
+  rt: null,
+  unidade: null,
+  colunas: {},
+};
+
+/**
+ * Valores RESOLVIDOS congelados na última publicação de uma aplicação. Não
+ * derivam de mais nada: mexer no custo base depois de publicar não move o preço
+ * publicado — é essa a garantia que separa rascunho de publicado.
+ */
+export interface PublishedPricing {
+  /** "Total final" publicado (R$) — o preço que vale. */
+  preco: number;
+  /** Valor unitário efetivo no momento da publicação (R$). */
+  valorUnitario: number;
+  qtd: number;
+  rt: number;
+  unidade: Unidade;
+  /** colId → nome e valor da coluna livre no momento da publicação. */
+  colunas: Record<string, { nome: string; valor: number }>;
+  /** "DD/MM/AAAA HH:mm". */
+  publicadoEm: string;
+  /** Rótulo da versão que congelou este preço ("v3"); "" se a versão sumiu. */
+  versaoLabel: string;
+}
+
 /** Opção de material de um componente (linha Material; era item de upgrades[]). */
 export interface MaterialOption {
   /** Material id (linha de opção). */
   id: number;
-  /** BaseMaterial referenciado (resolve custo/nome no catálogo). */
+  /** BaseMaterial referenciado (resolve nome/identidade no catálogo). */
   baseId: number;
   /** É um kit? (BaseMaterial.Type === "kit") */
   isKit: boolean;
   isDefault: boolean;
   ordem: number;
+  /** Rascunho de precificação. Nunca ausente — vazio = tudo herdado. */
+  pricing: MaterialPricing;
+  /** Última publicação desta aplicação; null = nunca publicada. */
+  publicado: PublishedPricing | null;
 }
 
 /**
@@ -133,12 +223,13 @@ export interface Componente {
   /** RoomComponent id (paleta compartilhada). */
   id: number;
   nome: string;
+  /** Unidade PADRÃO do componente — MaterialPricing.unidade sobrepõe por opção. */
   unidade: Unidade;
   /** BlueprintRoomComponent id (instância por planta) — alvo de qtd/RT/kitQtds. */
   instanceId: number;
-  /** Quantidade nesta planta. */
+  /** Quantidade nesta planta. Padrão: MaterialPricing.qtd sobrepõe por opção. */
   qtd: number;
-  /** Reserva técnica (%) nesta planta → qtdComRT = qtd * (1 + rt/100). */
+  /** Reserva técnica (%) nesta planta → qtdComRT = qtd * (1 + rt/100). Padrão. */
   rt: number;
   /** Opção default (crédito) — Material option id. */
   padrao: number | null;
@@ -278,6 +369,39 @@ export interface BudgetVersion {
   isCurrent: boolean;
   summary: string;
   changes: VersionChanges;
+}
+
+// ─── Diff rascunho × publicado (modal "Publicar orçamento" + badge) ─────
+
+/** Uma linha que mudou desde a última publicação. */
+export interface PricingDiffRow {
+  /** Material id (a aplicação). */
+  optionId: number;
+  /** "Porcelanato Portobello 90×90" — a especificação. */
+  especificacao: string;
+  ambiente: string;
+  componente: string;
+  /** Preço publicado (R$); null quando a linha nunca foi publicada. */
+  de: number | null;
+  /**
+   * Preço que será publicado (R$); null quando a linha saiu do orçamento
+   * (opção removida) ou está pendente de custo e fica fora do cálculo.
+   */
+  para: number | null;
+  tipo: "novo" | "alterado" | "removido";
+}
+
+/** Resultado da comparação de todo o empreendimento. */
+export interface PricingDiff {
+  rows: PricingDiffRow[];
+  /**
+   * Ambientes compartilhados por ≥2 tipologias com quantidades diferentes e sem
+   * override de qtd: o preço publicado usa a qtd da primeira tipologia (menor
+   * ordem). Texto pronto para exibição.
+   */
+  avisos: string[];
+  /** Nenhuma linha jamais publicada — o badge vira "Nunca publicado". */
+  nuncaPublicado: boolean;
 }
 
 /** Campos que o terceiro pode preencher via link. */

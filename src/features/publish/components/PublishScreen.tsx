@@ -13,16 +13,15 @@ import {
   PageHeader,
   StatusBadge,
 } from "@/components/ui";
-import { calcBudgetRow } from "@/lib/budget";
-import { getMaterial } from "@/lib/data/entities";
+import { isBasePending } from "@/features/budget/resolve";
 import { useBudgetColumns } from "@/lib/hooks/useBudgetColumns";
-import { useMateriais } from "@/lib/hooks/useMateriais";
+import { useCustosBase, toCustosBaseMap } from "@/lib/hooks/useCustosBase";
 import { useProject, usePublishProject } from "@/lib/hooks/useProjects";
 import { useTipologias } from "@/lib/hooks/useTipologias";
 import { cn, fmtBRL } from "@/lib/utils";
 import { useRequireActiveProject } from "@/lib/hooks/useRequireActiveProject";
 import { NUKI_EMAIL, nukiWhatsAppUrl } from "@/shared/constants/contact";
-import type { Componente, Material, Tipologia } from "@/shared/types/domain";
+import type { Tipologia } from "@/shared/types/domain";
 
 /** Item do checklist: ok (verde) ou pendência (âmbar — não há estado de erro). */
 interface ChecklistItem {
@@ -60,16 +59,18 @@ function ChecklistRow({ item }: { item: ChecklistItem }) {
   );
 }
 
-// Tela 11 — Publicação (protótipo: PublishScreen). Min/máx reais via
-// calcBudgetRow (excluindo pendências). Concluir apenas marca o projeto como
-// publicado (não bloqueia edição) e mostra a mensagem para avisar a Nuki.
+// Tela 11 — Publicação. Min/máx vêm do preço PUBLICADO de cada opção (o que já
+// está valendo), não de um recálculo do rascunho. "Concluir planejamento" é um
+// marco separado de "Publicar orçamento": só marca o projeto como publicado
+// (não bloqueia edição) e mostra a mensagem para avisar a Nuki.
 export function PublishScreen() {
   const router = useRouter();
   const projectId = useRequireActiveProject();
   const { data: project, isLoading: projectLoading } = useProject(projectId);
   const { data: tipologias = [] } = useTipologias(projectId);
-  const { data: materiais = [] } = useMateriais();
+  const { data: custoRows } = useCustosBase(projectId);
   const { data: cols = [] } = useBudgetColumns(projectId);
+  const custosBase = React.useMemo(() => toCustosBaseMap(custoRows), [custoRows]);
   const publish = usePublishProject();
 
   const [showConfirm, setShowConfirm] = React.useState(false);
@@ -77,44 +78,16 @@ export function PublishScreen() {
   if (!projectId || projectLoading) return <LoadingState label="Carregando publicação…" />;
   if (!project) return null;
 
-  const resolve = (id: number): Material | undefined => getMaterial(materiais, id);
-
-  /** Materiais dos componentes de custo "fixo" — entram no débito de cada opção. */
-  const satMats = (comp: Componente): Map<number, Material> => {
-    const out = new Map<number, Material>();
-    for (const cc of comp.custoComponentes ?? []) {
-      if (cc.tipo !== "fixo" || cc.baseId == null) continue;
-      const m = resolve(cc.baseId);
-      if (m) out.set(cc.baseId, m);
-    }
-    return out;
-  };
-
-  // Preço mín./máx. por tipologia sobre os upgrades com custo (kits ficam de
-  // fora, como no protótipo — o preço deles depende dos quantitativos). O padrão
-  // (crédito) é a opção default do componente, resolvida como material.
+  // Mín./máx. saem do preço PUBLICADO (Material.PriceInCents), não de um
+  // recálculo: esta tela mostra o que já está valendo. Rascunho não publicado
+  // aparece como "alterações não publicadas" no Construtor de Preço, não aqui.
   const tipSummary = tipologias.map((tip: Tipologia) => {
     const totals: number[] = [];
     for (const amb of tip.ambientes) {
       for (const comp of amb.componentes) {
-        const def = comp.options.find((o) => o.isDefault);
-        const padMat = def && !def.isKit ? resolve(def.baseId) : undefined;
         for (const opt of comp.options) {
-          if (opt.isDefault || opt.isKit) continue;
-          const upgMat = resolve(opt.baseId);
-          if (!upgMat) continue;
-          if (upgMat.custoMat <= 0) continue; // pendência: fora do mín./máx.
-          const r = calcBudgetRow(
-            upgMat,
-            padMat,
-            comp,
-            satMats(comp),
-            cols,
-            opt.id,
-            def?.id ?? null,
-            {}
-          );
-          if (r) totals.push(r.total);
+          if (opt.isDefault) continue;
+          if (opt.publicado) totals.push(opt.publicado.preco);
         }
       }
     }
@@ -126,7 +99,7 @@ export function PublishScreen() {
     };
   });
 
-  // Pendências reais por tipologia — upgrades (opções não-default) sem custo.
+  // Pendências reais por tipologia — upgrades sem custo base no empreendimento.
   const pendingByTip = tipologias
     .map((tip) => {
       let count = 0;
@@ -134,8 +107,7 @@ export function PublishScreen() {
         for (const comp of amb.componentes) {
           for (const opt of comp.options) {
             if (opt.isDefault || opt.isKit) continue;
-            const mat = resolve(opt.baseId);
-            if (mat && mat.custoMat <= 0) count++;
+            if (isBasePending(custosBase, opt.baseId)) count++;
           }
         }
       }
@@ -143,10 +115,20 @@ export function PublishScreen() {
     })
     .filter((e) => e.count > 0);
 
+  // "Nunca publicado" é diferente de "sem upgrades": o checklist precisa
+  // distinguir, senão um empreendimento inteiro sem preço passa como pronto.
+  const publicados = tipSummary.reduce((a, t) => a + t.totalUpgrades, 0);
+
   const revisaoOk = project.status === "em_revisao" || project.status === "publicado";
   const checklist: ChecklistItem[] = [
     { label: `${tipologias.length} tipologias configuradas`, ok: tipologias.length > 0 },
-    { label: "Tabela de orçamento revisada", ok: true },
+    {
+      label:
+        publicados > 0
+          ? `${publicados} ${publicados === 1 ? "preço publicado" : "preços publicados"}`
+          : "Nenhum preço publicado — publique o orçamento primeiro",
+      ok: publicados > 0,
+    },
     { label: `${cols.length} colunas de cálculo ativas`, ok: cols.length > 0 },
     { label: "Revisão de custos concluída", ok: revisaoOk },
     ...(pendingByTip.length > 0

@@ -13,9 +13,13 @@ import type {
   Componente,
   CostComponentKind,
   CostComponentSide,
+  CustoBase,
+  CustoBaseRow,
   FillLink,
   Kit,
   Material,
+  MaterialPricing,
+  PricingDiff,
   Project,
   Tipologia,
   TipologiaStatus,
@@ -83,6 +87,83 @@ export async function updateBudgetColumns(
     `/api/projects/${projectId}/columns`,
     "PUT",
     cols
+  );
+}
+
+// ─── Custo base por empreendimento (EnterpriseMaterialCost) ────────────
+
+/** Lista todo material que precisa de custo neste empreendimento. */
+export async function listCustosBase(projectId: number): Promise<CustoBaseRow[]> {
+  return httpGet<CustoBaseRow[]>(`/api/projects/${projectId}/custos-base`);
+}
+
+export interface CustoBaseInput {
+  baseId: number;
+  /** Omitido = não mexe no campo (a grade grava um campo por vez). */
+  custoMat?: number;
+  custoMO?: number;
+}
+
+export async function saveCustoBase(
+  projectId: number,
+  input: CustoBaseInput
+): Promise<CustoBase> {
+  return httpSend<CustoBase, CustoBaseInput>(
+    `/api/projects/${projectId}/custos-base`,
+    "PATCH",
+    input
+  );
+}
+
+// ─── Precificação (rascunho + publicação) ──────────────────────────────
+
+/** optionId (Material id) → rascunho de precificação. */
+export type PricingMap = Record<number, MaterialPricing>;
+
+export async function listPricing(projectId: number): Promise<PricingMap> {
+  return httpGet<PricingMap>(`/api/projects/${projectId}/precificacao`);
+}
+
+/** `null` limpa o override (volta a herdar); campo omitido não é tocado. */
+export interface PricingInput {
+  optionId: number;
+  valorUnitario?: number | null;
+  qtd?: number | null;
+  rt?: number | null;
+  unidade?: Unidade | null;
+  colunas?: Record<string, string>;
+}
+
+export async function savePricing(
+  projectId: number,
+  input: PricingInput
+): Promise<MaterialPricing> {
+  return httpSend<MaterialPricing, PricingInput>(
+    `/api/projects/${projectId}/precificacao`,
+    "PATCH",
+    input
+  );
+}
+
+/** O que mudou desde a última publicação (badge + modal de publicar). */
+export async function getPricingDiff(projectId: number): Promise<PricingDiff> {
+  return httpGet<PricingDiff>(`/api/projects/${projectId}/precificacao/diff`);
+}
+
+export interface PublishBudgetInput {
+  summary: string;
+  createdBy: string;
+}
+
+/** Congela o rascunho no Material e cria a versão. */
+export async function publishBudget(
+  projectId: number,
+  input: PublishBudgetInput
+): Promise<BudgetVersion> {
+  return httpSend<BudgetVersion, PublishBudgetInput>(
+    `/api/projects/${projectId}/precificacao/publicar`,
+    "POST",
+    input
   );
 }
 

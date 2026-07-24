@@ -6,15 +6,17 @@
 //   Blueprint ⇄ Room via BlueprintRoom (M:N: room compartilhado entre plantas)
 //   Catálogo: BaseMaterial (Type single|kit) + MaterialCategory + MaterialKitItem
 //
-// Divergências deliberadas da API (ver docs do plano):
-//   - CUSTO fica no BaseMaterial (catálogo), "preenche 1x": CostMaterialInCents
-//     + CostLaborInCents (Int? em centavos; NULL = pendente/sem custo). O catálogo
-//     é escopado por Organization (não por Enterprise).
-//   - Quantidade/RT variam POR PLANTA: BlueprintRoomComponent (a paleta de
-//     produtos — RoomComponent + Material — é compartilhada; a quantidade não).
+// Divergências deliberadas da API (ver docs/features/pricing.md):
+//   - CUSTO BASE é por EMPREENDIMENTO, não por catálogo: EnterpriseMaterialCost
+//     (EnterpriseId + BaseMaterialId → mat/MO em centavos; NULL = pendente). O
+//     BaseMaterial é só o template (identidade), sem preço.
+//   - PRECIFICAÇÃO tem duas camadas: MaterialPricing é o RASCUNHO (1:1 com
+//     Material, editável livremente) e o Material carrega o PUBLICADO
+//     (PriceInCents + PublishedSnapshot), congelado no "Publicar orçamento".
+//   - Quantidade/RT variam POR PLANTA em BlueprintRoomComponent, mas o override
+//     de MaterialPricing vence em TODAS as plantas (o ambiente compartilhado
+//     compartilha o preço — ver decisão 4 do doc).
 //   - Datas de exibição continuam String (*Label, verbatim "DD/MM/AAAA [HH:mm]").
-//   - Preço de venda vivo vem do motor de fórmulas; Material.PriceInCents é só
-//     snapshot de publicação.
 //
 // Tenancy: Organization/Membership são tabelas do planner (auth Supabase),
 // mantidas com id String (uuid/slug). Toda entidade de empreendimento carrega
@@ -120,10 +122,12 @@ model Enterprise {
   CreatedAt DateTime @default(now()) @db.Timestamptz()
   UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
 
-  Organization   Organization    @relation(fields: [OrganizationId], references: [id], onDelete: Cascade)
+  Organization   Organization             @relation(fields: [OrganizationId], references: [id], onDelete: Cascade)
   Blueprints     Blueprint[]
   Rooms          Room[]
   Materials      Material[]
+  MaterialCosts  EnterpriseMaterialCost[]
+  Pricings       MaterialPricing[]
   Towers         Tower[]
   UnitGroups     UnitGroup[]
   BudgetColumns  BudgetColumn[]
@@ -236,6 +240,10 @@ model BlueprintRoomComponent {
 }
 
 // ─── Material (opção por componente, COMPARTILHADA; era upgrades[]/padrao) ─
+//
+// É a APLICAÇÃO de um BaseMaterial num RoomComponent — e a camada PUBLICADA da
+// precificação. O que o usuário edita no dia a dia mora em MaterialPricing; só o
+// "Publicar orçamento" copia o resultado para cá.
 
 model Material {
   Id              Int     @id @default(autoincrement())
@@ -245,62 +253,137 @@ model Material {
   BaseMaterialId  Int
   Position        Int     @default(0) // ordem entre opções
   IsDefault       Boolean @default(false)
-  /// Snapshot de preço de venda (publicação); preço vivo vem da fórmula.
-  PriceInCents    Int     @default(0)
-  Name            String?
+
+  /// Preço de venda PUBLICADO ("Total final" congelado). NULL = nunca publicado.
+  PriceInCents       Int?
+  /// Valores resolvidos no instante da publicação (valor un., qtd, RT, unidade,
+  /// colunas) — ver PublishedPricingSnapshot no domínio. Só é lido para montar o
+  /// diff rascunho × publicado; nunca é consultado campo a campo.
+  PublishedSnapshot  Json?
+  PublishedAt        DateTime? @db.Timestamptz()
+  PublishedVersionId Int?
 
   CreatedAt DateTime @default(now()) @db.Timestamptz()
   UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
 
-  RoomComponent       RoomComponent   @relation("ComponentOptions", fields: [RoomComponentId], references: [Id], onDelete: Cascade)
-  DefaultForComponent RoomComponent[] @relation("DefaultOption")
-  Room                Room            @relation(fields: [RoomId], references: [Id], onDelete: Cascade)
-  Enterprise          Enterprise      @relation(fields: [EnterpriseId], references: [Id], onDelete: Cascade)
-  BaseMaterial        BaseMaterial    @relation(fields: [BaseMaterialId], references: [Id], onDelete: Restrict)
+  RoomComponent       RoomComponent           @relation("ComponentOptions", fields: [RoomComponentId], references: [Id], onDelete: Cascade)
+  DefaultForComponent RoomComponent[]         @relation("DefaultOption")
+  Room                Room                    @relation(fields: [RoomId], references: [Id], onDelete: Cascade)
+  Enterprise          Enterprise              @relation(fields: [EnterpriseId], references: [Id], onDelete: Cascade)
+  BaseMaterial        BaseMaterial            @relation(fields: [BaseMaterialId], references: [Id], onDelete: Restrict)
   Comments            Comment[]
   /// Itens de custo avulsos presos a esta opção (escopo do satélite).
   ScopedCostItems     RoomComponentCostItem[] @relation("CostItemScope")
+  /// Rascunho de precificação (1:1). Criado sob demanda no primeiro override.
+  Pricing             MaterialPricing?
+  /// SetNull: apagar a versão não desfaz a publicação — só perde a etiqueta.
+  PublishedVersion    BudgetVersion?          @relation(fields: [PublishedVersionId], references: [Id], onDelete: SetNull)
 
   @@unique([RoomComponentId, BaseMaterialId])
   @@index([RoomComponentId])
   @@index([BaseMaterialId])
   @@index([EnterpriseId])
+  @@index([PublishedVersionId])
 }
 
-// ─── BaseMaterial (catálogo; era Material + Kit) — por Organization ──────
+// ─── MaterialPricing (RASCUNHO de precificação; 1:1 com Material) ────────
+//
+// Uma linha por Material — um ambiente compartilhado entre tipologias
+// compartilha esta linha, logo o preço é o MESMO em todas as plantas. Não existe
+// versão de preço por tipologia (ver docs/features/pricing.md, decisão 1).
+//
+// Todo campo de override é NULLABLE: NULL = herda a fonte padrão; preenchido =
+// vale em TODAS as tipologias que usam o ambiente (decisão 4).
 
-model BaseMaterial {
-  Id                  Int     @id @default(autoincrement())
-  OrganizationId      String
-  CategoryId          Int?
-  Type                String  @default("single") // "single" | "kit"
-  ReferenceCode       String // codigo
-  Name                String
-  Manufacturer        String? // fabricante (null p/ kit)
-  Unit                String? // unidade (null p/ kit)
-  /// Custo "preenche 1x". NULL = pendente (sem custo).
-  CostMaterialInCents Int? // custoMat (centavos)
-  CostLaborInCents    Int? // custoMO (centavos)
-  /// URL legada — fallback quando MediaFileId é null (ver resolveMediaUrl).
-  ImagePreviewUrl     String?
-  MediaFileId         Int?
+model MaterialPricing {
+  Id           Int @id @default(autoincrement())
+  MaterialId   Int @unique
+  /// Denormalizado (paridade com Material): a publicação varre por empreendimento.
+  EnterpriseId Int
+
+  /// Sobrepõe o custo base final (material + MO já somados) desta aplicação.
+  /// É o que a coluna "Valor un." grava quando editada direto na tabela.
+  UnitCostInCents     Int?
+  /// Sobrepõem BlueprintRoomComponent.UsageQuantity / .TechnicalReservePct.
+  UsageQuantity       Float?
+  TechnicalReservePct Float?
+  /// Sobrepõe RoomComponent.Unit.
+  Unit                String?
+  /// { "<budgetColumnId>": "expressão" } — override por célula das colunas
+  /// livres. Antes vivia só no estado React da tela e sumia no reload.
+  ColumnOverrides     Json    @default("{}")
 
   CreatedAt DateTime @default(now()) @db.Timestamptz()
   UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
 
-  Organization Organization            @relation(fields: [OrganizationId], references: [id], onDelete: Cascade)
-  Category     MaterialCategory?       @relation(fields: [CategoryId], references: [Id], onDelete: SetNull)
-  MediaFile    MediaFile?              @relation("BaseMaterialPreviewMedia", fields: [MediaFileId], references: [Id], onDelete: SetNull)
-  Options      Material[]
-  KitItems     MaterialKitItem[]       @relation("KitParent")
-  ParentKits   MaterialKitItem[]       @relation("KitChild")
-  PortalFills  PortalFill[]
-  CostItems    RoomComponentCostItem[] @relation("CostItemMaterial")
+  Material   Material   @relation(fields: [MaterialId], references: [Id], onDelete: Cascade)
+  Enterprise Enterprise @relation(fields: [EnterpriseId], references: [Id], onDelete: Cascade)
+
+  @@index([EnterpriseId])
+}
+
+// ─── BaseMaterial (catálogo; era Material + Kit) — por Organization ──────
+//
+// TEMPLATE puro: só identidade (código, nome, fabricante, categoria, unidade,
+// tipo, mídia), reusável em qualquer ambiente/planta. SEM custo — o custo é do
+// empreendimento (EnterpriseMaterialCost), porque o mesmo porcelanato tem preço
+// diferente em obras diferentes.
+
+model BaseMaterial {
+  Id              Int     @id @default(autoincrement())
+  OrganizationId  String
+  CategoryId      Int?
+  Type            String  @default("single") // "single" | "kit"
+  ReferenceCode   String // codigo
+  Name            String
+  Manufacturer    String? // fabricante (null p/ kit)
+  Unit            String? // unidade (null p/ kit)
+  /// URL legada — fallback quando MediaFileId é null (ver resolveMediaUrl).
+  ImagePreviewUrl String?
+  MediaFileId     Int?
+
+  CreatedAt DateTime @default(now()) @db.Timestamptz()
+  UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
+
+  Organization    Organization             @relation(fields: [OrganizationId], references: [id], onDelete: Cascade)
+  Category        MaterialCategory?        @relation(fields: [CategoryId], references: [Id], onDelete: SetNull)
+  MediaFile       MediaFile?               @relation("BaseMaterialPreviewMedia", fields: [MediaFileId], references: [Id], onDelete: SetNull)
+  Options         Material[]
+  KitItems        MaterialKitItem[]        @relation("KitParent")
+  ParentKits      MaterialKitItem[]        @relation("KitChild")
+  PortalFills     PortalFill[]
+  CostItems       RoomComponentCostItem[]  @relation("CostItemMaterial")
+  EnterpriseCosts EnterpriseMaterialCost[]
 
   @@index([OrganizationId])
   @@index([OrganizationId, Type])
   @@index([OrganizationId, CategoryId])
   @@index([MediaFileId])
+}
+
+// ─── EnterpriseMaterialCost (custo base POR EMPREENDIMENTO) ──────────────
+//
+// Custo de material + mão de obra de um BaseMaterial DENTRO de um
+// empreendimento, compartilhado por todas as aplicações (Material) dele ali —
+// é o que a aba "Custos base" preenche e o que o portal do terceiro alimenta.
+// Uma aplicação específica pode sobrepor esse valor em MaterialPricing.
+
+model EnterpriseMaterialCost {
+  Id                  Int  @id @default(autoincrement())
+  EnterpriseId        Int
+  BaseMaterialId      Int
+  /// NULL = pendente (nunca preenchido). 0 é valor legítimo digitado.
+  CostMaterialInCents Int?
+  CostLaborInCents    Int?
+
+  CreatedAt DateTime @default(now()) @db.Timestamptz()
+  UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
+
+  Enterprise   Enterprise   @relation(fields: [EnterpriseId], references: [Id], onDelete: Cascade)
+  BaseMaterial BaseMaterial @relation(fields: [BaseMaterialId], references: [Id], onDelete: Cascade)
+
+  @@unique([EnterpriseId, BaseMaterialId])
+  @@index([EnterpriseId])
 }
 
 model MaterialCategory {
@@ -438,7 +521,9 @@ model BudgetVersion {
   Position       Int      @default(0)
   CreatedAt      DateTime @default(now()) @db.Timestamptz()
 
-  Enterprise Enterprise @relation(fields: [EnterpriseId], references: [Id], onDelete: Cascade)
+  Enterprise         Enterprise @relation(fields: [EnterpriseId], references: [Id], onDelete: Cascade)
+  /// Materiais cujo preço publicado foi congelado NESTA publicação.
+  PublishedMaterials Material[]
 
   @@index([EnterpriseId])
 }
@@ -479,7 +564,8 @@ model FillLink {
   @@index([EnterpriseId])
 }
 
-/// Custo preenchido pela construtora no portal — vai para o BaseMaterial.
+/// Custo preenchido pela construtora no portal — é uma PROPOSTA por
+/// empreendimento; ao ser aceita vira EnterpriseMaterialCost.
 model PortalFill {
   EnterpriseId   Int
   BaseMaterialId Int

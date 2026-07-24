@@ -1,18 +1,22 @@
-// Pendência ("sem custo") no canvas — derivada do custo (custoMat <= 0), mesma
-// semântica do motor (calcKitRow / isOptionPending). Sem mais Set externo.
+// Pendência ("sem custo") no canvas — derivada do custo base DO EMPREENDIMENTO,
+// mesma semântica do motor (isOptionPending / isOptionOwnPending). O canvas é de
+// um empreendimento, então recebe o mapa de custos dele; um material sem custo
+// aqui pode estar precificado em outra obra, e isso é o esperado.
 import { costItemAppliesTo } from "@/lib/budget";
-import { getMaterial, getOptionEntity } from "@/lib/data/entities";
+import { getOptionEntity } from "@/lib/data/entities";
+import { isBasePending } from "@/features/budget/resolve";
 import type {
   Componente,
+  CustosBase,
   Kit,
   KitItem,
   Material,
   MaterialOption,
 } from "@/shared/types/domain";
 
-/** Sub-item de kit pendente = custo de material zerado. */
-export function subitemPending(item: KitItem): boolean {
-  return item.custoMat <= 0;
+/** Sub-item de kit pendente = sem custo de material no empreendimento. */
+export function subitemPending(custosBase: CustosBase, item: KitItem): boolean {
+  return isBasePending(custosBase, item.materialId);
 }
 
 /**
@@ -22,7 +26,7 @@ export function subitemPending(item: KitItem): boolean {
  * orçamento exclui do total.
  */
 export function costItemsPending(
-  materiais: Material[],
+  custosBase: CustosBase,
   comp: Pick<Componente, "custoComponentes">,
   optionId: number | null
 ): boolean {
@@ -30,20 +34,26 @@ export function costItemsPending(
     if (cc.tipo !== "fixo") return false;
     if (!costItemAppliesTo(cc, optionId)) return false;
     if (cc.baseId == null) return true;
-    const m = getMaterial(materiais, cc.baseId);
-    return !m || m.custoMat <= 0;
+    return isBasePending(custosBase, cc.baseId);
   });
 }
 
-/** Opção pendente: material com custo 0, ou kit com algum sub-item pendente. */
+/**
+ * Opção pendente: sem custo base no empreendimento, ou kit com algum sub-item
+ * pendente. Um override de valor unitário na aba "Preço final" também resolve a
+ * pendência, mas o canvas não carrega o rascunho — daí olhar só o custo base.
+ */
 export function optionPending(
   materiais: Material[],
   kits: Kit[],
+  custosBase: CustosBase,
   opt: Pick<MaterialOption, "id" | "baseId" | "isKit">,
   comp?: Pick<Componente, "custoComponentes">
 ): boolean {
-  if (comp && costItemsPending(materiais, comp, opt.id)) return true;
+  if (comp && costItemsPending(custosBase, comp, opt.id)) return true;
   const ent = getOptionEntity(materiais, kits, opt);
   if (!ent) return false;
-  return ent.isKit ? ent.itens.some(subitemPending) : ent.custoMat <= 0;
+  return ent.isKit
+    ? ent.itens.some((it) => subitemPending(custosBase, it))
+    : isBasePending(custosBase, ent.id);
 }

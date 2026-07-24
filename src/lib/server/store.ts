@@ -14,9 +14,16 @@
 // assertEnterprise aqui dentro. O catálogo (BaseMaterial/kits/categorias) é a
 // única entidade compartilhada entre empreendimentos: escopa só por org.
 //
+// Precificação em duas camadas (ver docs/features/pricing.md):
+//   custo base   → EnterpriseMaterialCost (por empreendimento, compartilhado)
+//   rascunho     → MaterialPricing (1:1 com Material, overrides nullable)
+//   publicado    → Material.PriceInCents + PublishedSnapshot (congelado)
+// O catálogo (BaseMaterial) não tem custo nenhum: é só template.
+//
 // Conversões de borda:
 //   custo reais↔cents: fromCents(null|0 → 0); toCentsOrNull(reais>0 ? round : null).
-//   "pendente" NÃO é mais uma tabela — deriva de CostMaterialInCents IS NULL (custo 0).
+//   "pendente" NÃO é mais uma tabela — deriva do custo base do empreendimento
+//   ser NULL/0 para aquele BaseMaterial.
 import { randomUUID } from "crypto";
 
 import { Prisma } from "@prisma/client";
@@ -24,6 +31,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { assertMediaFileInOrg } from "@/lib/server/media";
 import { resolveMediaUrl } from "@/lib/server/mediaRules";
+import { EMPTY_PRICING } from "@/shared/types/domain";
 import type {
   Ambiente,
   ImagemVinculada,
@@ -37,14 +45,19 @@ import type {
   CostComponentKind,
   CostComponentSide,
   CostRegistro,
+  CustoBase,
+  CustoBaseRow,
+  CustosBase,
   FillLink,
   FillLinkCampos,
   Kit,
   KitItem,
   Material,
   MaterialOption,
+  MaterialPricing,
   PortalFill,
   Project,
+  PublishedPricing,
   RoomShape,
   Tipologia,
   TipologiaStatus,
@@ -57,11 +70,15 @@ import type { FetchCatalogParams, FetchCatalogResponse } from "@/shared/types/ca
 
 // ─── Utilidades de borda ────────────────────────────────────────────────
 
-/** Data/hora atual no formato de exibição: "DD/MM/AAAA HH:mm". */
-function nowBR(): string {
-  const d = new Date();
+/** Data/hora no formato de exibição: "DD/MM/AAAA HH:mm". */
+function formatBR(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** Agora, no formato de exibição. */
+function nowBR(): string {
+  return formatBR(new Date());
 }
 
 /** Interfaces do domínio → coluna Json do Prisma. */
@@ -288,8 +305,6 @@ function toMaterial(row: BaseMaterialRow): Material {
     nome: row.Name,
     fabricante: row.Manufacturer ?? "",
     categoria: row.Category?.Name ?? "",
-    custoMat: fromCents(row.CostMaterialInCents),
-    custoMO: fromCents(row.CostLaborInCents),
     imagem: toImagem(row.MediaFile, row.ImagePreviewUrl),
   };
 }
@@ -305,8 +320,6 @@ function toKit(row: KitRow): Kit {
       // Fallback para o Unit do material: kits antigos (antes da coluna
       // MaterialKitItem.Unit) mantêm a unidade que exibiam.
       unidade: (ki.Unit ?? ki.ChildMaterial.Unit ?? "und") as Unidade,
-      custoMat: fromCents(ki.ChildMaterial.CostMaterialInCents),
-      custoMO: fromCents(ki.ChildMaterial.CostLaborInCents),
     }));
   return {
     id: row.Id,
@@ -320,10 +333,17 @@ function toKit(row: KitRow): Kit {
 // Árvore de uma planta (Blueprint) em duas camadas: paleta compartilhada
 // (Room→RoomComponent→Options→BaseMaterial) + overrides por planta
 // (BlueprintRoomComponent + MaterialKitUsage).
+/** Include do Material (opção) reusado por Room e pela publicação. */
+const OPTION_INCLUDE = {
+  BaseMaterial: true,
+  Pricing: true,
+  PublishedVersion: { select: { Label: true } },
+} satisfies Prisma.MaterialInclude;
+
 /** Include do Room reusado por todos os caminhos que montam um Ambiente. */
 const ROOM_INCLUDE = {
   RoomComponents: {
-    include: { Options: { include: { BaseMaterial: true } }, CostItems: true },
+    include: { Options: { include: OPTION_INCLUDE }, CostItems: true },
   },
   CostRegistros: true,
 } satisfies Prisma.RoomInclude;
@@ -353,6 +373,73 @@ type CostItemRow = RoomComponentRow["CostItems"][number];
 type RegistroRow = BlueprintRoomRow["Room"]["CostRegistros"][number];
 type BrcRow = BlueprintRoomRow["Components"][number];
 
+/**
+ * Metade do snapshot de publicação que mora no Json — o resto (preço, data,
+ * versão) vem das colunas de Material. Separar evita duplicar o preço em dois
+ * lugares que poderiam divergir.
+ */
+interface PublishedSnapshotJson {
+  valorUnitario: number;
+  qtd: number;
+  rt: number;
+  unidade: string;
+  colunas: Record<string, { nome: string; valor: number }>;
+}
+
+function isPublishedSnapshot(v: unknown): v is PublishedSnapshotJson {
+  if (typeof v !== "object" || v === null) return false;
+  const s = v as Record<string, unknown>;
+  return (
+    typeof s.valorUnitario === "number" &&
+    typeof s.qtd === "number" &&
+    typeof s.rt === "number" &&
+    typeof s.unidade === "string" &&
+    typeof s.colunas === "object" &&
+    s.colunas !== null
+  );
+}
+
+/** Coluna Json de overrides → Record<colId, expressão>, ignorando lixo. */
+function toColumnOverrides(v: Prisma.JsonValue | null | undefined): Record<string, string> {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, val] of Object.entries(v)) {
+    if (typeof val === "string") out[k] = val;
+  }
+  return out;
+}
+
+function toPricing(row: OptionRow["Pricing"]): MaterialPricing {
+  if (!row) return { ...EMPTY_PRICING, colunas: {} };
+  return {
+    valorUnitario: row.UnitCostInCents == null ? null : row.UnitCostInCents / 100,
+    qtd: row.UsageQuantity,
+    rt: row.TechnicalReservePct,
+    unidade: (row.Unit as Unidade | null) ?? null,
+    colunas: toColumnOverrides(row.ColumnOverrides),
+  };
+}
+
+/**
+ * Publicado da aplicação. Exige PriceInCents E um snapshot válido: sem os dois,
+ * a linha não tem como ser exibida no diff, e "meio publicada" é pior que não
+ * publicada — some silenciosamente do "de → para" em vez de mentir um valor.
+ */
+function toPublished(m: OptionRow): PublishedPricing | null {
+  if (m.PriceInCents == null || !isPublishedSnapshot(m.PublishedSnapshot)) return null;
+  const s = m.PublishedSnapshot;
+  return {
+    preco: fromCents(m.PriceInCents),
+    valorUnitario: s.valorUnitario,
+    qtd: s.qtd,
+    rt: s.rt,
+    unidade: s.unidade as Unidade,
+    colunas: s.colunas,
+    publicadoEm: m.PublishedAt ? formatBR(m.PublishedAt) : "",
+    versaoLabel: m.PublishedVersion?.Label ?? "",
+  };
+}
+
 function toMaterialOption(m: OptionRow, defaultMaterialId: number | null): MaterialOption {
   return {
     id: m.Id,
@@ -360,6 +447,8 @@ function toMaterialOption(m: OptionRow, defaultMaterialId: number | null): Mater
     isKit: m.BaseMaterial.Type === "kit",
     isDefault: m.Id === defaultMaterialId,
     ordem: m.Position,
+    pricing: toPricing(m.Pricing),
+    publicado: toPublished(m),
   };
 }
 
@@ -729,8 +818,241 @@ export async function updateBudgetColumns(
     prisma.budgetColumn.deleteMany({
       where: { EnterpriseId: projectId, Id: { in: removedIds } },
     }),
+    // Excluir a coluna tem que limpar os overrides por célula dela: a chave
+    // sobreviveria no Json apontando para um Id morto e voltaria a valer se um
+    // autoincrement futuro reciclasse o número. Um statement por coluna
+    // removida (`jsonb - text` tira uma chave): excluir coluna é raro, e ligar
+    // um array JS a `text[]` num raw do Prisma é frágil o bastante para não
+    // valer a economia.
+    ...removedIds.map(
+      (id) => prisma.$executeRaw`
+        UPDATE "MaterialPricing"
+           SET "ColumnOverrides" = "ColumnOverrides" - ${String(id)}
+         WHERE "EnterpriseId" = ${projectId}`
+    ),
   ]);
   return getBudgetColumns(organizationId, projectId);
+}
+
+// ─── Custos base do empreendimento (EnterpriseMaterialCost) ─────────────
+
+/**
+ * Todo BaseMaterial que precisa de custo NESTE empreendimento, com o custo já
+ * preenchido (se houver) e onde é usado. Três origens, de-duplicadas por
+ * BaseMaterial:
+ *   1. opção de componente (Material) — o caso normal;
+ *   2. sub-item de kit — o kit não tem custo próprio, quem tem é o filho;
+ *   3. item de custo "fixo" (satélite) — sem preço nele, o custo de troca de
+ *      todas as opções do componente fica pendente.
+ *
+ * É a fonte da aba "Custos base" e o contrato de "o que o terceiro precisa
+ * preencher" — por isso vive aqui e não na tela.
+ */
+export async function listEnterpriseCosts(
+  organizationId: string,
+  projectId: number
+): Promise<CustoBaseRow[]> {
+  await assertEnterprise(organizationId, projectId);
+
+  const [options, costItems, costs] = await Promise.all([
+    prisma.material.findMany({
+      where: { EnterpriseId: projectId },
+      select: {
+        BaseMaterialId: true,
+        BaseMaterial: {
+          include: { Category: true, KitItems: { include: { ChildMaterial: { include: { Category: true } } } } },
+        },
+        RoomComponent: { select: { Name: true } },
+        Room: { select: { Name: true } },
+      },
+    }),
+    prisma.roomComponentCostItem.findMany({
+      where: { Kind: "fixo", BaseMaterialId: { not: null }, RoomComponent: { Room: { EnterpriseId: projectId } } },
+      select: {
+        Name: true,
+        BaseMaterial: { include: { Category: true } },
+        RoomComponent: { select: { Name: true, Room: { select: { Name: true } } } },
+      },
+    }),
+    prisma.enterpriseMaterialCost.findMany({ where: { EnterpriseId: projectId } }),
+  ]);
+
+  const costByBase = new Map(costs.map((c) => [c.BaseMaterialId, c]));
+  const rows = new Map<number, CustoBaseRow>();
+
+  const add = (
+    bm: { Id: number; Name: string; Manufacturer: string | null; Category: { Name: string } | null },
+    label: string,
+    indireto: boolean
+  ) => {
+    const found = rows.get(bm.Id);
+    if (found) {
+      found.usos += 1;
+      if (!found.usadoEm.includes(label)) found.usadoEm.push(label);
+      if (!indireto) found.somenteIndireto = false;
+      return;
+    }
+    const cost = costByBase.get(bm.Id);
+    rows.set(bm.Id, {
+      baseId: bm.Id,
+      custoMat: fromCents(cost?.CostMaterialInCents),
+      custoMO: fromCents(cost?.CostLaborInCents),
+      nome: bm.Name,
+      fabricante: bm.Manufacturer ?? "",
+      categoria: bm.Category?.Name ?? "",
+      usos: 1,
+      usadoEm: [label],
+      somenteIndireto: indireto,
+    });
+  };
+
+  for (const opt of options) {
+    const label = `${opt.Room.Name} · ${opt.RoomComponent.Name}`;
+    const bm = opt.BaseMaterial;
+    if (bm.Type === "kit") {
+      // O kit em si não tem custo — quem precisa de preço são os sub-itens.
+      for (const ki of bm.KitItems) add(ki.ChildMaterial, `${label} · ${bm.Name}`, true);
+      continue;
+    }
+    add(bm, label, false);
+  }
+
+  for (const ci of costItems) {
+    if (!ci.BaseMaterial) continue;
+    add(ci.BaseMaterial, `${ci.RoomComponent.Room.Name} · ${ci.RoomComponent.Name} · ${ci.Name}`, true);
+  }
+
+  // Pendentes primeiro (é o que o usuário veio resolver), depois por nome.
+  return [...rows.values()].sort((a, b) => {
+    const pa = a.custoMat <= 0 ? 0 : 1;
+    const pb = b.custoMat <= 0 ? 0 : 1;
+    return pa !== pb ? pa - pb : a.nome.localeCompare(b.nome, "pt-BR");
+  });
+}
+
+/** Custos base do empreendimento indexados por BaseMaterial (uso interno + API). */
+export async function getEnterpriseCostMap(projectId: number): Promise<CustosBase> {
+  const rows = await prisma.enterpriseMaterialCost.findMany({ where: { EnterpriseId: projectId } });
+  const out: CustosBase = {};
+  for (const r of rows) {
+    out[r.BaseMaterialId] = {
+      baseId: r.BaseMaterialId,
+      custoMat: fromCents(r.CostMaterialInCents),
+      custoMO: fromCents(r.CostLaborInCents),
+    };
+  }
+  return out;
+}
+
+export type CustoBasePatch = Partial<Pick<CustoBase, "custoMat" | "custoMO">>;
+
+/**
+ * Grava o custo base de um BaseMaterial no empreendimento. O BaseMaterial é
+ * validado contra a ORG (é catálogo compartilhado), o empreendimento contra a
+ * org também — sem isso dava para escrever custo de material de outra org.
+ */
+export async function upsertEnterpriseCost(
+  organizationId: string,
+  projectId: number,
+  baseMaterialId: number,
+  patch: CustoBasePatch
+): Promise<CustoBase> {
+  await assertEnterprise(organizationId, projectId);
+  const bm = await prisma.baseMaterial.findFirst({
+    where: { Id: baseMaterialId, OrganizationId: organizationId },
+    select: { Id: true },
+  });
+  if (!bm) throw new Error("Material não encontrado.");
+
+  const data = {
+    ...(patch.custoMat !== undefined ? { CostMaterialInCents: toCentsOrNull(patch.custoMat) } : {}),
+    ...(patch.custoMO !== undefined ? { CostLaborInCents: toCentsOrNull(patch.custoMO) } : {}),
+  };
+  const row = await prisma.enterpriseMaterialCost.upsert({
+    where: { EnterpriseId_BaseMaterialId: { EnterpriseId: projectId, BaseMaterialId: baseMaterialId } },
+    create: { EnterpriseId: projectId, BaseMaterialId: baseMaterialId, ...data },
+    update: data,
+  });
+  return {
+    baseId: row.BaseMaterialId,
+    custoMat: fromCents(row.CostMaterialInCents),
+    custoMO: fromCents(row.CostLaborInCents),
+  };
+}
+
+// ─── Rascunho de precificação (MaterialPricing) ─────────────────────────
+
+/** optionId (Material id) → rascunho. Ausente = tudo herdado. */
+export type PricingMap = Record<number, MaterialPricing>;
+
+export async function listPricing(
+  organizationId: string,
+  projectId: number
+): Promise<PricingMap> {
+  await assertEnterprise(organizationId, projectId);
+  const rows = await prisma.materialPricing.findMany({ where: { EnterpriseId: projectId } });
+  const out: PricingMap = {};
+  for (const r of rows) {
+    out[r.MaterialId] = {
+      valorUnitario: r.UnitCostInCents == null ? null : r.UnitCostInCents / 100,
+      qtd: r.UsageQuantity,
+      rt: r.TechnicalReservePct,
+      unidade: (r.Unit as Unidade | null) ?? null,
+      colunas: toColumnOverrides(r.ColumnOverrides),
+    };
+  }
+  return out;
+}
+
+/**
+ * Patch do rascunho. `null` LIMPA o override (volta a herdar) e `undefined` não
+ * mexe no campo — a distinção é o contrato da UI ("↩ voltar ao custo base"),
+ * então não colapsar os dois.
+ */
+export interface PricingPatch {
+  valorUnitario?: number | null;
+  qtd?: number | null;
+  rt?: number | null;
+  unidade?: Unidade | null;
+  /** Substitui o mapa inteiro de overrides de coluna. */
+  colunas?: Record<string, string>;
+}
+
+export async function upsertPricing(
+  organizationId: string,
+  projectId: number,
+  optionId: number,
+  patch: PricingPatch
+): Promise<MaterialPricing> {
+  // A opção tem que ser DESTE empreendimento (que já foi validado contra a org
+  // na borda) — senão dava para precificar material de outro projeto.
+  const opt = await prisma.material.findFirst({
+    where: { Id: optionId, EnterpriseId: projectId, Enterprise: { OrganizationId: organizationId } },
+    select: { Id: true },
+  });
+  if (!opt) throw new Error("Opção não encontrada.");
+
+  const data = {
+    ...(patch.valorUnitario !== undefined
+      ? { UnitCostInCents: patch.valorUnitario == null ? null : Math.round(patch.valorUnitario * 100) }
+      : {}),
+    ...(patch.qtd !== undefined ? { UsageQuantity: patch.qtd } : {}),
+    ...(patch.rt !== undefined ? { TechnicalReservePct: patch.rt } : {}),
+    ...(patch.unidade !== undefined ? { Unit: patch.unidade } : {}),
+    ...(patch.colunas !== undefined ? { ColumnOverrides: patch.colunas } : {}),
+  };
+  const row = await prisma.materialPricing.upsert({
+    where: { MaterialId: optionId },
+    create: { MaterialId: optionId, EnterpriseId: projectId, ...data },
+    update: data,
+  });
+  return {
+    valorUnitario: row.UnitCostInCents == null ? null : row.UnitCostInCents / 100,
+    qtd: row.UsageQuantity,
+    rt: row.TechnicalReservePct,
+    unidade: (row.Unit as Unidade | null) ?? null,
+    colunas: toColumnOverrides(row.ColumnOverrides),
+  };
 }
 
 /**
@@ -858,8 +1180,6 @@ async function baseMaterialCreateData(
     ReferenceCode: input.codigo,
     Name: input.nome,
     Manufacturer: input.fabricante,
-    CostMaterialInCents: toCentsOrNull(input.custoMat),
-    CostLaborInCents: toCentsOrNull(input.custoMO),
     ImagePreviewUrl: legacyUrl,
     MediaFileId: mediaFileId,
   };
@@ -912,8 +1232,6 @@ export async function updateMaterial(
   if (patch.codigo !== undefined) data.ReferenceCode = patch.codigo;
   if (patch.nome !== undefined) data.Name = patch.nome;
   if (patch.fabricante !== undefined) data.Manufacturer = patch.fabricante;
-  if (patch.custoMat !== undefined) data.CostMaterialInCents = toCentsOrNull(patch.custoMat);
-  if (patch.custoMO !== undefined) data.CostLaborInCents = toCentsOrNull(patch.custoMO);
   if (patch.categoria !== undefined) {
     data.Category = { connect: { Id: await resolveCategoryId(organizationId, patch.categoria) } };
   }
@@ -1182,6 +1500,9 @@ async function cloneBlueprintRoomInto(
     let newDefaultId: number | null = null;
     const optIdMap = new Map<number, number>(); // KitItem lookup usa BaseMaterial; aqui mapeamos option→option
     for (const opt of [...rc.Options].sort((a, b) => a.Position - b.Position)) {
+      // O PUBLICADO não é clonado (PriceInCents/PublishedSnapshot nascem NULL):
+      // a cópia é uma linha nova de orçamento, ainda não publicada. O RASCUNHO
+      // é, para que duplicar a tipologia preserve o trabalho de precificação.
       const created = await prisma.material.create({
         data: {
           RoomComponentId: newRc.Id,
@@ -1190,8 +1511,20 @@ async function cloneBlueprintRoomInto(
           BaseMaterialId: opt.BaseMaterialId,
           Position: opt.Position,
           IsDefault: opt.IsDefault,
-          PriceInCents: opt.PriceInCents,
-          Name: opt.Name,
+          ...(opt.Pricing
+            ? {
+                Pricing: {
+                  create: {
+                    EnterpriseId: enterpriseId,
+                    UnitCostInCents: opt.Pricing.UnitCostInCents,
+                    UsageQuantity: opt.Pricing.UsageQuantity,
+                    TechnicalReservePct: opt.Pricing.TechnicalReservePct,
+                    Unit: opt.Pricing.Unit,
+                    ColumnOverrides: opt.Pricing.ColumnOverrides ?? {},
+                  },
+                },
+              }
+            : {}),
         },
         select: { Id: true },
       });
@@ -2189,33 +2522,44 @@ export async function listVersions(
   return rows.map(toVersion);
 }
 
+/**
+ * Corpo da criação de versão, parametrizado pelo client — a publicação de preço
+ * precisa criar a versão DENTRO da sua própria transação, senão uma falha ao
+ * gravar os preços deixaria uma versão "atual" alegando uma publicação que não
+ * aconteceu.
+ */
+export async function createVersionWithin(
+  tx: Prisma.TransactionClient,
+  projectId: number,
+  input: VersionInput
+): Promise<BudgetVersion> {
+  const count = await tx.budgetVersion.count({ where: { EnterpriseId: projectId } });
+  const agg = await tx.budgetVersion.aggregate({
+    where: { EnterpriseId: projectId },
+    _min: { Position: true },
+  });
+  await tx.budgetVersion.updateMany({ where: { EnterpriseId: projectId }, data: { IsCurrent: false } });
+  const row = await tx.budgetVersion.create({
+    data: {
+      EnterpriseId: projectId,
+      Label: `v${count + 1}`,
+      CreatedAtLabel: nowBR().replace(" ", " às "),
+      CreatedBy: input.createdBy,
+      IsCurrent: true,
+      Summary: input.summary,
+      Changes: json(input.changes) ?? {},
+      Position: (agg._min.Position ?? 1) - 1, // nova versão vem primeiro na lista
+    },
+  });
+  return toVersion(row);
+}
+
 export async function createVersion(
   organizationId: string,
   projectId: number,
   input: VersionInput
 ): Promise<BudgetVersion> {
-  const enterpriseId = projectId;
-  const count = await prisma.budgetVersion.count({ where: { EnterpriseId: enterpriseId } });
-  const agg = await prisma.budgetVersion.aggregate({
-    where: { EnterpriseId: enterpriseId },
-    _min: { Position: true },
-  });
-  const [, row] = await prisma.$transaction([
-    prisma.budgetVersion.updateMany({ where: { EnterpriseId: enterpriseId }, data: { IsCurrent: false } }),
-    prisma.budgetVersion.create({
-      data: {
-        EnterpriseId: enterpriseId,
-        Label: `v${count + 1}`,
-        CreatedAtLabel: nowBR().replace(" ", " às "),
-        CreatedBy: input.createdBy,
-        IsCurrent: true,
-        Summary: input.summary,
-        Changes: json(input.changes) ?? {},
-        Position: (agg._min.Position ?? 1) - 1, // nova versão vem primeiro na lista
-      },
-    }),
-  ]);
-  return toVersion(row);
+  return prisma.$transaction((tx) => createVersionWithin(tx, projectId, input));
 }
 
 export async function restoreVersion(
@@ -2498,9 +2842,13 @@ async function syncConstrutoraComments(
 }
 
 /**
- * "Enviar preenchimento" do portal: grava os fills, aplica os custos ao catálogo
- * (BaseMaterial) e move o empreendimento ativo para "em_revisao". A pendência
+ * "Enviar preenchimento" do portal: grava os fills, aplica os custos ao CUSTO
+ * BASE DO EMPREENDIMENTO e move o empreendimento para "em_revisao". A pendência
  * some por construção (custo deixa de ser NULL). Retorna quantos foram aplicados.
+ *
+ * Escreve em EnterpriseMaterialCost, não no catálogo: o link é sempre de um
+ * empreendimento, e o preço que a construtora daquela obra informou não vale
+ * para as outras obras da incorporadora.
  */
 export async function submitPortalFills(
   organizationId: string,
@@ -2531,18 +2879,27 @@ export async function submitPortalFills(
   // (o portal coleta por BaseMaterialId; a thread é por opção/Material.Id).
   await syncConstrutoraComments(organizationId, enterpriseId, scoped, authorName);
 
-  // Aplica os custos preenchidos (> 0) ao catálogo, em paralelo.
+  // Aplica os custos preenchidos (> 0) ao custo base do empreendimento.
+  // allowedBaseMaterialIds já veio de getPortalMaterialIds, que só enumera
+  // material das plantas do link — daí o upsert não repetir o escopo por org.
   const paraAplicar = scoped.filter(([, f]) => parseFloat(f.mat) > 0);
   const resultados = await Promise.all(
     paraAplicar.map(async ([baseId, fill]) => {
-      const res = await prisma.baseMaterial.updateMany({
-        where: { Id: Number(baseId), OrganizationId: organizationId },
-        data: {
-          CostMaterialInCents: toCentsOrNull(parseFloat(fill.mat)),
-          CostLaborInCents: toCentsOrNull(parseFloat(fill.mo) > 0 ? parseFloat(fill.mo) : 0),
+      const custoMat = toCentsOrNull(parseFloat(fill.mat));
+      const custoMO = toCentsOrNull(parseFloat(fill.mo) > 0 ? parseFloat(fill.mo) : 0);
+      await prisma.enterpriseMaterialCost.upsert({
+        where: {
+          EnterpriseId_BaseMaterialId: { EnterpriseId: enterpriseId, BaseMaterialId: Number(baseId) },
         },
+        create: {
+          EnterpriseId: enterpriseId,
+          BaseMaterialId: Number(baseId),
+          CostMaterialInCents: custoMat,
+          CostLaborInCents: custoMO,
+        },
+        update: { CostMaterialInCents: custoMat, CostLaborInCents: custoMO },
       });
-      return res.count > 0;
+      return true;
     })
   );
   const applied = resultados.filter(Boolean).length;

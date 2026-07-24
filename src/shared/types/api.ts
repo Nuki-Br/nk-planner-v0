@@ -21,6 +21,7 @@ export interface GetParams {
 
 // ─── Portal do terceiro (rota pública /api/portal/[token]) ────────────
 import type {
+  CustosBase,
   FillLinkCampos,
   Material,
   PortalFill,
@@ -40,5 +41,11 @@ export interface PortalData {
   /** Só as tipologias do escopo do link (com ambientes/componentes). */
   tipologias: Tipologia[];
   materiais: Material[];
+  /**
+   * Custo base JÁ preenchido neste empreendimento — semeia os campos do portal.
+   * Vem do empreendimento do link, não do catálogo: o que a construtora desta
+   * obra cotou não vale para as outras obras da incorporadora.
+   */
+  custosBase: CustosBase;
   fills: Record<string, PortalFill>;
 }

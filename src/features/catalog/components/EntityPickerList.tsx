@@ -6,9 +6,9 @@ import { Input as HeroInput } from "@heroui/react";
 import { Icon, MaterialThumb, Pagination, Select } from "@/components/ui";
 import { useCategorias } from "@/lib/hooks/useCategorias";
 import { useDebounce } from "@/lib/hooks/useDebounce";
-import { cn, fmtBRL } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import type { CatalogTipo } from "@/shared/types/catalog";
-import type { CatalogEntity, CategoriaCatalogo, Unidade } from "@/shared/types/domain";
+import type { CatalogEntity, CategoriaCatalogo } from "@/shared/types/domain";
 
 import { CategoryChip } from "./CategoryChip";
 import { KitBadge } from "./KitBadge";
@@ -40,10 +40,6 @@ export interface EntityPickerListProps {
   selectedId?: number | null;
   /** Entrega a ENTIDADE inteira — ver nota em EntityPickerListProps abaixo. */
   onSelect: (entity: CatalogEntity) => void;
-  /** Custo no trilho direito. Falso nas modais (decisão de produto). */
-  showPrice?: boolean;
-  /** Sufixo do custo ("R$ X/m²") — o material não carrega unidade. */
-  unidade?: Unidade;
   pageSize?: number;
   maxHeightClass?: string;
   emptyText?: string;
@@ -59,8 +55,6 @@ interface EntityPickerItemProps {
   categorias: CategoriaCatalogo[];
   selected: boolean;
   mode: "single" | "add";
-  showPrice: boolean;
-  unidade?: Unidade;
   onSelect: (entity: CatalogEntity) => void;
 }
 
@@ -74,8 +68,6 @@ const EntityPickerItem = React.memo(function EntityPickerItem({
   categorias,
   selected,
   mode,
-  showPrice,
-  unidade,
   onSelect,
 }: EntityPickerItemProps) {
   return (
@@ -124,15 +116,6 @@ const EntityPickerItem = React.memo(function EntityPickerItem({
 
       <span className="flex shrink-0 flex-col items-end gap-1">
         <CategoryChip nome={entity.categoria} categorias={categorias} />
-        {showPrice && (
-          <span className="text-xs text-neutral-gray-8">
-            {entity.isKit ? (
-              <span className="text-neutral-gray-5">soma dos itens</span>
-            ) : (
-              `${fmtBRL(entity.custoMat)}${unidade ? `/${unidade}` : ""}`
-            )}
-          </span>
-        )}
       </span>
     </button>
   );
@@ -145,8 +128,6 @@ export function EntityPickerList({
   mode = "single",
   selectedId = null,
   onSelect,
-  showPrice = false,
-  unidade,
   pageSize = CATALOG_PICKER_PAGE_SIZE,
   maxHeightClass = "max-h-[340px]",
   emptyText = "Nenhum item encontrado.",
@@ -240,8 +221,6 @@ export function EntityPickerList({
             categorias={categorias}
             selected={selectedId === e.id}
             mode={mode}
-            showPrice={showPrice}
-            unidade={unidade}
             onSelect={onSelect}
           />
         ))}

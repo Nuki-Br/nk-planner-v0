@@ -23,7 +23,7 @@ publicar, alimenta automaticamente o módulo Personaliza (fase 02).
 ### Jornada
 ```
 CONFIGURAÇÃO  → Config base → Tipologias ⇄ Visualizador (canvas) ; Grupos de unidades ; Catálogo
-CUSTOS        → Revisão de custos (opcional: link p/ terceiro; versionamento) → Orçamento por tipologia
+CUSTOS        → Custos base do empreendimento (opcional: link p/ terceiro) → Preço final por tipologia
 PUBLICAÇÃO    → Publicar → alimenta a fase 02
 ```
 

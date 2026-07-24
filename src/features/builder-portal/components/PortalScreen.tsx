@@ -76,16 +76,17 @@ export function PortalScreen({ token }: { token: string }) {
   }, [error, senha]);
 
   // Inicializa o rascunho quando o payload liberado chega: fills já enviados
-  // sobrepõem os custos do catálogo.
+  // sobrepõem o custo base já preenchido NESTE empreendimento.
   React.useEffect(() => {
     if (costs !== null || !data || data.protegido) return;
     const init: Fills = {};
     for (const tip of data.tipologias) {
       for (const m of tipMateriais(tip, data.materiais)) {
         const key = String(m.id);
+        const base = data.custosBase[m.id];
         init[key] = data.fills[key] ?? {
-          mat: m.custoMat > 0 ? String(m.custoMat) : "",
-          mo: m.custoMO > 0 ? String(m.custoMO) : "",
+          mat: base && base.custoMat > 0 ? String(base.custoMat) : "",
+          mo: base && base.custoMO > 0 ? String(base.custoMO) : "",
           comment: "",
         };
       }
@@ -176,7 +177,7 @@ export function PortalScreen({ token }: { token: string }) {
       onSubmit={(fills) =>
         submitFills.mutate({ fills, nome: nome.trim() }, { onSuccess: () => setSubmitted(true) })
       }
-      onBackToPlatform={() => router.push("/revisao-custos")}
+      onBackToPlatform={() => router.push("/orcamento")}
     />
   );
 }

@@ -166,8 +166,8 @@ export function SendBuilderScreen() {
             <Button variant="teal" icon="link" onPress={() => router.push(`/portal/${link.token}`)}>
               Ver portal da construtora
             </Button>
-            <Button onPress={() => router.push("/revisao-custos")}>
-              Ir para revisão de custos →
+            <Button onPress={() => router.push("/orcamento")}>
+              Ir para os custos base →
             </Button>
           </div>
         </div>

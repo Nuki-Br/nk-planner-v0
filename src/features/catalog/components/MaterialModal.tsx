@@ -54,7 +54,7 @@ export function MaterialModal({ open, onClose, material }: MaterialModalProps) {
     };
     const opts = { onSuccess: onClose };
     if (isEdit) updateMaterial.mutate({ id: material.id, patch: ident }, opts);
-    else createMaterial.mutate({ ...ident, custoMat: 0, custoMO: 0 }, opts);
+    else createMaterial.mutate(ident, opts);
   };
 
   return (

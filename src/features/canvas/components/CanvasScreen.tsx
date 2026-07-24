@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { Button, LoadingState, Modal, StatusBadge } from "@/components/ui";
 import { buildLayout, CV } from "@/lib/canvas/buildLayout";
+import { useCustosBase, toCustosBaseMap } from "@/lib/hooks/useCustosBase";
 import { useKits } from "@/lib/hooks/useKits";
 import { useMateriais } from "@/lib/hooks/useMateriais";
 import {
@@ -97,6 +98,10 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
   const { data: tipologias = [], isLoading: tipsLoading } = useTipologias(projectId);
   const { data: materiais = [], isLoading: matsLoading } = useMateriais();
   const { data: kits = [], isLoading: kitsLoading } = useKits();
+  // A pendência do canvas é a do EMPREENDIMENTO: o mesmo material pode estar
+  // precificado numa obra e pendente noutra.
+  const { data: custoRows } = useCustosBase(projectId);
+  const custosBase = React.useMemo(() => toCustosBaseMap(custoRows), [custoRows]);
 
   const tipParam = Number(tipologiaId);
   const tip = tipologias.find((t) => t.id === tipParam) ?? tipologias[0] ?? null;
@@ -433,13 +438,14 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
               node={n}
               materiais={materiais}
               kits={kits}
+              custosBase={custosBase}
               onToggleKit={toggleKit}
               act={act}
               detailed={detailed}
             />
           ))}
           {layout.subNodes.map((n) => (
-            <SubItemNode key={n.key} node={n} materiais={materiais} />
+            <SubItemNode key={n.key} node={n} materiais={materiais} custosBase={custosBase} />
           ))}
 
           {layout.placeholders.map((p) => (

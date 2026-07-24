@@ -13,7 +13,7 @@ config de materiais, portal do terceiro) são acessadas de dentro de outras, nã
 | 5 | Grupos de unidades | (modal) | modal em `/tipologias` | screens-unitgroups.jsx |
 | 6 | Catálogo de materiais e kits | `materials-catalog` | `/catalogo` | screens-b.jsx |
 | 7 | Config. de materiais por componente | `materials-config` | `/tipologias/[id]/componente/[cid]` | screens-b/c.jsx |
-| 8 | Revisão de custos | `cost-review` | `/revisao-custos` | screens-c.jsx |
+| 8 | ~~Revisão de custos~~ | — | — | **Removida em 2026-07-23** — virou a aba "Custos base" do Construtor de Preço (por empreendimento). Ver `docs/features/pricing.md`. |
 | 9 | Portal do terceiro (link) | `builder-portal` | `/portal/[token]` (sem shell) | screens-c.jsx |
 | 10 | Orçamento por tipologia | `budget-table` | `/orcamento` | screens-budget.jsx, screens-pricing.jsx |
 | 11 | Publicação | `publish` | `/publicacao` | screens-a.jsx |

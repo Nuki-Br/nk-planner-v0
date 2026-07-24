@@ -36,6 +36,12 @@ export const queryKeys = {
   unitGroupsRoot: ["unit-groups"] as const,
   torres: (projectId: number) => ["torres", projectId] as const,
   budgetColumns: (projectId: number) => ["budget-columns", projectId] as const,
+  /** Custo base por empreendimento (aba "Custos base"). */
+  custosBase: (projectId: number) => ["custos-base", projectId] as const,
+  /** Rascunho de precificação (optionId → overrides). */
+  pricing: (projectId: number) => ["pricing", projectId] as const,
+  /** Diff rascunho × publicado — badge de status e modal de publicar. */
+  pricingDiff: (projectId: number) => ["pricing-diff", projectId] as const,
   sharedAmbientes: (projectId: number) => ["shared-ambientes", projectId] as const,
   sharedAmbientesRoot: ["shared-ambientes"] as const,
   versions: (projectId: number) => ["versions", projectId] as const,

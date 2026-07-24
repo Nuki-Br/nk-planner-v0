@@ -111,8 +111,6 @@ async function main(): Promise<void> {
         Name: m.nome,
         Manufacturer: m.fabricante,
         Unit: m.unidade,
-        CostMaterialInCents: toCents(m.custoMat),
-        CostLaborInCents: toCents(m.custoMO),
       },
       select: { Id: true },
     });
@@ -167,6 +165,21 @@ async function main(): Promise<void> {
     enterpriseMap.set(p.id, row.Id);
   }
   const activeId = enterpriseMap.get(seed.projects[0]!.id)!;
+
+  // ── Custo base do empreendimento âncora ──
+  // O catálogo não guarda custo: quem guarda é o empreendimento. Só o âncora é
+  // semeado — os outros projetos ficam pendentes de propósito, que é o estado
+  // real de um empreendimento novo e o que demonstra o escopo por obra.
+  await prisma.enterpriseMaterialCost.createMany({
+    data: Object.values(seed.custosBase)
+      .filter((c) => c.custoMat > 0 || c.custoMO > 0)
+      .map((c) => ({
+        EnterpriseId: activeId,
+        BaseMaterialId: catalogMap.get(c.baseId)!,
+        CostMaterialInCents: toCents(c.custoMat),
+        CostLaborInCents: toCents(c.custoMO),
+      })),
+  });
 
   // ── Colunas de orçamento do empreendimento âncora ──
   const cols = seed.projects[0]!.taxColumns ?? [];
