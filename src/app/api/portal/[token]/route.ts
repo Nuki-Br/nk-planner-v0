@@ -2,13 +2,12 @@ import type { NextRequest } from "next/server";
 
 import { fail, publicRoute } from "@/lib/api/handler";
 import {
-  getEnterpriseCostMap,
   getFillLinkByToken,
   getPortalFills,
   getPortalMaterialIds,
   getProject,
-  listMateriais,
-  listTipologias,
+  listCategorias,
+  listEnterpriseCosts,
 } from "@/lib/server/store";
 import type { PortalData } from "@/shared/types/api";
 
@@ -35,32 +34,28 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
         projectNome: project?.nome ?? "",
         prazo: link.prazo,
         campos: link.campos,
-        tipologias: [],
-        materiais: [],
-        custosBase: {},
+        custoRows: [],
+        categorias: [],
         fills: {},
       };
     }
-    const [tipologias, materiais, fills, scopedIds, custosBase] = await Promise.all([
-      listTipologias(organizationId, enterpriseId),
-      listMateriais(organizationId),
+    // Mesma lista plana e de-duplicada da aba "Custos base" (uma linha por
+    // BaseMaterial no empreendimento), recortada pelo escopo do link.
+    const [custoRows, fills, scopedIds, categorias] = await Promise.all([
+      listEnterpriseCosts(organizationId, enterpriseId),
       getPortalFills(organizationId, enterpriseId),
       getPortalMaterialIds(organizationId, link.tipologiaIds),
-      getEnterpriseCostMap(enterpriseId),
+      listCategorias(organizationId),
     ]);
-    // Escopo do link: só as tipologias liberadas e os BaseMaterials preenchíveis
-    // que elas referenciam (opções + sub-itens de kit) — não expõe o catálogo inteiro.
-    const scopedTipologias = tipologias.filter((t) => link.tipologiaIds.includes(t.id));
+    // Escopo do link: só os BaseMaterials preenchíveis das tipologias liberadas
+    // (opções + sub-itens de kit + itens de custo "fixo") — não expõe o resto.
     return {
       protegido: false,
       projectNome: project?.nome ?? "",
       prazo: link.prazo,
       campos: link.campos,
-      tipologias: scopedTipologias,
-      materiais: materiais.filter((m) => scopedIds.has(m.id)),
-      custosBase: Object.fromEntries(
-        Object.entries(custosBase).filter(([id]) => scopedIds.has(Number(id)))
-      ),
+      custoRows: custoRows.filter((r) => scopedIds.has(r.baseId)),
+      categorias,
       fills: Object.fromEntries(Object.entries(fills).filter(([id]) => scopedIds.has(Number(id)))),
     };
   });

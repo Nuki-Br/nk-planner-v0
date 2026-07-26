@@ -33,3 +33,19 @@ export function parseBR(value: string | number): number {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
   return parseFloat(value.replace(",", ".")) || 0;
 }
+
+/**
+ * Normaliza texto para busca: minúsculas e sem acento ("Porcelanato Ébano" →
+ * "porcelanato ebano"). Usado nas buscas de custo (Custos base / portal).
+ */
+export function norm(s: string): string {
+  return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+/**
+ * Comparador de nomes de categoria em PT-BR; "" (sem categoria) sempre por
+ * último. Usado para ordenar grupos/opções por categoria.
+ */
+export function byCategoria(a: string, b: string): number {
+  return a === "" ? 1 : b === "" ? -1 : a.localeCompare(b, "pt-BR");
+}

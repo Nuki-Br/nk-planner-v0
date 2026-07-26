@@ -45,7 +45,7 @@ export function LinkFillModal({ open, onClose }: { open: boolean; onClose: () =>
   const [campos, setCampos] = React.useState<FillLinkCampos>({ mat: true, mo: true, comment: true });
   const [useSenha, setUseSenha] = React.useState(false);
   const [senha, setSenha] = React.useState("");
-  const [prazo, setPrazo] = React.useState("20/06/2026");
+  const [prazo, setPrazo] = React.useState("");
   const copyTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Volta ao passo 1 (com todas as tipologias marcadas) a cada abertura.
@@ -282,7 +282,7 @@ export function LinkFillModal({ open, onClose }: { open: boolean; onClose: () =>
             <div>
               <p className="text-sm font-bold text-functional-success">Link criado com sucesso!</p>
               <p className="text-[11px] text-functional-success/80">
-                Gerado em {link.criadoEm.replace(" ", " às ")} · válido por 30 dias
+                Gerado em {link.criadoEm.replace(" ", " às ")}
               </p>
             </div>
           </div>

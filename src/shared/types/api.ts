@@ -21,11 +21,10 @@ export interface GetParams {
 
 // ─── Portal do terceiro (rota pública /api/portal/[token]) ────────────
 import type {
-  CustosBase,
+  CategoriaCatalogo,
+  CustoBaseRow,
   FillLinkCampos,
-  Material,
   PortalFill,
-  Tipologia,
 } from "@/shared/types/domain";
 
 /**
@@ -38,14 +37,19 @@ export interface PortalData {
   projectNome: string;
   prazo: string | null;
   campos: FillLinkCampos;
-  /** Só as tipologias do escopo do link (com ambientes/componentes). */
-  tipologias: Tipologia[];
-  materiais: Material[];
   /**
-   * Custo base JÁ preenchido neste empreendimento — semeia os campos do portal.
-   * Vem do empreendimento do link, não do catálogo: o que a construtora desta
-   * obra cotou não vale para as outras obras da incorporadora.
+   * Linhas de custo do escopo do link — a MESMA lista plana e de-duplicada da
+   * aba "Custos base" (`listEnterpriseCosts`), filtrada pelas tipologias do
+   * link. Cada linha já traz identidade, categoria, "onde é usado" e o custo
+   * base JÁ preenchido neste empreendimento (semeia os campos do portal). Vem
+   * do empreendimento do link, não do catálogo: o que a construtora desta obra
+   * cotou não vale para as outras obras da incorporadora.
    */
-  custosBase: CustosBase;
+  custoRows: CustoBaseRow[];
+  /**
+   * Categorias da org (nome → cor) para os chips — o portal é público e não
+   * pode chamar /api/categorias (autenticado), então as cores vêm no payload.
+   */
+  categorias: CategoriaCatalogo[];
   fills: Record<string, PortalFill>;
 }
