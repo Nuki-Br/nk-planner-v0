@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -14,6 +15,20 @@ import { queryKeys } from "./queryKeys";
 
 export function useCategorias() {
   return useQuery({ queryKey: queryKeys.categorias, queryFn: listCategorias });
+}
+
+/**
+ * Materiais e kits guardam a categoria como NOME; o filtro do catálogo é por
+ * id. "" (sem categoria no contexto) = undefined, e nome que não resolve (ou
+ * categorias ainda carregando) também — filtrar por um id inexistente
+ * esvaziaria a lista em vez de mostrar tudo.
+ */
+export function useCategoriaIdByNome(nome: string): number | undefined {
+  const { data: categorias = [] } = useCategorias();
+  return React.useMemo(() => {
+    if (nome === "") return undefined;
+    return categorias.find((c) => c.nome === nome)?.id;
+  }, [nome, categorias]);
 }
 
 export function useCreateCategoria() {

@@ -353,6 +353,7 @@ export interface ComponenteInput {
 type OpcaoBody =
   | { op: "setPadrao"; padraoBaseId: number | null }
   | { op: "addUpgrade"; baseId: number }
+  | { op: "addUpgrades"; baseIds: number[] }
   | { op: "replaceUpgrade"; optionId: number; newBaseId: number }
   | { op: "removeUpgrade"; optionId: number }
   | { op: "setKitQtds"; qtds: Record<number, number> };
@@ -436,6 +437,16 @@ export async function addUpgrade(
   baseId: number
 ): Promise<Componente> {
   return opcao(tipologiaId, ambienteId, componenteId, { op: "addUpgrade", baseId });
+}
+
+/** Adiciona várias opções (upgrades) num único POST, na ordem recebida. */
+export async function addUpgrades(
+  tipologiaId: number,
+  ambienteId: number,
+  componenteId: number,
+  baseIds: number[]
+): Promise<Componente> {
+  return opcao(tipologiaId, ambienteId, componenteId, { op: "addUpgrades", baseIds });
 }
 
 /** Troca o BaseMaterial de uma opção (optionId → newBaseId), preservando a posição. */

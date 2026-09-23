@@ -25,6 +25,8 @@ import { CATALOG_PICKER_PAGE_SIZE, useCatalogEntities } from "../hooks/useCatalo
 // Antes desta extração o mesmo bloco de HeroInput de busca estava copiado
 // verbatim em três arquivos, cada um refiltrando o catálogo inteiro no cliente.
 
+type PickerMode = "single" | "multi" | "add";
+
 export interface EntityPickerListProps {
   /** "all" = materiais + kits; "single" = só materiais; "kit" = só kits. */
   tipo?: CatalogTipo;
@@ -33,11 +35,22 @@ export interface EntityPickerListProps {
    * `undefined` = usuário escolhe; `null` = trava em "sem categoria".
    */
   lockedCategoriaId?: number | null;
+  /**
+   * Categoria sugerida pelo contexto — pré-seleciona o Select, mas o usuário
+   * pode trocá-la ou limpar o filtro. Ignorada quando `lockedCategoriaId` vem.
+   * `undefined` = sem filtro inicial; `null` = começa em "sem categoria".
+   */
+  initialCategoriaId?: number | null;
   /** Ids a esconder (já usados). Vai para o servidor, não filtra depois. */
   excludeIds?: readonly number[];
-  /** "single" = rádio controlado por `selectedId`; "add" = clique já adiciona. */
-  mode?: "single" | "add";
+  /**
+   * "single" = rádio controlado por `selectedId`; "multi" = checkbox controlado
+   * por `selectedIds` (o clique alterna); "add" = clique já adiciona.
+   */
+  mode?: PickerMode;
   selectedId?: number | null;
+  /** Só no modo "multi". */
+  selectedIds?: ReadonlySet<number>;
   /** Entrega a ENTIDADE inteira — ver nota em EntityPickerListProps abaixo. */
   onSelect: (entity: CatalogEntity) => void;
   pageSize?: number;
@@ -54,7 +67,7 @@ interface EntityPickerItemProps {
   entity: CatalogEntity;
   categorias: CategoriaCatalogo[];
   selected: boolean;
-  mode: "single" | "add";
+  mode: PickerMode;
   onSelect: (entity: CatalogEntity) => void;
 }
 
@@ -77,10 +90,19 @@ const EntityPickerItem = React.memo(function EntityPickerItem({
       className={cn(
         "flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left",
         selected ? "border-primary-7 bg-primary-1" : "border-neutral-gray-4 bg-white",
-        mode === "add" && "hover:bg-primary-1"
+        mode !== "single" && "hover:bg-primary-1"
       )}
     >
-      {mode === "single" ? (
+      {mode === "multi" ? (
+        <span
+          className={cn(
+            "flex h-4 w-4 shrink-0 items-center justify-center rounded border-2",
+            selected ? "border-primary-7 bg-primary-7 text-white" : "border-neutral-gray-5"
+          )}
+        >
+          {selected && <Icon name="check" size={11} />}
+        </span>
+      ) : mode === "single" ? (
         <span
           className={cn(
             "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2",
@@ -121,12 +143,20 @@ const EntityPickerItem = React.memo(function EntityPickerItem({
   );
 });
 
+/** Converte um id de categoria no valor do Select ("" = todas; "none" = sem categoria). */
+function toCatFilter(categoriaId: number | null | undefined): string {
+  if (categoriaId === undefined) return "";
+  return categoriaId === null ? "none" : String(categoriaId);
+}
+
 export function EntityPickerList({
   tipo = "all",
   lockedCategoriaId,
+  initialCategoriaId,
   excludeIds,
   mode = "single",
   selectedId = null,
+  selectedIds,
   onSelect,
   pageSize = CATALOG_PICKER_PAGE_SIZE,
   maxHeightClass = "max-h-[340px]",
@@ -135,8 +165,15 @@ export function EntityPickerList({
   const [search, setSearch] = React.useState("");
   const debouncedSearch = useDebounce(search, 500);
   // "" = todas; "none" = sem categoria; caso contrário o id em string.
-  const [catFilter, setCatFilter] = React.useState("");
+  const [catFilter, setCatFilter] = React.useState(() => toCatFilter(initialCategoriaId));
   const [page, setPage] = React.useState(1);
+
+  // A sugestão costuma chegar depois da montagem (o call site resolve nome →
+  // id com as categorias carregadas em paralelo); só re-sincroniza quando ela
+  // muda, então a escolha do usuário no Select é preservada.
+  React.useEffect(() => {
+    setCatFilter(toCatFilter(initialCategoriaId));
+  }, [initialCategoriaId]);
 
   const locked = lockedCategoriaId !== undefined;
   const categoriaId = locked
@@ -219,7 +256,7 @@ export function EntityPickerList({
             key={e.id}
             entity={e}
             categorias={categorias}
-            selected={selectedId === e.id}
+            selected={mode === "multi" ? (selectedIds?.has(e.id) ?? false) : selectedId === e.id}
             mode={mode}
             onSelect={onSelect}
           />

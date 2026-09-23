@@ -1916,9 +1916,28 @@ export async function addUpgrade(
   componenteId: number,
   upgradeBaseId: number
 ): Promise<Componente> {
+  return addUpgrades(organizationId, tipologiaId, blueprintRoomId, componenteId, [upgradeBaseId]);
+}
+
+/**
+ * Adiciona várias opções (upgrades) de uma vez, na ordem recebida (seleção
+ * múltipla do canvas). Sequencial de propósito: a posição de cada opção sai do
+ * MAX(Position) atual, e inserções concorrentes repetiriam a mesma posição.
+ * Não é atômico, mas ensureOption é upsert — repetir após uma falha no meio
+ * só completa o que faltou, sem duplicar.
+ */
+export async function addUpgrades(
+  organizationId: string,
+  tipologiaId: number,
+  blueprintRoomId: number,
+  componenteId: number,
+  upgradeBaseIds: readonly number[]
+): Promise<Componente> {
   await findBlueprintRoomCtx(organizationId, tipologiaId, blueprintRoomId);
   const ctx = await findRoomComponentCtx(organizationId, componenteId);
-  await ensureOption(ctx, upgradeBaseId);
+  for (const baseId of new Set(upgradeBaseIds)) {
+    await ensureOption(ctx, baseId);
+  }
   return reloadComponente(organizationId, blueprintRoomId, componenteId);
 }
 

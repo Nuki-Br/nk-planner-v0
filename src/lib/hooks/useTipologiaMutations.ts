@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   addUpgrade,
+  addUpgrades,
   cloneAmbiente,
   createAmbiente,
   createComponente,
@@ -205,6 +206,12 @@ export function useSetPadrao() {
 export function useAddUpgrade() {
   return useTreeMutation(({ tipologiaId, ambienteId, componenteId, baseId }: CompPath & { baseId: number }) =>
     addUpgrade(tipologiaId, ambienteId, componenteId, baseId)
+  );
+}
+
+export function useAddUpgrades() {
+  return useTreeMutation(({ tipologiaId, ambienteId, componenteId, baseIds }: CompPath & { baseIds: number[] }) =>
+    addUpgrades(tipologiaId, ambienteId, componenteId, baseIds)
   );
 }
 

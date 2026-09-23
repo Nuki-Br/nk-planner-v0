@@ -5,11 +5,12 @@ import { useRouter } from "next/navigation";
 
 import { Button, LoadingState, Modal, StatusBadge } from "@/components/ui";
 import { buildLayout, CV } from "@/lib/canvas/buildLayout";
+import { getOptionEntity } from "@/lib/data/entities";
 import { useCustosBase, toCustosBaseMap } from "@/lib/hooks/useCustosBase";
 import { useKits } from "@/lib/hooks/useKits";
 import { useMateriais } from "@/lib/hooks/useMateriais";
 import {
-  useAddUpgrade,
+  useAddUpgrades,
   useCloneAmbiente,
   useCreateAmbiente,
   useCreateComponente,
@@ -66,6 +67,10 @@ interface MatPickerState {
   subtitle: string;
   /** id de catálogo (baseId) atual, para pré-seleção no picker. */
   currentId: number | null;
+  /** Categoria (nome) do padrão do componente — filtro inicial; "" = sem padrão. */
+  categoria: string;
+  /** Ids de catálogo já usados pelo componente (só ao adicionar — escondidos da lista). */
+  excludeIds: number[];
 }
 
 interface ConfirmState {
@@ -136,7 +141,7 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
   const updateComp = useUpdateComponente();
   const deleteComp = useDeleteComponente();
   const setPadrao = useSetPadrao();
-  const addUpgrade = useAddUpgrade();
+  const addUpgrades = useAddUpgrades();
   const removeUpgrade = useRemoveUpgrade();
   const replaceUpgrade = useReplaceUpgrade();
 
@@ -150,14 +155,18 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
   );
 
   // fitView na montagem e na troca de tipologia (comportamento do protótipo).
+  // Depende SÓ do id: cada mutação (adicionar material, editar componente…)
+  // refaz o fetch e entrega um objeto `tip` novo — depender dele reenquadrava
+  // o canvas a cada edição e jogava fora o zoom/posição do usuário.
   const layoutHeightRef = React.useRef(600);
   if (layout) layoutHeightRef.current = layout.height;
   const fitRef = React.useRef(view.fitView);
   fitRef.current = view.fitView;
+  const tipKey = tip?.id;
   React.useEffect(() => {
-    if (!tip) return;
+    if (tipKey === undefined) return;
     fitRef.current(layoutHeightRef.current);
-  }, [tip?.id, tip]);
+  }, [tipKey]);
 
   if (tipsLoading || matsLoading || kitsLoading)
     return <LoadingState label="Carregando canvas…" />;
@@ -167,6 +176,10 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
   const deleting = deleteAmb.isPending || deleteComp.isPending || deleteTip.isPending;
 
   const iconFor = (amb: Ambiente) => amb.icon ?? guessAmbIcon(amb.nome);
+  const padraoCategoria = (comp: Componente) => {
+    const def = comp.options.find((o) => o.isDefault);
+    return def ? (getOptionEntity(materiais, kits, def)?.categoria ?? "") : "";
+  };
   const toggleKit = (key: string) =>
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -231,6 +244,8 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
         title: isPadrao ? "Material padrão" : "Trocar opção de material",
         subtitle: `${comp.nome} — ${isPadrao ? "material entregue sem custo adicional" : "opção de upgrade"}`,
         currentId: opt?.baseId ?? null,
+        categoria: padraoCategoria(comp),
+        excludeIds: [],
       });
     },
     addOption: (ambId, comp) =>
@@ -239,9 +254,11 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
         compId: comp.id,
         which: null,
         isPadrao: false,
-        title: "Adicionar opção de material",
-        subtitle: `${comp.nome} — nova opção de upgrade`,
+        title: "Adicionar opções de material",
+        subtitle: `${comp.nome} — selecione uma ou mais opções de upgrade`,
         currentId: null,
+        categoria: padraoCategoria(comp),
+        excludeIds: comp.options.map((o) => o.baseId),
       }),
     deleteOption: (ambId, comp, optId, isPadrao) => {
       const path = { tipologiaId: tipId, ambienteId: ambId, componenteId: comp.id };
@@ -252,8 +269,9 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
     },
   };
 
-  const confirmMatPicker = (matId: number) => {
-    if (!matPicker) return;
+  const confirmMatPicker = (ids: number[]) => {
+    const [matId] = ids;
+    if (!matPicker || matId === undefined) return;
     const path = {
       tipologiaId: tipId,
       ambienteId: matPicker.ambId,
@@ -265,7 +283,7 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
     };
     setPickerBusy(true);
     if (matPicker.isPadrao) setPadrao.mutate({ ...path, padraoBaseId: matId }, close);
-    else if (matPicker.which === null) addUpgrade.mutate({ ...path, baseId: matId }, close);
+    else if (matPicker.which === null) addUpgrades.mutate({ ...path, baseIds: ids }, close);
     else replaceUpgrade.mutate({ ...path, optionId: matPicker.which, newBaseId: matId }, close);
   };
 
@@ -481,6 +499,9 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
         title={matPicker?.title}
         subtitle={matPicker?.subtitle}
         currentId={matPicker?.currentId ?? null}
+        categoria={matPicker?.categoria ?? ""}
+        multiple={matPicker !== null && !matPicker.isPadrao && matPicker.which === null}
+        excludeIds={matPicker?.excludeIds}
         onClose={() => setMatPicker(null)}
         onConfirm={confirmMatPicker}
         confirming={pickerBusy}

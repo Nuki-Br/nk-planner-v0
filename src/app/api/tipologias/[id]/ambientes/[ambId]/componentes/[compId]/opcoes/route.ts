@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import { fail, toInt, withOrg } from "@/lib/api/handler";
 import {
   addUpgrade,
+  addUpgrades,
   removeUpgrade,
   replaceUpgrade,
   setKitQtds,
@@ -15,12 +16,13 @@ interface Params {
 
 /**
  * Operações sobre a paleta do componente (payload discriminado). Ids em `number`:
- * setPadrao/addUpgrade recebem um BaseMaterial (catálogo); replace/remove recebem
+ * setPadrao/addUpgrade(s) recebem BaseMaterial (catálogo); replace/remove recebem
  * o id da linha de opção (Material); setKitQtds mapeia KitItem id → quantitativo.
  */
 type OpcaoBody =
   | { op: "setPadrao"; padraoBaseId: number | null }
   | { op: "addUpgrade"; baseId: number }
+  | { op: "addUpgrades"; baseIds: number[] }
   | { op: "replaceUpgrade"; optionId: number; newBaseId: number }
   | { op: "removeUpgrade"; optionId: number }
   | { op: "setKitQtds"; qtds: Record<number, number> };
@@ -33,6 +35,14 @@ export async function POST(req: NextRequest, { params }: Params) {
       return withOrg((org) => setPadrao(org, toInt(id), toInt(ambId), toInt(compId), body.padraoBaseId));
     case "addUpgrade":
       return withOrg((org) => addUpgrade(org, toInt(id), toInt(ambId), toInt(compId), body.baseId));
+    case "addUpgrades":
+      if (
+        !Array.isArray(body.baseIds) ||
+        body.baseIds.length === 0 ||
+        !body.baseIds.every((b) => Number.isInteger(b))
+      )
+        return fail("Parâmetro inválido: baseIds.", 400);
+      return withOrg((org) => addUpgrades(org, toInt(id), toInt(ambId), toInt(compId), body.baseIds));
     case "replaceUpgrade":
       return withOrg((org) =>
         replaceUpgrade(org, toInt(id), toInt(ambId), toInt(compId), body.optionId, body.newBaseId)

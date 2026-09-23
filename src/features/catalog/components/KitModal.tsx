@@ -4,7 +4,7 @@ import React from "react";
 
 import { Button, Icon, Input, Modal, Select } from "@/components/ui";
 import { getMaterial } from "@/lib/data/entities";
-import { useCategorias } from "@/lib/hooks/useCategorias";
+import { useCategoriaIdByNome, useCategorias } from "@/lib/hooks/useCategorias";
 import { useCreateKit, useUpdateKit } from "@/lib/hooks/useKits";
 import { UNIDADE_OPTIONS, type Unidade } from "@/shared/constants/unidades";
 import type { CatalogEntity, Kit, KitItem, Material } from "@/shared/types/domain";
@@ -80,12 +80,9 @@ export function KitModal({ open, onClose, kit, materiais }: KitModalProps) {
     addItem(e);
   }, []);
 
-  // A categoria do kit trava o picker, mas ela é um NOME e o filtro é por id.
-  // Categoria não escolhida ainda (ou nome que não resolve) → sem trava.
-  const lockedCategoriaId = React.useMemo(() => {
-    if (categoria === "") return undefined;
-    return categorias.find((c) => c.nome === categoria)?.id;
-  }, [categoria, categorias]);
+  // A categoria do kit trava o picker. Categoria não escolhida ainda (ou nome
+  // que não resolve) → sem trava.
+  const lockedCategoriaId = useCategoriaIdByNome(categoria);
 
   const excludeIds = React.useMemo(() => itens.map((it) => it.materialId), [itens]);
 

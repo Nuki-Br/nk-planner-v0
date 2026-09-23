@@ -4,7 +4,7 @@ import React from "react";
 
 import { Button, Modal } from "@/components/ui";
 import { getMaterial } from "@/lib/data/entities";
-import { useCategorias } from "@/lib/hooks/useCategorias";
+import { useCategoriaIdByNome } from "@/lib/hooks/useCategorias";
 import { parseBR } from "@/lib/utils";
 import { EntityPickerList } from "@/features/catalog/components/EntityPickerList";
 import { KitBadge } from "@/features/catalog/components/KitBadge";
@@ -66,14 +66,10 @@ export function SelectEntityModal({
     setQtds({});
   }, [open]);
 
-  const { data: categorias = [] } = useCategorias();
-  // O prop chega como NOME e o picker filtra por id. categoria "" (componente
-  // sem padrão) = sem filtro, e nome que não resolve também cai em undefined —
-  // travar num id inexistente esvaziaria a lista em vez de mostrar tudo.
-  const lockedCategoriaId = React.useMemo(() => {
-    if (categoria === "") return undefined;
-    return categorias.find((c) => c.nome === categoria)?.id;
-  }, [categoria, categorias]);
+  // categoria "" (componente sem padrão) = sem filtro. É só o filtro INICIAL:
+  // o padrão pode estar numa categoria à parte (ex.: "Não entregue") e os
+  // upgrades noutra, então o usuário pode trocá-lo.
+  const initialCategoriaId = useCategoriaIdByNome(categoria);
 
   // O picker recebe array; o call site já tem um Set.
   const excludeIdList = React.useMemo(() => [...excludeIds], [excludeIds]);
@@ -153,19 +149,19 @@ export function SelectEntityModal({
               <>Materiais e kits do catálogo. Kits aparecem com o selo Kit.</>
             ) : (
               <>
-                Materiais e kits da categoria <strong>{categoria}</strong>. Kits aparecem com o
-                selo Kit.
+                Filtrado pela categoria <strong>{categoria}</strong> do material padrão — troque o
+                filtro para ver outras categorias. Kits aparecem com o selo Kit.
               </>
             )}
           </p>
           <EntityPickerList
             tipo="all"
-            lockedCategoriaId={lockedCategoriaId}
+            initialCategoriaId={initialCategoriaId}
             excludeIds={excludeIdList}
             mode="single"
             selectedId={picked}
             onSelect={setPickedEntity}
-            emptyText="Nenhum item encontrado nesta categoria."
+            emptyText="Nenhum item encontrado com esses filtros."
           />
         </>
       )}
