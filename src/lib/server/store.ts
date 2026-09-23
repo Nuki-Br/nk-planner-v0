@@ -96,6 +96,17 @@ function toCentsOrNull(reais: number): number | null {
   return reais > 0 ? Math.round(reais * 100) : null;
 }
 
+/**
+ * Custo de MATERIAL do empreendimento, onde NULL e 0 são coisas diferentes:
+ * NULL = pendente (nunca preenchido), 0 = "sem custo" marcado de propósito.
+ */
+function materialCostFromCents(cents: number | null | undefined): number | null {
+  return cents == null ? null : cents / 100;
+}
+function materialCostToCents(reais: number | null): number | null {
+  return reais == null ? null : Math.round(reais * 100);
+}
+
 /** Nome de arquivo derivado de uma URL de imagem (o schema guarda só a URL). */
 function imageName(url: string): string {
   const seg = (url.split("?")[0] ?? "").split("/").pop() ?? "";
@@ -895,7 +906,7 @@ export async function listEnterpriseCosts(
     const cost = costByBase.get(bm.Id);
     rows.set(bm.Id, {
       baseId: bm.Id,
-      custoMat: fromCents(cost?.CostMaterialInCents),
+      custoMat: materialCostFromCents(cost?.CostMaterialInCents),
       custoMO: fromCents(cost?.CostLaborInCents),
       nome: bm.Name,
       fabricante: bm.Manufacturer ?? "",
@@ -924,8 +935,8 @@ export async function listEnterpriseCosts(
 
   // Pendentes primeiro (é o que o usuário veio resolver), depois por nome.
   return [...rows.values()].sort((a, b) => {
-    const pa = a.custoMat <= 0 ? 0 : 1;
-    const pb = b.custoMat <= 0 ? 0 : 1;
+    const pa = a.custoMat === null ? 0 : 1;
+    const pb = b.custoMat === null ? 0 : 1;
     return pa !== pb ? pa - pb : a.nome.localeCompare(b.nome, "pt-BR");
   });
 }
@@ -937,7 +948,7 @@ export async function getEnterpriseCostMap(projectId: number): Promise<CustosBas
   for (const r of rows) {
     out[r.BaseMaterialId] = {
       baseId: r.BaseMaterialId,
-      custoMat: fromCents(r.CostMaterialInCents),
+      custoMat: materialCostFromCents(r.CostMaterialInCents),
       custoMO: fromCents(r.CostLaborInCents),
     };
   }
@@ -965,7 +976,9 @@ export async function upsertEnterpriseCost(
   if (!bm) throw new Error("Material não encontrado.");
 
   const data = {
-    ...(patch.custoMat !== undefined ? { CostMaterialInCents: toCentsOrNull(patch.custoMat) } : {}),
+    ...(patch.custoMat !== undefined
+      ? { CostMaterialInCents: materialCostToCents(patch.custoMat) }
+      : {}),
     ...(patch.custoMO !== undefined ? { CostLaborInCents: toCentsOrNull(patch.custoMO) } : {}),
   };
   const row = await prisma.enterpriseMaterialCost.upsert({
@@ -975,7 +988,7 @@ export async function upsertEnterpriseCost(
   });
   return {
     baseId: row.BaseMaterialId,
-    custoMat: fromCents(row.CostMaterialInCents),
+    custoMat: materialCostFromCents(row.CostMaterialInCents),
     custoMO: fromCents(row.CostLaborInCents),
   };
 }
@@ -2860,6 +2873,15 @@ async function syncConstrutoraComments(
   if (toCreate.length > 0) await prisma.comment.createMany({ data: toCreate });
 }
 
+/** BaseMaterials marcados "sem custo" (custo de material 0, não NULL) no empreendimento. */
+async function semCustoBaseIds(enterpriseId: number): Promise<Set<number>> {
+  const rows = await prisma.enterpriseMaterialCost.findMany({
+    where: { EnterpriseId: enterpriseId, CostMaterialInCents: 0 },
+    select: { BaseMaterialId: true },
+  });
+  return new Set(rows.map((r) => r.BaseMaterialId));
+}
+
 /**
  * "Enviar preenchimento" do portal: grava os fills, aplica os custos ao CUSTO
  * BASE DO EMPREENDIMENTO e move o empreendimento para "em_revisao". A pendência
@@ -2878,8 +2900,13 @@ export async function submitPortalFills(
 ): Promise<number> {
   const enterpriseId = projectId;
 
-  // Escopo do link: descarta fills fora das plantas liberadas.
-  const scoped = Object.entries(fills).filter(([baseId]) => allowedBaseMaterialIds.has(Number(baseId)));
+  // Escopo do link: descarta fills fora das plantas liberadas e os materiais
+  // marcados "sem custo" — o portal nem os mostra, e um envio (ou um rascunho
+  // antigo) não pode sobrescrever a decisão da incorporadora.
+  const semCusto = await semCustoBaseIds(enterpriseId);
+  const scoped = Object.entries(fills).filter(
+    ([baseId]) => allowedBaseMaterialIds.has(Number(baseId)) && !semCusto.has(Number(baseId))
+  );
 
   await prisma.$transaction([
     prisma.portalFill.deleteMany({ where: { EnterpriseId: enterpriseId } }),

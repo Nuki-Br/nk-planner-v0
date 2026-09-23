@@ -15,7 +15,7 @@ import {
   StatusBadge,
 } from "@/components/ui";
 import { MaterialImageModal } from "@/features/catalog";
-import { custoBaseOf, isBasePending } from "@/features/budget/resolve";
+import { baseCostStatus, custoBaseOf } from "@/features/budget/resolve";
 import { getMaterial, getOptionEntity } from "@/lib/data/entities";
 import { useCustosBase, toCustosBaseMap } from "@/lib/hooks/useCustosBase";
 import { useKits } from "@/lib/hooks/useKits";
@@ -266,7 +266,7 @@ export function MaterialsConfigScreen({
                 </p>
               )}
             </div>
-            <StatusBadge status={isBasePending(custosBase, padrao.id) ? "pendente" : "preenchido"} />
+            <StatusBadge status={baseCostStatus(custosBase, padrao.id)} />
           </div>
         )}
         {padrao && padrao.isKit && (
@@ -431,6 +431,8 @@ export function MaterialsConfigScreen({
                     <td className="px-3 py-2.5 text-[13px] font-semibold text-neutral-gray-11">
                       {(custosBase[ent.id]?.custoMat ?? 0) > 0 ? (
                         fmtBRL(custosBase[ent.id]?.custoMat ?? 0)
+                      ) : custosBase[ent.id]?.custoMat === 0 ? (
+                        fmtBRL(0)
                       ) : (
                         <span className="font-normal text-neutral-gray-5">Aguardando</span>
                       )}
@@ -444,7 +446,7 @@ export function MaterialsConfigScreen({
                     </td>
                     <td className="px-3 py-2.5">
                       <StatusBadge
-                        status={isBasePending(custosBase, ent.id) ? "pendente" : "preenchido"}
+                        status={baseCostStatus(custosBase, ent.id)}
                       />
                     </td>
                     <td className="px-3 py-2.5">

@@ -272,7 +272,7 @@ export function calcBudgetRow(
   const creditoItem = usaDebitoCredito ? valUnPad * pad.qtd : 0;
   const debitoTotal = debitoItem + sumLines(satUpg);
   const creditoTotal = creditoItem + sumLines(satPad);
-  const custoDeTroca = debitoTotal - creditoTotal;
+  const custoDeTroca = trocaNaoNegativa(debitoTotal, creditoTotal);
 
   const scope = baseScope({ custoDeTroca, debitoTotal, creditoTotal, qtdComRT });
   const { colResults, sumFree } = runColumns(scope, cols, rowOverrides);
@@ -290,7 +290,7 @@ export function calcBudgetRow(
     satellitePending: satellites.some((s) => s.pending),
     colResults,
     sumFree,
-    total: custoDeTroca + sumFree,
+    total: precoNaoNegativo(custoDeTroca, sumFree),
   };
 }
 
@@ -336,7 +336,7 @@ export function calcKitRow(
   const creditoItem = usaDebitoCredito && pad ? valUnPad * pad.qtd : 0;
   const debitoTotal = debitoItem + sumLines(satUpg);
   const creditoTotal = creditoItem + sumLines(satPad);
-  const custoDeTroca = debitoTotal - creditoTotal;
+  const custoDeTroca = trocaNaoNegativa(debitoTotal, creditoTotal);
 
   const scope = baseScope({ custoDeTroca, debitoTotal, creditoTotal, qtdComRT });
   const { colResults, sumFree } = runColumns(scope, cols, rowOverrides);
@@ -356,8 +356,26 @@ export function calcKitRow(
     custoDeTroca,
     colResults,
     sumFree,
-    total: custoDeTroca + sumFree,
+    total: precoNaoNegativo(custoDeTroca, sumFree),
   };
+}
+
+/**
+ * Upgrade nunca sai mais barato que o padrão: o crédito abate no máximo o
+ * débito. Sem isso, um upgrade de custo menor (ou "sem custo") que o padrão
+ * viraria preço negativo — dinheiro devolvido ao cliente —, e as colunas
+ * percentuais sobre `custo_troca` também sairiam negativas.
+ */
+function trocaNaoNegativa(debitoTotal: number, creditoTotal: number): number {
+  return Math.max(0, debitoTotal - creditoTotal);
+}
+
+/**
+ * Trava final do preço em zero: cobre colunas livres cuja fórmula não parte de
+ * `custo_troca` (ex.: `= debito - credito`) e poderiam negativar a linha.
+ */
+function precoNaoNegativo(custoDeTroca: number, sumFree: number): number {
+  return Math.max(0, custoDeTroca + sumFree);
 }
 
 /**

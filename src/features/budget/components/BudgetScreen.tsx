@@ -56,6 +56,7 @@ import {
   isOptionOwnPending,
   isOptionPending,
   padraoSatellites,
+  padroesPendentes,
   pendingCostItems,
   pricingOf,
   qtdOf,
@@ -588,7 +589,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
       [baseId]:
         p[baseId] ??
         {
-          mat: c && c.custoMat > 0 ? String(c.custoMat) : "",
+          mat: c && (c.custoMat ?? 0) > 0 ? String(c.custoMat) : "",
           mo: c && c.custoMO > 0 ? String(c.custoMO) : "",
         },
     }));
@@ -619,6 +620,13 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
     closeFill(rowKey);
     persistBaseCost(baseId, d.mat, d.mo);
   };
+  /**
+   * "Sem custo" — ex.: padrão "Não entregue". Zero DECIDIDO (não pendente): o
+   * crédito do padrão fica 0 e o material some do portal do terceiro. Desfaz
+   * na aba "Custos base".
+   */
+  const markSemCusto = (baseId: number) =>
+    saveCustoBase.mutate({ baseId, custoMat: 0, custoMO: 0 });
 
   // Guarda os COLAPSADOS (não os expandidos) para que o default seja expandido.
   // Três namespaces de chave: rowKey(opção) para kit e material, `pad-<compId>`
@@ -692,6 +700,9 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
     setShowPublishModal(false);
     publishBudget.reset();
   };
+  // Padrões pendentes creditam zero — os upgrades sairiam sem o desconto do
+  // padrão. Só calcula com o modal aberto (varre todas as tipologias).
+  const padroesSemCusto = showPublishModal ? padroesPendentes(deps, tipologias) : [];
   const publishError =
     publishGateError === "failed"
       ? "uma alteração da tabela não foi salva — confira os valores e tente de novo"
@@ -1114,13 +1125,23 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                                     )}
                                   </div>
                                   {ownPending && !inlineFill && !(filling && fillMode === "expandRow") && (
-                                    <button
-                                      type="button"
-                                      onClick={() => openFill(rk, def.baseId)}
-                                      className="mt-1.5 inline-flex items-center gap-[5px] rounded-full border border-primary-7 bg-white px-2.5 py-1 text-[11px] font-bold text-primary-7"
-                                    >
-                                      <Icon name="plus" size={12} /> Preencher custo base
-                                    </button>
+                                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => openFill(rk, def.baseId)}
+                                        className="inline-flex items-center gap-[5px] rounded-full border border-primary-7 bg-white px-2.5 py-1 text-[11px] font-bold text-primary-7"
+                                      >
+                                        <Icon name="plus" size={12} /> Preencher custo base
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => markSemCusto(def.baseId)}
+                                        title="Nada é entregue no padrão (ex.: “Não entregue”): o crédito fica zero e o upgrade sai pelo valor cheio."
+                                        className="inline-flex items-center rounded-full border border-neutral-gray-5 bg-white px-2.5 py-1 text-[11px] font-bold text-neutral-gray-8 hover:border-neutral-gray-6"
+                                      >
+                                        Sem custo
+                                      </button>
+                                    </div>
                                   )}
                                 </div>
                                 {ownPending && (
@@ -1990,6 +2011,32 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
             disso não muda mais o que foi publicado, até a próxima publicação.
           </p>
           <PublishDiffList diff={diff} />
+          {padroesSemCusto.length > 0 && (
+            <div className="flex items-start gap-2 rounded-lg border border-functional-warning/40 bg-functional-warning-light px-3 py-2.5">
+              <Icon name="warning" size={13} className="mt-0.5 shrink-0 text-tint-orange-fg" />
+              <div className="text-[12px] text-neutral-gray-9">
+                <p>
+                  <strong>
+                    {padroesSemCusto.length}{" "}
+                    {padroesSemCusto.length === 1
+                      ? "componente com material padrão pendente"
+                      : "componentes com material padrão pendente"}
+                  </strong>{" "}
+                  — os upgrades serão publicados sem o crédito do padrão.
+                </p>
+                <p className="mt-1 text-neutral-gray-7">
+                  {padroesSemCusto
+                    .slice(0, 4)
+                    .map((p) => `${p.ambiente} · ${p.componente}`)
+                    .join(", ")}
+                  {padroesSemCusto.length > 4 && ` +${padroesSemCusto.length - 4}`}
+                </p>
+                <p className="mt-1 text-neutral-gray-7">
+                  Se nada é entregue no padrão, marque-o como “Sem custo” na aba Custos base.
+                </p>
+              </div>
+            </div>
+          )}
           <Textarea
             label="Resumo das alterações *"
             value={publishSummary}

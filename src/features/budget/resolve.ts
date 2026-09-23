@@ -39,20 +39,30 @@ export interface ResolveDeps {
   pricings: PricingMap;
 }
 
-/** Custo base efetivo de um BaseMaterial (material + mão de obra). 0 = pendente. */
+/** Custo base efetivo de um BaseMaterial (material + mão de obra). Pendente conta 0. */
 export function custoBaseOf(custosBase: CustosBase, baseId: number): number {
   const c = custosBase[baseId];
-  return c ? c.custoMat + c.custoMO : 0;
+  return c ? (c.custoMat ?? 0) + c.custoMO : 0;
 }
 
 /**
- * "Pendente" é a AUSÊNCIA de custo de material, não do total: um item com mão de
- * obra preenchida e material zerado segue pendente (mesmo critério de antes,
- * quando a regra era `custoMat <= 0` no catálogo).
+ * "Pendente" é a AUSÊNCIA de custo de material (nunca preenchido), não do total:
+ * um item com mão de obra preenchida e material vazio segue pendente. O "sem
+ * custo" marcado (custoMat 0) NÃO é pendente — é um zero decidido.
  */
 export function isBasePending(custosBase: CustosBase, baseId: number): boolean {
   const c = custosBase[baseId];
-  return !c || c.custoMat <= 0;
+  return !c || c.custoMat === null;
+}
+
+/** Status do custo base para os selos: pendente, sem custo (0 marcado) ou preenchido. */
+export function baseCostStatus(
+  custosBase: CustosBase,
+  baseId: number
+): "pendente" | "sem_custo" | "preenchido" {
+  const mat = custosBase[baseId]?.custoMat ?? null;
+  if (mat === null) return "pendente";
+  return mat === 0 ? "sem_custo" : "preenchido";
 }
 
 /** Rascunho de uma aplicação — nunca undefined, para o chamador não ramificar. */

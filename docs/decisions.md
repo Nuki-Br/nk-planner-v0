@@ -44,6 +44,18 @@ Split de responsabilidades entre catálogo, custo e preço. Regras completas em
 | **Publicar × concluir** | Continuam sendo **marcos separados**: "Publicar orçamento" (Construtor de Preço) congela preços e pode acontecer N vezes; "Concluir planejamento" (tela de Publicação) marca o empreendimento como `publicado` e avisa a Nuki. |
 | **Onde o diff é calculado** | **No servidor** (`lib/server/pricing.ts`), percorrendo o mesmo resolvedor que a publicação usa — o que o modal promete é o que o publish grava. |
 
+## Decisões travadas (Material sem custo, 2026-09-23)
+Caso motivador: padrão "Não entregue" — nada é entregue no padrão, mas há upgrades.
+
+| Tema | Decisão |
+|------|---------|
+| **Três estados do custo** | `EnterpriseMaterialCost.CostMaterialInCents`: **NULL = pendente** (nunca preenchido), **0 = "sem custo"** (zero decidido), **> 0 = com custo**. No domínio, `CustoBase.custoMat: number \| null`. Só "pendente" trava opções/upgrades. |
+| **Onde marcar** | **Por empreendimento**, na aba "Custos base" (e no atalho da linha de padrão em "Preço final"). Sem flag no catálogo. |
+| **Como marcar** | **Ação explícita "Sem custo"** — digitar 0 ou limpar o campo volta a *pendente*, para um zero acidental não virar material grátis. "Desfazer" volta a pendente. Linha com custo real não oferece a ação (limpar antes). |
+| **Padrão pendente** | O motor credita um padrão pendente como zero; como agora existe "sem custo", isso é tratado como esquecimento: **aviso** (não bloqueio) no modal "Publicar orçamento" e no checklist da Publicação. Sem débito/crédito, não avisa. |
+| **Preço negativo** | **Travado em zero**: `custo_troca = max(0, débito − crédito)` e o total da linha também nunca fica negativo. Vale para qualquer upgrade mais barato que o padrão, não só os "sem custo". |
+| **Portal do terceiro** | Materiais "sem custo" **somem** do portal e o envio do terceiro os ignora (não sobrescreve a decisão). |
+
 ## Questões em aberto (do módulo doc §7 — resolver quando pesarem)
 | # | Questão | Impacto | Resolver em |
 |---|---------|---------|-------------|

@@ -56,7 +56,7 @@ export function PortalScreen({ token }: { token: string }) {
     for (const row of data.custoRows) {
       const key = String(row.baseId);
       init[key] = data.fills[key] ?? {
-        mat: row.custoMat > 0 ? String(row.custoMat) : "",
+        mat: (row.custoMat ?? 0) > 0 ? String(row.custoMat) : "",
         mo: row.custoMO > 0 ? String(row.custoMO) : "",
         comment: "",
       };

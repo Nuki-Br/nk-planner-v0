@@ -49,14 +49,18 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
     ]);
     // Escopo do link: só os BaseMaterials preenchíveis das tipologias liberadas
     // (opções + sub-itens de kit + itens de custo "fixo") — não expõe o resto.
+    // Os marcados "sem custo" (ex.: padrão "Não entregue") também saem: não há
+    // o que o terceiro cotar, e o envio os ignora (submitPortalFills).
+    const visiveis = custoRows.filter((r) => scopedIds.has(r.baseId) && r.custoMat !== 0);
+    const visiveisIds = new Set(visiveis.map((r) => String(r.baseId)));
     return {
       protegido: false,
       projectNome: project?.nome ?? "",
       prazo: link.prazo,
       campos: link.campos,
-      custoRows: custoRows.filter((r) => scopedIds.has(r.baseId)),
+      custoRows: visiveis,
       categorias,
-      fills: Object.fromEntries(Object.entries(fills).filter(([id]) => scopedIds.has(Number(id)))),
+      fills: Object.fromEntries(Object.entries(fills).filter(([id]) => visiveisIds.has(id))),
     };
   });
 }

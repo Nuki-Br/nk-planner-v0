@@ -172,11 +172,11 @@ async function main(): Promise<void> {
   // real de um empreendimento novo e o que demonstra o escopo por obra.
   await prisma.enterpriseMaterialCost.createMany({
     data: Object.values(seed.custosBase)
-      .filter((c) => c.custoMat > 0 || c.custoMO > 0)
+      .filter((c) => c.custoMat !== null || c.custoMO > 0)
       .map((c) => ({
         EnterpriseId: activeId,
         BaseMaterialId: catalogMap.get(c.baseId)!,
-        CostMaterialInCents: toCents(c.custoMat),
+        CostMaterialInCents: c.custoMat === null ? null : toCents(c.custoMat),
         CostLaborInCents: toCents(c.custoMO),
       })),
   });

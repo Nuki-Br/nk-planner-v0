@@ -10,6 +10,7 @@ export type StatusKey =
   | "incompleta"
   | "preenchido"
   | "pendente"
+  | "sem_custo"
   | "com_comentario"
   | "variacao_alta";
 
@@ -42,6 +43,7 @@ export const STATUS_CFG: Record<StatusKey, StatusConfig> = {
     className: "bg-functional-success-light text-functional-success",
   },
   pendente: { label: "Pendente", className: "bg-neutral-gray-4 text-neutral-gray-7" },
+  sem_custo: { label: "Sem custo", className: "bg-primary-1 text-primary-7" },
   com_comentario: {
     label: "Com comentário",
     className: "bg-tint-amber-bg text-tint-amber-fg",

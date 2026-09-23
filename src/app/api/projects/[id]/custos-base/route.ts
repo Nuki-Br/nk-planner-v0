@@ -10,9 +10,13 @@ interface Params {
 /** Corpo do PATCH — um material por vez (a grade grava no blur de cada campo). */
 interface CustoBaseBody {
   baseId: number;
-  custoMat?: number;
+  /** `null` = volta a pendente; `0` = "sem custo" (ver CustoBase.custoMat). */
+  custoMat?: number | null;
   custoMO?: number;
 }
+
+const isCusto = (x: unknown): x is number =>
+  typeof x === "number" && Number.isFinite(x) && x >= 0;
 
 // `custoMat`/`custoMO` são opcionais de propósito: a UI grava um campo por vez,
 // e mandar o outro como 0 apagaria o valor já preenchido.
@@ -20,9 +24,8 @@ function isCustoBaseBody(v: unknown): v is CustoBaseBody {
   if (typeof v !== "object" || v === null) return false;
   const b = v as Record<string, unknown>;
   if (!Number.isInteger(b.baseId)) return false;
-  for (const k of ["custoMat", "custoMO"] as const) {
-    if (b[k] !== undefined && (typeof b[k] !== "number" || !Number.isFinite(b[k]))) return false;
-  }
+  if (b.custoMat !== undefined && b.custoMat !== null && !isCusto(b.custoMat)) return false;
+  if (b.custoMO !== undefined && !isCusto(b.custoMO)) return false;
   return true;
 }
 

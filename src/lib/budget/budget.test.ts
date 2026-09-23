@@ -29,7 +29,7 @@ function mat(codigo: string): Material {
 /** Custo base do material no empreendimento do seed (material + mão de obra). */
 function custo(m: Material): number {
   const c = seed.custosBase[m.id];
-  return c ? c.custoMat + c.custoMO : 0;
+  return c ? (c.custoMat ?? 0) + c.custoMO : 0;
 }
 
 /**
@@ -40,7 +40,7 @@ function custo(m: Material): number {
 function side(m: Material | undefined, qtd: number, rt = 0): RowSide | null {
   if (!m) return null;
   const c = seed.custosBase[m.id];
-  return { valUn: custo(m), qtd, rt, pending: !c || c.custoMat <= 0 };
+  return { valUn: custo(m), qtd, rt, pending: !c || c.custoMat === null };
 }
 
 /** PricedEntity a partir de um material do seed (custo do empreendimento). */
@@ -223,6 +223,31 @@ describe("calcBudgetRow (material)", () => {
     expect(nicho.padrao).toBeNull();
     expect(padraoSide(nicho)).toBeNull();
     expect(calcBudgetRow(side(piso002, 1)!, padraoSide(nicho), nicho, new Map(), cols, null, null)).toBeNull();
+  });
+
+  // T-M7 — upgrade mais barato que o padrão: o crédito abate no máximo o débito
+  it("T-M7: custo de troca e preço travam em zero (nunca negativos)", () => {
+    // Invertido: "upgrade" piso-001 (84.5) sobre "padrão" piso-002 (120).
+    const r = mustCalc(calcBudgetRow(side(piso001, 18.4)!, side(piso002, 18.4), plain(), new Map(), cols, null, null));
+    expect(r.debitoTotal).toBeCloseTo(1554.8, 10);
+    expect(r.creditoTotal).toBeCloseTo(2208, 10);
+    expect(r.custoDeTroca).toBe(0); // seria −653,20
+    expect(col(r, 1).value).toBe(0); // custo_troca * 8% acompanha a trava
+    expect(r.total).toBeGreaterThanOrEqual(0);
+
+    // Coluna livre que não parte de custo_troca não fura a trava final.
+    const colsNeg: BudgetColumn[] = [{ id: 401, nome: "Dif", expr: "=debito - credito", visivel: true }];
+    const n = mustCalc(calcBudgetRow(side(piso001, 18.4)!, side(piso002, 18.4), plain(), new Map(), colsNeg, null, null));
+    expect(col(n, 401).value).toBeCloseTo(-653.2, 10);
+    expect(n.total).toBe(0);
+  });
+
+  // T-M8 — padrão "sem custo" (ex.: "Não entregue"): crédito zero, upgrade cheio
+  it("T-M8: padrão sem custo credita zero e o upgrade sai pelo débito", () => {
+    const naoEntregue: RowSide = { valUn: 0, qtd: 18.4, rt: 0, pending: false };
+    const r = mustCalc(calcBudgetRow(side(piso002, 18.4, 15)!, naoEntregue, plain(), new Map(), cols, null, null));
+    expect(r.creditoTotal).toBe(0);
+    expect(r.custoDeTroca).toBeCloseTo(r.debitoTotal, 10);
   });
 });
 

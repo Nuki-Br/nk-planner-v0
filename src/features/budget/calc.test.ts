@@ -11,6 +11,7 @@ import {
   calcAnyRow,
   isOptionOwnPending,
   isOptionPending,
+  padroesPendentes,
   pendingCostItems,
   qtdOf,
   unidadeOf,
@@ -29,7 +30,7 @@ const deps = (extra?: Partial<BudgetDeps>): BudgetDeps => ({
 });
 
 /** Custo base do empreendimento com um material sobrescrito. */
-const comCusto = (baseId: number, custoMat: number, custoMO: number) => ({
+const comCusto = (baseId: number, custoMat: number | null, custoMO: number) => ({
   ...seed.custosBase,
   [baseId]: { baseId, custoMat, custoMO },
 });
@@ -132,8 +133,8 @@ describe("pendência de item de custo", () => {
   const hall = t1.ambientes.find((a) => a.nome === "Hall")!;
   const hallPiso = hall.componentes[0]!;
   const rodape = seed.materiais.find((m) => m.codigo === "RDP-466-SL")!;
-  /** Zera o custo do rodapé (satélite fixo do Hall) no catálogo. */
-  const semRodape = deps({ custosBase: comCusto(rodape.id, 0, 0) });
+  /** Deixa o rodapé (satélite fixo do Hall) sem cotação — pendente. */
+  const semRodape = deps({ custosBase: comCusto(rodape.id, null, 0) });
 
   it("derruba todas as opções do componente afetado", () => {
     for (const opt of hallPiso.options.filter((o) => !o.isDefault)) {
@@ -147,6 +148,13 @@ describe("pendência de item de custo", () => {
     }
     const upg = hallPiso.options.find((o) => !o.isDefault)!;
     expect(pendingCostItems(semRodape, hallPiso, upg.id).map((c) => c.nome)).toEqual(["Rodapé"]);
+  });
+
+  it("rodapé marcado 'sem custo' (0) NÃO derruba as opções", () => {
+    const rodapeSemCusto = deps({ custosBase: comCusto(rodape.id, 0, 0) });
+    for (const opt of hallPiso.options.filter((o) => !o.isDefault)) {
+      expect(isOptionPending(rodapeSemCusto, hallPiso, opt)).toBe(false);
+    }
   });
 
   it("não vaza para outros componentes nem outros ambientes", () => {
@@ -213,5 +221,26 @@ describe("buildScopeRefs", () => {
       "taxa_construtora",
       "contingencia_incc",
     ]);
+  });
+});
+
+describe("padroesPendentes (aviso antes de publicar)", () => {
+  // Sala/Living Piso da T1: padrão piso-001 + upgrades — o caso típico.
+  const pad = salaPisoT1.options.find((o) => o.isDefault)!;
+  const listados = (d: BudgetDeps) => padroesPendentes(d, seed.tipologias).map((p) => p.compId);
+
+  it("lista o componente cujo padrão está pendente", () => {
+    const d = deps({ custosBase: comCusto(pad.baseId, null, 0) });
+    expect(listados(d)).toContain(salaPisoT1.id);
+  });
+
+  it("padrão marcado 'sem custo' não é aviso — é decisão", () => {
+    const d = deps({ custosBase: comCusto(pad.baseId, 0, 0) });
+    expect(listados(d)).not.toContain(salaPisoT1.id);
+  });
+
+  it("sem débito/crédito não avisa (não há crédito a perder)", () => {
+    const d = deps({ custosBase: comCusto(pad.baseId, null, 0), usaDebitoCredito: false });
+    expect(listados(d)).toEqual([]);
   });
 });

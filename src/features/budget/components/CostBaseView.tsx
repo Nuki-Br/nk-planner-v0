@@ -14,23 +14,45 @@ import type { CustoBaseRow } from "@/shared/types/domain";
 /** Campo de custo em edição — "" enquanto o usuário limpa para redigitar. */
 type Draft = Record<number, { mat?: string; mo?: string }>;
 
-/** "" = todos. */
-type StatusFilter = "" | "pendente" | "preenchido";
+/** "" = todos. "sem_custo" = zero marcado de propósito (ex.: "Não entregue"). */
+type StatusFilter = "" | "pendente" | "preenchido" | "sem_custo";
+
+/** Status de uma linha pelo custo de material gravado (null = pendente, 0 = sem custo). */
+function rowStatus(row: CustoBaseRow): Exclude<StatusFilter, ""> {
+  if (row.custoMat === null) return "pendente";
+  return row.custoMat === 0 ? "sem_custo" : "preenchido";
+}
+
+const STATUS_LABEL: Record<Exclude<StatusFilter, "">, string> = {
+  pendente: "Pendente",
+  preenchido: "Com custo",
+  sem_custo: "Sem custo",
+};
 /** "" = todos; "opcao" = ofertável; "item" = só sub-item de kit / item de custo. */
 type TipoFilter = "" | "opcao" | "item";
 
 function CostField({
   value,
   isPending,
+  disabled = false,
   onChange,
   onCommit,
 }: {
   value: string;
   isPending: boolean;
+  /** Linha "sem custo": não há o que digitar — desfazer volta a pendente. */
+  disabled?: boolean;
   onChange: (v: string) => void;
   onCommit: (v: string) => void;
 }) {
   const filledNow = value !== "" && parseFloat(value) > 0;
+  if (disabled) {
+    return (
+      <span className="inline-block w-[118px] pr-2 text-right text-[12.5px] text-neutral-gray-5">
+        —
+      </span>
+    );
+  }
   return (
     <div className="relative inline-block">
       <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] text-neutral-gray-6">
@@ -59,8 +81,11 @@ function CostField({
 interface CostBaseViewProps {
   /** Todo material que precisa de custo NESTE empreendimento (todas as tipologias). */
   rows: CustoBaseRow[];
-  /** Persiste no blur. Campo omitido = não mexe (a grade grava um por vez). */
-  onPersist: (baseId: number, patch: { custoMat?: number; custoMO?: number }) => void;
+  /**
+   * Persiste no blur. Campo omitido = não mexe (a grade grava um por vez).
+   * `custoMat: null` volta a pendente; `custoMat: 0` marca "sem custo".
+   */
+  onPersist: (baseId: number, patch: { custoMat?: number | null; custoMO?: number }) => void;
 }
 
 /**
@@ -103,14 +128,20 @@ export function CostBaseView({ rows, onPersist }: CostBaseViewProps) {
     const d = draft[row.baseId]?.[fld];
     if (d !== undefined) return d;
     const v = fld === "mat" ? row.custoMat : row.custoMO;
-    return v > 0 ? String(v) : "";
+    return v !== null && v > 0 ? String(v) : "";
   };
 
   const commit = (row: CustoBaseRow, fld: "mat" | "mo", raw: string) => {
     const n = parseFloat(raw.replace(",", ".")) || 0;
-    const atual = fld === "mat" ? row.custoMat : row.custoMO;
-    // Sai do campo sem ter mudado nada → nenhum request.
-    if (n !== atual) onPersist(row.baseId, fld === "mat" ? { custoMat: n } : { custoMO: n });
+    if (fld === "mat") {
+      // Digitar 0 ou limpar volta a PENDENTE, não a "sem custo": um zero
+      // acidental não pode virar material grátis. "Sem custo" é a ação explícita.
+      const mat = n > 0 ? n : null;
+      if (mat !== row.custoMat) onPersist(row.baseId, { custoMat: mat });
+    } else if (n !== row.custoMO) {
+      // Sai do campo sem ter mudado nada → nenhum request.
+      onPersist(row.baseId, { custoMO: n });
+    }
     setDraft((p) => {
       const next = { ...p };
       delete next[row.baseId];
@@ -133,7 +164,9 @@ export function CostBaseView({ rows, onPersist }: CostBaseViewProps) {
     setTipoFilter("");
   };
 
-  const pendentesTotal = rows.filter((r) => r.custoMat <= 0).length;
+  const countBy = (status: Exclude<StatusFilter, "">) =>
+    rows.filter((r) => rowStatus(r) === status).length;
+  const pendentesTotal = countBy("pendente");
 
   // Opções do filtro de categoria a partir das linhas presentes (com contagem).
   const catCounts = React.useMemo(() => {
@@ -162,8 +195,7 @@ export function CostBaseView({ rows, onPersist }: CostBaseViewProps) {
         )
           return false;
         if (catFilters.length > 0 && !catFilters.includes(r.categoria)) return false;
-        if (statusFilter === "pendente" && r.custoMat > 0) return false;
-        if (statusFilter === "preenchido" && r.custoMat <= 0) return false;
+        if (statusFilter !== "" && rowStatus(r) !== statusFilter) return false;
         if (tipoFilter === "item" && !r.somenteIndireto) return false;
         if (tipoFilter === "opcao" && r.somenteIndireto) return false;
         return true;
@@ -183,8 +215,8 @@ export function CostBaseView({ rows, onPersist }: CostBaseViewProps) {
     return [...m.entries()].sort(([a], [b]) => byCategoria(a, b));
   }, [filtered]);
 
-  const pendentesFiltrados = filtered.filter((r) => r.custoMat <= 0).length;
-  const totalBase = filtered.reduce((s, r) => s + r.custoMat + r.custoMO, 0);
+  const pendentesFiltrados = filtered.filter((r) => rowStatus(r) === "pendente").length;
+  const totalBase = filtered.reduce((s, r) => s + (r.custoMat ?? 0) + r.custoMO, 0);
   const hasFilters =
     search !== "" || catFilters.length > 0 || statusFilter !== "" || tipoFilter !== "";
 
@@ -214,7 +246,8 @@ export function CostBaseView({ rows, onPersist }: CostBaseViewProps) {
     const moV = valOf(row, "mo");
     const matN = parseFloat(matV) || 0;
     const moN = parseFloat(moV) || 0;
-    const isPending = row.custoMat <= 0 && !(matN > 0);
+    const semCusto = row.custoMat === 0;
+    const isPending = row.custoMat === null && !(matN > 0);
     return (
       <tr
         key={row.baseId}
@@ -265,6 +298,7 @@ export function CostBaseView({ rows, onPersist }: CostBaseViewProps) {
           <CostField
             value={matV}
             isPending={isPending}
+            disabled={semCusto}
             onChange={(v) => setField(row.baseId, "mat", v)}
             onCommit={(v) => commit(row, "mat", v)}
           />
@@ -273,6 +307,7 @@ export function CostBaseView({ rows, onPersist }: CostBaseViewProps) {
           <CostField
             value={moV}
             isPending={isPending}
+            disabled={semCusto}
             onChange={(v) => setField(row.baseId, "mo", v)}
             onCommit={(v) => commit(row, "mo", v)}
           />
@@ -280,13 +315,36 @@ export function CostBaseView({ rows, onPersist }: CostBaseViewProps) {
         <td
           className={cn(
             "whitespace-nowrap px-3 py-[9px] text-right text-xs font-bold",
-            matN + moN > 0 ? "text-neutral-gray-11" : "text-neutral-gray-5"
+            matN + moN > 0 || semCusto ? "text-neutral-gray-11" : "text-neutral-gray-5"
           )}
         >
-          {matN + moN > 0 ? fmtBRL(matN + moN) : "—"}
+          {matN + moN > 0 || semCusto ? fmtBRL(matN + moN) : "—"}
         </td>
         <td className="px-3 py-[9px]">
-          <StatusBadge status={isPending ? "pendente" : "preenchido"} />
+          <div className="flex flex-col items-start gap-1">
+            <StatusBadge status={semCusto ? "sem_custo" : isPending ? "pendente" : "preenchido"} />
+            {/* Só pendente ↔ sem custo: marcar "sem custo" numa linha COM custo
+                apagaria uma cotação real — para isso, limpe o campo antes. */}
+            {row.custoMat === null && !(matN > 0) && (
+              <button
+                type="button"
+                onClick={() => onPersist(row.baseId, { custoMat: 0, custoMO: 0 })}
+                title="Material sem custo (ex.: padrão “Não entregue”): deixa de ficar pendente e some do portal do terceiro."
+                className="whitespace-nowrap text-[11px] font-semibold text-primary-7 hover:underline"
+              >
+                Marcar sem custo
+              </button>
+            )}
+            {semCusto && (
+              <button
+                type="button"
+                onClick={() => onPersist(row.baseId, { custoMat: null })}
+                className="whitespace-nowrap text-[11px] font-semibold text-neutral-gray-7 hover:underline"
+              >
+                Desfazer
+              </button>
+            )}
+          </div>
         </td>
       </tr>
     );
@@ -342,8 +400,9 @@ export function CostBaseView({ rows, onPersist }: CostBaseViewProps) {
             icon="tune"
             options={[
               { value: "", label: `Todos (${rows.length})` },
-              { value: "pendente", label: `Sem custo (${pendentesTotal})` },
-              { value: "preenchido", label: `Com custo (${rows.length - pendentesTotal})` },
+              { value: "pendente", label: `Pendente (${pendentesTotal})` },
+              { value: "preenchido", label: `Com custo (${countBy("preenchido")})` },
+              { value: "sem_custo", label: `Sem custo (${countBy("sem_custo")})` },
             ]}
             value={statusFilter}
             onChange={(v) => setStatusFilter(v as StatusFilter)}
@@ -378,10 +437,7 @@ export function CostBaseView({ rows, onPersist }: CostBaseViewProps) {
             />
           ))}
           {statusFilter !== "" && (
-            <ActiveChip
-              label={statusFilter === "pendente" ? "Sem custo" : "Com custo"}
-              onRemove={() => setStatusFilter("")}
-            />
+            <ActiveChip label={STATUS_LABEL[statusFilter]} onRemove={() => setStatusFilter("")} />
           )}
           {tipoFilter !== "" && (
             <ActiveChip
@@ -410,7 +466,7 @@ export function CostBaseView({ rows, onPersist }: CostBaseViewProps) {
           {filtered.length === 1 ? "material" : "materiais"}
           {pendentesFiltrados > 0 && (
             <strong className="ml-1.5 font-bold text-tint-orange-fg">
-              · {pendentesFiltrados} sem custo
+              · {pendentesFiltrados} {pendentesFiltrados === 1 ? "pendente" : "pendentes"}
             </strong>
           )}
         </span>
@@ -444,8 +500,8 @@ export function CostBaseView({ rows, onPersist }: CostBaseViewProps) {
             {grouped ? (
               groups.map(([cat, groupRows]) => {
                 const isCollapsed = collapsed.has(cat);
-                const sub = groupRows.reduce((s, r) => s + r.custoMat + r.custoMO, 0);
-                const subPend = groupRows.filter((r) => r.custoMat <= 0).length;
+                const sub = groupRows.reduce((s, r) => s + (r.custoMat ?? 0) + r.custoMO, 0);
+                const subPend = groupRows.filter((r) => rowStatus(r) === "pendente").length;
                 return (
                   <tbody key={cat || "__sem__"}>
                     <tr className="border-b border-neutral-gray-4 bg-neutral-gray-2">
@@ -467,7 +523,7 @@ export function CostBaseView({ rows, onPersist }: CostBaseViewProps) {
                           </span>
                           {subPend > 0 && (
                             <span className="text-[11px] font-bold text-tint-orange-fg">
-                              · {subPend} sem custo
+                              · {subPend} {subPend === 1 ? "pendente" : "pendentes"}
                             </span>
                           )}
                           <span className="ml-auto whitespace-nowrap text-[11px] text-neutral-gray-7">

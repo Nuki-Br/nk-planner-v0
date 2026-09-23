@@ -54,7 +54,7 @@ function CanvasLegend({ materiais }: { materiais: Material[] }) {
       node: (
         <div className="h-[18px] w-[18px] rounded border-[1.5px] border-functional-error bg-functional-error-light" />
       ),
-      label: "Sem custo base",
+      label: "Custo base pendente",
     },
     {
       node: <Icon name="edit" size={15} className="text-neutral-gray-7" />,

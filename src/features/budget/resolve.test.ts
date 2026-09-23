@@ -4,6 +4,7 @@ import { createSeed } from "@/lib/data/seed";
 import type { CustosBase, MaterialOption, PublishedPricing } from "@/shared/types/domain";
 
 import {
+  baseCostStatus,
   custoBaseOf,
   isBasePending,
   isOptionOwnPending,
@@ -65,11 +66,21 @@ describe("custo base do empreendimento", () => {
   });
 
   it("pendência olha o custo de MATERIAL, não o total", () => {
-    // Um item com MO preenchida e material zerado segue pendente: falta a
+    // Um item com MO preenchida e material vazio segue pendente: falta a
     // cotação do material, que é o que a construtora precisa devolver.
-    const soMO: CustosBase = { 1: { baseId: 1, custoMat: 0, custoMO: 50 } };
+    const soMO: CustosBase = { 1: { baseId: 1, custoMat: null, custoMO: 50 } };
     expect(isBasePending(soMO, 1)).toBe(true);
     expect(isBasePending({}, 1)).toBe(true);
+    expect(baseCostStatus(soMO, 1)).toBe("pendente");
+  });
+
+  it("'sem custo' (material 0 marcado) não é pendente e vale 0", () => {
+    // Ex.: padrão "Não entregue" — zero decidido, não esquecido.
+    const semCusto: CustosBase = { 1: { baseId: 1, custoMat: 0, custoMO: 0 } };
+    expect(isBasePending(semCusto, 1)).toBe(false);
+    expect(custoBaseOf(semCusto, 1)).toBe(0);
+    expect(baseCostStatus(semCusto, 1)).toBe("sem_custo");
+    expect(baseCostStatus({ 1: { baseId: 1, custoMat: 10, custoMO: 0 } }, 1)).toBe("preenchido");
   });
 });
 

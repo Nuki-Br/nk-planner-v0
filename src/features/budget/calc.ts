@@ -35,6 +35,7 @@ import type {
   CostComponent,
   CostRegistro,
   MaterialOption,
+  Tipologia,
 } from "@/shared/types/domain";
 
 export type { PricingMap } from "./resolve";
@@ -188,6 +189,44 @@ export function calcAnyRow(
     usaDC
   );
   return result ? { kind: "material", result } : null;
+}
+
+/** Componente com upgrades cujo material PADRÃO está pendente (sem custo preenchido). */
+export interface PadraoPendente {
+  compId: number;
+  ambiente: string;
+  componente: string;
+}
+
+/**
+ * Padrões pendentes que afetam preço: o motor credita um padrão sem custo como
+ * ZERO, então os upgrades do componente seriam publicados sem o desconto do
+ * padrão. Com a ação "Sem custo" disponível (ex.: "Não entregue"), um padrão
+ * pendente é quase sempre esquecimento — daí o aviso antes de publicar.
+ *
+ * Fica de fora: empreendimento sem débito/crédito (não há crédito a perder) e
+ * componente sem upgrade (nada é publicado). De-duplicado por componente, que
+ * é compartilhado entre as tipologias que usam o mesmo ambiente.
+ */
+export function padroesPendentes(
+  deps: BudgetDeps,
+  tipologias: readonly Tipologia[]
+): PadraoPendente[] {
+  if (deps.usaDebitoCredito === false) return [];
+  const out = new Map<number, PadraoPendente>();
+  for (const tip of tipologias) {
+    for (const amb of tip.ambientes) {
+      for (const comp of amb.componentes) {
+        if (out.has(comp.id)) continue;
+        const pad = comp.options.find((o) => o.isDefault);
+        if (!pad || !comp.options.some((o) => !o.isDefault)) continue;
+        if (isOptionOwnPending(deps, pad)) {
+          out.set(comp.id, { compId: comp.id, ambiente: amb.nome, componente: comp.nome });
+        }
+      }
+    }
+  }
+  return [...out.values()];
 }
 
 /** Total do ambiente — pendências (kit ou material) ficam de fora. */

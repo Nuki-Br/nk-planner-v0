@@ -505,7 +505,11 @@ export function createSeed(): SeedData {
   // mesmos valores do protótipo (0 = pendente, aguardando a construtora).
   const custosBase: CustosBase = {};
   for (const m of materiais) {
-    custosBase[m.id] = { baseId: m.id, custoMat: m.custoMat, custoMO: m.custoMO };
+    custosBase[m.id] = {
+      baseId: m.id,
+      custoMat: m.custoMat > 0 ? m.custoMat : null,
+      custoMO: m.custoMO,
+    };
   }
 
   return {

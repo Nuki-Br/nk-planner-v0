@@ -13,9 +13,13 @@ import {
   PageHeader,
   StatusBadge,
 } from "@/components/ui";
+import { padroesPendentes } from "@/features/budget/calc";
 import { isBasePending } from "@/features/budget/resolve";
 import { useBudgetColumns } from "@/lib/hooks/useBudgetColumns";
 import { useCustosBase, toCustosBaseMap } from "@/lib/hooks/useCustosBase";
+import { useKits } from "@/lib/hooks/useKits";
+import { useMateriais } from "@/lib/hooks/useMateriais";
+import { usePricing } from "@/lib/hooks/useMaterialPricing";
 import { useProject, usePublishProject } from "@/lib/hooks/useProjects";
 import { useTipologias } from "@/lib/hooks/useTipologias";
 import { cn, fmtBRL } from "@/lib/utils";
@@ -71,6 +75,10 @@ export function PublishScreen() {
   const { data: custoRows } = useCustosBase(projectId);
   const { data: cols = [] } = useBudgetColumns(projectId);
   const custosBase = React.useMemo(() => toCustosBaseMap(custoRows), [custoRows]);
+  // Só para achar padrões pendentes (kit padrão e override de valor contam).
+  const { data: materiais = [] } = useMateriais();
+  const { data: kits = [] } = useKits();
+  const { data: pricings = {} } = usePricing(projectId);
   const publish = usePublishProject();
 
   const [showConfirm, setShowConfirm] = React.useState(false);
@@ -120,6 +128,10 @@ export function PublishScreen() {
   const publicados = tipSummary.reduce((a, t) => a + t.totalUpgrades, 0);
 
   const revisaoOk = project.status === "em_revisao" || project.status === "publicado";
+  const padroesSemCusto = padroesPendentes(
+    { materiais, kits, cols, custosBase, pricings, usaDebitoCredito: project.usaDebitoCredito },
+    tipologias
+  );
   const checklist: ChecklistItem[] = [
     { label: `${tipologias.length} tipologias configuradas`, ok: tipologias.length > 0 },
     {
@@ -133,10 +145,26 @@ export function PublishScreen() {
     { label: "Revisão de custos concluída", ok: revisaoOk },
     ...(pendingByTip.length > 0
       ? pendingByTip.map(({ tip, count }) => ({
-          label: `${tip.nome} — ${count} ${count === 1 ? "item" : "itens"} sem custo`,
+          label: `${tip.nome} — ${count} ${count === 1 ? "item pendente" : "itens pendentes"} de custo`,
           ok: false,
         }))
-      : [{ label: "Nenhum item sem custo", ok: true }]),
+      : [{ label: "Nenhum item pendente de custo", ok: true }]),
+    // Padrão pendente credita zero: os upgrades do componente saem sem o
+    // desconto. Some sem débito/crédito (padroesPendentes devolve vazio).
+    ...(project.usaDebitoCredito === false
+      ? []
+      : [
+          padroesSemCusto.length > 0
+            ? {
+                label: `${padroesSemCusto.length} ${
+                  padroesSemCusto.length === 1
+                    ? "componente com padrão pendente"
+                    : "componentes com padrão pendente"
+                } — upgrades sairão sem crédito (marque “Sem custo” se nada é entregue)`,
+                ok: false,
+              }
+            : { label: "Todos os padrões com custo definido", ok: true },
+        ]),
   ];
 
   const taxLabel = cols.map((c) => c.nome).join(" · ");

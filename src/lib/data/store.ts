@@ -99,8 +99,11 @@ export async function listCustosBase(projectId: number): Promise<CustoBaseRow[]>
 
 export interface CustoBaseInput {
   baseId: number;
-  /** Omitido = não mexe no campo (a grade grava um campo por vez). */
-  custoMat?: number;
+  /**
+   * Omitido = não mexe no campo (a grade grava um campo por vez). `null` volta
+   * a pendente; `0` marca "sem custo" (ver CustoBase.custoMat).
+   */
+  custoMat?: number | null;
   custoMO?: number;
 }
 

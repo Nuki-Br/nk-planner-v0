@@ -63,8 +63,13 @@ export interface Material {
 export interface CustoBase {
   /** BaseMaterial (material avulso ou sub-item de kit). */
   baseId: number;
-  /** Custo de material (R$/unidade; 0 = pendente = NULL no banco). */
-  custoMat: number;
+  /**
+   * Custo de material (R$/unidade). `null` = pendente (nunca preenchido, NULL no
+   * banco); `0` = "sem custo" marcado de propósito (ex.: padrão "Não entregue");
+   * `> 0` = com custo. Só a ação "Sem custo" grava 0 — digitar 0 ou limpar o
+   * campo volta a pendente, para um zero acidental não virar "grátis".
+   */
+  custoMat: number | null;
   /** Custo de mão de obra (R$/unidade; 0 = pendente). */
   custoMO: number;
 }

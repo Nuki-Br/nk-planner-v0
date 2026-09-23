@@ -334,7 +334,7 @@ export function OptionNode({
             )}
             {pending && (
               <span className="inline-flex h-[15px] items-center rounded-full bg-functional-error-light px-1.5 text-[9px] font-bold text-functional-error">
-                sem custo
+                custo pendente
               </span>
             )}
           </div>
