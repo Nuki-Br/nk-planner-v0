@@ -78,3 +78,12 @@ export const queryKeys = {
   mediaUsage: ["media-usage"] as const,
   mediaFileUsages: (id: number) => ["media-file-usages", id] as const,
 };
+
+// Mutation keys das gravações otimistas do Construtor de Preço. A reconciliação
+// (`isMutating`) e o gate de publicar (`waitForSaves`) localizam as gravações
+// em voo por estas keys — um literal digitado errado num dos lados desligaria
+// a proteção em silêncio, por isso a fábrica única.
+export const mutationKeys = {
+  savePricing: (projectId: number) => ["save-pricing", projectId] as const,
+  saveCusto: (projectId: number) => ["save-custo", projectId] as const,
+};

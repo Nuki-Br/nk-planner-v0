@@ -2,7 +2,7 @@
 
 import type { QueryClient } from "@tanstack/react-query";
 
-import { queryKeys } from "./queryKeys";
+import { mutationKeys, queryKeys } from "./queryKeys";
 
 // Reconciliação em background das telas de edição do Construtor de Preço.
 //
@@ -42,6 +42,14 @@ export function scheduleReconcile(qc: QueryClient, projectId: number, delay = 70
     projectId,
     setTimeout(() => {
       timers.delete(projectId);
+      // Ainda há gravação em voo? Um refetch agora leria o servidor SEM a última
+      // edição e sobrescreveria o cache otimista — a célula "voltaria" e só
+      // reapareceria no próximo ciclo. Não precisa reagendar: o onSettled da
+      // gravação em voo chama scheduleReconcile de novo quando ela assentar.
+      const busy =
+        qc.isMutating({ mutationKey: mutationKeys.savePricing(projectId) }) +
+        qc.isMutating({ mutationKey: mutationKeys.saveCusto(projectId) });
+      if (busy > 0) return;
       for (const key of reconcileKeys(projectId)) {
         void qc.invalidateQueries({ queryKey: key });
       }

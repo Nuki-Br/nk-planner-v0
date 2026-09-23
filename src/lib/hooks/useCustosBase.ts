@@ -6,7 +6,8 @@ import { listCustosBase, saveCustoBase, type CustoBaseInput } from "@/lib/data/s
 import type { CustoBaseRow, CustosBase } from "@/shared/types/domain";
 
 import { scheduleReconcile } from "./diffRefresh";
-import { queryKeys } from "./queryKeys";
+import { mutationKeys, queryKeys } from "./queryKeys";
+import { enqueueWrite } from "./writeQueue";
 
 /** Linhas da aba "Custos base" — todo material que precisa de custo no projeto. */
 export function useCustosBase(projectId: number | null) {
@@ -45,24 +46,39 @@ function applyCustoPatch(prev: CustoBaseRow[] | undefined, input: CustoBaseInput
 
 /**
  * Grava o custo base. Otimista: a grade e o preço (que consome o custo) refletem
- * a edição na hora e o servidor confirma em background; reverte no erro. A
- * reconciliação e o refresh do badge ficam no debounce compartilhado (dispara
- * ~700ms depois que o usuário para de editar).
+ * a edição na hora e o servidor confirma em background; reverte no erro (o toast
+ * global do MutationCache avisa). A reconciliação e o refresh do badge ficam no
+ * debounce compartilhado (dispara ~700ms depois que o usuário para de editar).
  */
 export function useSaveCustoBase(projectId: number | null) {
   const queryClient = useQueryClient();
-  const key = queryKeys.custosBase(projectId ?? 0);
+  const pid = projectId ?? 0;
+  const key = queryKeys.custosBase(pid);
+  const rowOf = (rows: CustoBaseRow[] | undefined, baseId: number) =>
+    rows?.find((r) => r.baseId === baseId);
   return useMutation({
-    mutationFn: (input: CustoBaseInput) => saveCustoBase(projectId ?? 0, input),
+    // Mesma key que a reconciliação e o gate de publicar consultam; a fila por
+    // baseId garante que dois blur seguidos do mesmo item não se atropelem.
+    mutationKey: mutationKeys.saveCusto(pid),
+    mutationFn: (input: CustoBaseInput) =>
+      enqueueWrite(`custo:${pid}:${input.baseId}`, () => saveCustoBase(pid, input)),
     onMutate: async (input) => {
       await queryClient.cancelQueries({ queryKey: key });
-      const previous = queryClient.getQueryData<CustoBaseRow[]>(key);
+      const before = rowOf(queryClient.getQueryData<CustoBaseRow[]>(key), input.baseId);
       queryClient.setQueryData<CustoBaseRow[]>(key, (prev) => applyCustoPatch(prev, input));
-      return { previous };
+      // Referência lida de volta do cache — ver useSavePricing.
+      const applied = rowOf(queryClient.getQueryData<CustoBaseRow[]>(key), input.baseId);
+      return { before, applied };
     },
-    onError: (_err, _input, ctx) => {
-      if (ctx?.previous) queryClient.setQueryData(key, ctx.previous);
+    // Reverte SÓ a linha desta gravação, e só se ninguém a editou depois — mesma
+    // regra do useSavePricing (não apagar edições otimistas mais novas).
+    onError: (_err, input, ctx) => {
+      const before = ctx?.before;
+      if (!before) return;
+      queryClient.setQueryData<CustoBaseRow[]>(key, (cur) =>
+        cur?.map((r) => (r.baseId === input.baseId && r === ctx.applied ? before : r))
+      );
     },
-    onSettled: () => scheduleReconcile(queryClient, projectId ?? 0),
+    onSettled: () => scheduleReconcile(queryClient, pid),
   });
 }

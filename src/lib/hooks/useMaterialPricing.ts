@@ -14,7 +14,8 @@ import {
 import { EMPTY_PRICING } from "@/shared/types/domain";
 
 import { scheduleReconcile } from "./diffRefresh";
-import { queryKeys } from "./queryKeys";
+import { mutationKeys, queryKeys } from "./queryKeys";
+import { enqueueWrite } from "./writeQueue";
 
 /** Rascunho de precificação do empreendimento (optionId → overrides). */
 export function usePricing(projectId: number | null) {
@@ -46,26 +47,46 @@ function applyPatch(prev: PricingMap | undefined, input: PricingInput): PricingM
 
 /**
  * Grava um override. Otimista: a tabela recalcula na hora (é uma planilha — o
- * round-trip apareceria como travada), e reverte no erro. O refetch de
- * reconciliação + o refresh do badge ficam no debounce compartilhado (dispara
- * ~700ms depois que o usuário para de editar) — invalidar por tecla causava
- * corrida entre edições rápidas.
+ * round-trip apareceria como travada), e reverte no erro (o toast global do
+ * MutationCache avisa). O refetch de reconciliação + o refresh do badge ficam
+ * no debounce compartilhado (dispara ~700ms depois que o usuário para de
+ * editar) — invalidar por tecla causava corrida entre edições rápidas.
  */
 export function useSavePricing(projectId: number | null) {
   const queryClient = useQueryClient();
-  const key = queryKeys.pricing(projectId ?? 0);
+  const pid = projectId ?? 0;
+  const key = queryKeys.pricing(pid);
   return useMutation({
-    mutationFn: (input: PricingInput) => savePricing(projectId ?? 0, input),
+    // A key deixa o `isMutating` (reconciliação) e o `waitForSaves` (gate de
+    // publicar) mirarem só estas gravações; a fila por optionId garante ordem
+    // de submissão.
+    mutationKey: mutationKeys.savePricing(pid),
+    mutationFn: (input: PricingInput) =>
+      enqueueWrite(`pricing:${pid}:${input.optionId}`, () => savePricing(pid, input)),
     onMutate: async (input) => {
       await queryClient.cancelQueries({ queryKey: key });
-      const previous = queryClient.getQueryData<PricingMap>(key);
+      const before = queryClient.getQueryData<PricingMap>(key)?.[input.optionId];
       queryClient.setQueryData<PricingMap>(key, (prev) => applyPatch(prev, input));
-      return { previous };
+      // Lido de volta do cache (o structural sharing copia o objeto): é a
+      // referência que o onError compara para saber se a célula mudou depois.
+      const applied = queryClient.getQueryData<PricingMap>(key)?.[input.optionId];
+      return { before, applied };
     },
-    onError: (_err, _input, ctx) => {
-      if (ctx?.previous) queryClient.setQueryData(key, ctx.previous);
+    // Reverte SÓ a linha desta gravação — restaurar o mapa inteiro apagaria as
+    // edições otimistas de outras células feitas nesse meio-tempo. E só se
+    // ninguém a editou depois: uma edição mais nova da mesma linha (na fila)
+    // já carrega o estado atual e vai gravá-lo.
+    onError: (_err, input, ctx) => {
+      if (!ctx) return;
+      queryClient.setQueryData<PricingMap>(key, (cur) => {
+        if (!cur || cur[input.optionId] !== ctx.applied) return cur;
+        const next = { ...cur };
+        if (ctx.before) next[input.optionId] = ctx.before;
+        else delete next[input.optionId];
+        return next;
+      });
     },
-    onSettled: () => scheduleReconcile(queryClient, projectId ?? 0),
+    onSettled: () => scheduleReconcile(queryClient, pid),
   });
 }
 

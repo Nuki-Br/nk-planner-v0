@@ -10,6 +10,7 @@ import { getKit, getMaterial } from "@/lib/data/entities";
 import { useBudgetColumns, useUpdateBudgetColumns } from "@/lib/hooks/useBudgetColumns";
 import { useCommentThreads } from "@/lib/hooks/useComments";
 import { flushDiff } from "@/lib/hooks/diffRefresh";
+import { waitForSaves, type SaveGateResult } from "@/lib/hooks/writeQueue";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { useCustosBase, useSaveCustoBase, toCustosBaseMap } from "@/lib/hooks/useCustosBase";
 import { useKits } from "@/lib/hooks/useKits";
@@ -124,6 +125,8 @@ interface CostRemoveTarget {
 
 /** Estado do modal de coluna: criando, editando uma existente, ou fechado. */
 type ColumnModalState = { mode: "create" } | { mode: "edit"; col: BudgetColumn } | null;
+/** Etapas do publicar — ver handlePublish. */
+type PublishPhase = "idle" | "waiting" | "sending";
 
 /** Botão "+ Item de custo" das linhas mestre da tabela. */
 function AddCostItemBtn({ onClick }: { onClick: () => void }) {
@@ -346,6 +349,16 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   const [showLinkModal, setShowLinkModal] = React.useState(false);
   const [showPublishModal, setShowPublishModal] = React.useState(false);
   const [publishSummary, setPublishSummary] = React.useState("");
+  // "waiting" = esperando as gravações em voo (Cancelar ainda aborta);
+  // "sending" = publish já foi ao servidor (o modal trava até a resposta).
+  const [publishPhase, setPublishPhaseState] = React.useState<PublishPhase>("idle");
+  // Espelho em ref: os guards precisam do valor no mesmo tick (duplo clique,
+  // Cancelar logo após o envio), antes de o state re-renderizar.
+  const publishPhaseRef = React.useRef<PublishPhase>("idle");
+  // Id da execução corrente — o Cancelar durante a espera o invalida, e a
+  // execução abandonada não chega a publicar.
+  const publishRunRef = React.useRef(0);
+  const [publishGateError, setPublishGateError] = React.useState<SaveGateResult | null>(null);
   const [restoreTarget, setRestoreTarget] = React.useState<BudgetVersion | null>(null);
   const [toastMsg, setToastMsg] = React.useState("");
   const [convWarnDismissed, setConvWarnDismissed] = React.useState(false);
@@ -619,29 +632,76 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
     });
 
   // ── publicar ──
+  const setPublishPhase = (p: PublishPhase) => {
+    publishPhaseRef.current = p;
+    setPublishPhaseState(p);
+  };
   // O diff/badge é reconciliado com debounce (~700ms após a última edição). Ao
   // abrir o modal, forçar o refetch AGORA para o preview não ficar atrás do que
-  // será publicado.
+  // será publicado — se ainda houver gravação em voo, o onSettled dela agenda a
+  // reconciliação, que recarrega o diff de novo.
   const openPublishModal = () => {
-    if (projectId) flushDiff(queryClient, projectId);
+    if (!projectId) return;
+    publishBudget.reset(); // limpa erro de uma tentativa anterior (R4)
+    setPublishGateError(null);
     setShowPublishModal(true);
+    flushDiff(queryClient, projectId);
   };
   // CONGELA o rascunho no Material (preço + snapshot) e cria a versão. Até aqui
   // nada do que o usuário editou na tabela afetava o preço que está valendo.
-  const handlePublish = () => {
+  //
+  // O publish lê o rascunho DO BANCO (resolveEnterprise), então antes de gravar
+  // espera as edições em voo assentarem — uma ainda em trânsito congelaria o
+  // valor velho (R1). Se alguma falhou (ou travou), NÃO publica: o banco não
+  // tem o que a tela mostrava.
+  const handlePublish = async () => {
     const summary = publishSummary.trim();
-    if (!summary) return;
-    publishBudget.mutate(
-      { summary, createdBy: currentUser.name },
-      {
-        onSuccess: () => {
-          setShowPublishModal(false);
-          setPublishSummary("");
-          router.push("/publicacao");
-        },
+    if (!summary || !projectId || publishPhaseRef.current !== "idle") return;
+    const run = ++publishRunRef.current;
+    setPublishGateError(null);
+    publishBudget.reset();
+    setPublishPhase("waiting");
+    try {
+      const gate = await waitForSaves(queryClient, projectId);
+      if (run !== publishRunRef.current) return; // cancelado durante a espera
+      if (gate !== "ok") {
+        setPublishGateError(gate);
+        return;
       }
-    );
+      setPublishPhase("sending");
+      const v = await publishBudget.mutateAsync({ summary, createdBy: currentUser.name });
+      setShowPublishModal(false);
+      setPublishSummary("");
+      // Fica no Construtor de Preço; o badge vira verde ao reconciliar o diff.
+      fireToast(`Orçamento publicado · ${v.label}`);
+    } catch {
+      // Falha do publish: o banner do modal mostra publishBudget.error.
+    } finally {
+      if (run === publishRunRef.current) setPublishPhase("idle");
+    }
   };
+  // Durante a espera o Cancelar aborta (a execução vê o id trocado e para antes
+  // de gravar). Depois que o publish foi ao servidor não há como desfazer, então
+  // o modal não fecha até a resposta. Fechar limpa o erro da tentativa anterior,
+  // senão o banner reapareceria na próxima abertura (R4).
+  const closePublishModal = () => {
+    if (publishPhaseRef.current === "sending") return;
+    publishRunRef.current++;
+    setPublishPhase("idle");
+    setPublishGateError(null);
+    setShowPublishModal(false);
+    publishBudget.reset();
+  };
+  const publishError =
+    publishGateError === "failed"
+      ? "uma alteração da tabela não foi salva — confira os valores e tente de novo"
+      : publishGateError === "timeout"
+        ? "as últimas alterações ainda não terminaram de salvar — verifique a conexão e tente de novo"
+        : publishBudget.isError
+          ? publishBudget.error instanceof Error
+            ? publishBudget.error.message
+            : "erro inesperado"
+          : null;
   const handleRestoreConfirm = () => {
     if (!restoreTarget) return;
     restoreVersion.mutate(restoreTarget.id, {
@@ -1902,18 +1962,22 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
       {/* Publicar orçamento (salva versão + publica) */}
       <Modal
         open={showPublishModal}
-        onClose={() => setShowPublishModal(false)}
+        onClose={closePublishModal}
         title="Publicar orçamento"
         actions={
           <>
-            <Button variant="bordered" onPress={() => setShowPublishModal(false)}>
+            <Button
+              variant="bordered"
+              onPress={closePublishModal}
+              isDisabled={publishPhase === "sending"}
+            >
               Cancelar
             </Button>
             <Button
               icon="upload"
-              onPress={handlePublish}
-              isDisabled={publishSummary.trim() === ""}
-              isLoading={publishBudget.isPending}
+              onPress={() => void handlePublish()}
+              isDisabled={publishSummary.trim() === "" || publishPhase !== "idle"}
+              isLoading={publishPhase !== "idle"}
             >
               Publicar orçamento
             </Button>
@@ -1932,6 +1996,14 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
             onValueChange={setPublishSummary}
             placeholder="Ex: revisão de custos após retorno da construtora, novas opções de piso adicionadas…"
           />
+          {publishError && (
+            <div className="flex items-start gap-2 rounded-lg border border-functional-error/30 bg-functional-error-light px-3 py-2">
+              <Icon name="warning" size={13} className="mt-0.5 shrink-0 text-functional-error" />
+              <p className="text-[12px] text-functional-error">
+                Não foi possível publicar: {publishError}. Nenhuma alteração foi aplicada.
+              </p>
+            </div>
+          )}
         </div>
       </Modal>
 
