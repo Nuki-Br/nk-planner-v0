@@ -412,7 +412,7 @@ type OpcaoBody =
   | { op: "addUpgrades"; baseIds: number[] }
   | { op: "replaceUpgrade"; optionId: number; newBaseId: number }
   | { op: "removeUpgrade"; optionId: number }
-  | { op: "setKitQtds"; qtds: Record<number, number> };
+  | { op: "setKitQtds"; qtds: Record<number, number | null> };
 
 function opcao(
   tipologiaId: number,
@@ -526,12 +526,15 @@ export async function removeUpgrade(
   return opcao(tipologiaId, ambienteId, componenteId, { op: "removeUpgrade", optionId });
 }
 
-/** Grava os quantitativos de sub-itens de kit desta planta (keyed por KitItem id). */
+/**
+ * Grava os quantitativos de sub-itens de kit desta planta (keyed por KitItem id).
+ * `null` apaga: o sub-item volta a herdar a qtd do componente ou fica pendente.
+ */
 export async function setKitQtds(
   tipologiaId: number,
   ambienteId: number,
   componenteId: number,
-  qtds: Record<number, number>
+  qtds: Record<number, number | null>
 ): Promise<Componente> {
   return opcao(tipologiaId, ambienteId, componenteId, { op: "setKitQtds", qtds });
 }

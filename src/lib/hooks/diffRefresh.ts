@@ -20,6 +20,12 @@ import { mutationKeys, queryKeys } from "./queryKeys";
 // nas DUAS abas (Preço final e Custos base) coalescem num refetch só.
 
 const timers = new Map<number, ReturnType<typeof setTimeout>>();
+/**
+ * Empreendimentos cuja árvore de tipologias também precisa reconciliar (a qtd
+ * de sub-item de kit vive nela). Separado porque é a query mais pesada da tela:
+ * edições só de preço/custo não a recarregam.
+ */
+const treeDirty = new Set<number>();
 
 /** Chaves de cache reconciliadas quando o usuário para de editar. */
 function reconcileKeys(projectId: number) {
@@ -36,7 +42,13 @@ function reconcileKeys(projectId: number) {
  * `onSettled` de cada gravação; cada nova edição empurra o timer, então o
  * refetch só dispara quando a edição cessa.
  */
-export function scheduleReconcile(qc: QueryClient, projectId: number, delay = 700): void {
+export function scheduleReconcile(
+  qc: QueryClient,
+  projectId: number,
+  delay = 700,
+  { tipologias = false }: { tipologias?: boolean } = {}
+): void {
+  if (tipologias) treeDirty.add(projectId);
   const existing = timers.get(projectId);
   if (existing) clearTimeout(existing);
   timers.set(
@@ -51,10 +63,15 @@ export function scheduleReconcile(qc: QueryClient, projectId: number, delay = 70
         qc.isMutating({ mutationKey: mutationKeys.savePricing(projectId) }) +
         qc.isMutating({ mutationKey: mutationKeys.saveCusto(projectId) }) +
         qc.isMutating({ mutationKey: mutationKeys.saveCostItem(projectId) }) +
-        qc.isMutating({ mutationKey: mutationKeys.composicao(projectId) });
+        qc.isMutating({ mutationKey: mutationKeys.composicao(projectId) }) +
+        qc.isMutating({ mutationKey: mutationKeys.kitQtds(projectId) });
       if (busy > 0) return;
       for (const key of reconcileKeys(projectId)) {
         void qc.invalidateQueries({ queryKey: key });
+      }
+      if (treeDirty.delete(projectId)) {
+        // Raiz: lista (Construtor de Preço, canvas) e detalhe (config do componente).
+        void qc.invalidateQueries({ queryKey: queryKeys.tipologiasRoot });
       }
     }, delay)
   );

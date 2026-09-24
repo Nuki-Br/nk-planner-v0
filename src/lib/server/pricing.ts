@@ -7,11 +7,13 @@
 // então o que o modal promete é o que o publish grava.
 import { Prisma } from "@prisma/client";
 
-import { calcAnyRow, isOptionPending, type BudgetDeps } from "@/features/budget/calc";
-import { qtdOf, rtOf, unidadeOf, valUnOf } from "@/features/budget/resolve";
+import { calcAnyRow, isRowPending, type BudgetDeps } from "@/features/budget/calc";
+import { kitSubItemsOf, qtdOf, rtOf, unidadeOf, valUnOf } from "@/features/budget/resolve";
+import { fmtNum } from "@/lib/utils";
 import { prisma } from "@/lib/prisma";
 import type {
   BudgetVersion,
+  Componente,
   MaterialOption,
   PricingDiff,
   PricingDiffRow,
@@ -94,11 +96,15 @@ async function resolveEnterprise(
 
   const rows: ResolvedRow[] = [];
   const published = new Map<number, MaterialOption["publicado"]>();
-  const seen = new Map<number, { tipologia: Tipologia; qtd: number }>();
-  // Chaveado por COMPONENTE, não por opção: a quantidade diverge no componente
-  // (BlueprintRoomComponent), então cada opção dele produziria a MESMA frase — e
-  // o usuário leria o mesmo aviso três vezes.
-  const conflitos = new Map<number, string>();
+  const seen = new Map<
+    number,
+    { tipologia: Tipologia; qtd: number; kitQtds: string | null; padKitQtds: string | null }
+  >();
+  // Material: chaveado por COMPONENTE, não por opção — a quantidade diverge no
+  // componente (BlueprintRoomComponent), então cada opção dele produziria a
+  // MESMA frase e o usuário leria o mesmo aviso três vezes. Kit: por opção,
+  // porque os quantitativos dos sub-itens são de cada kit.
+  const conflitos = new Map<string, string>();
 
   for (const tip of tipologias) {
     for (const amb of tip.ambientes) {
@@ -107,23 +113,61 @@ async function resolveEnterprise(
           if (opt.isDefault) continue; // o padrão é crédito, não preço de venda
 
           const qtd = qtdOf(deps, comp, opt.id);
+          const kitQtds = opt.isKit ? kitQtdsLabel(deps, comp, opt) : null;
+          // Kit PADRÃO: as quantidades dos sub-itens definem o crédito de todas
+          // as opções do componente.
+          const def = comp.options.find((o) => o.id === comp.padrao);
+          const padKitQtds = def?.isKit ? kitQtdsLabel(deps, comp, def) : null;
           const first = seen.get(opt.id);
           if (first) {
             // Já resolvido numa tipologia anterior. Se a quantidade herdada
             // difere e não há override, o preço publicado é o da primeira —
             // avisar é melhor que escolher calado.
             const semOverride = deps.pricings[opt.id]?.qtd == null;
-            if (semOverride && Math.abs(first.qtd - qtd) >= 0.0001 && !conflitos.has(comp.id)) {
+            const compKey = `comp-${comp.id}`;
+            if (
+              !opt.isKit &&
+              semOverride &&
+              Math.abs(first.qtd - qtd) >= 0.0001 &&
+              !conflitos.has(compKey)
+            ) {
               conflitos.set(
-                comp.id,
+                compKey,
                 `"${amb.nome} · ${comp.nome}" é compartilhado e tem quantidades diferentes ` +
                   `(${first.tipologia.nome}: ${first.qtd}; ${tip.nome}: ${qtd}). ` +
                   `O preço publicado usa a de ${first.tipologia.nome}.`
               );
             }
+            // Kit: os quantitativos dos sub-itens são da PLANTA e não têm
+            // override compartilhado — divergência entre tipologias sempre avisa.
+            const kitKey = `kit-${opt.id}`;
+            if (kitQtds !== null && first.kitQtds !== kitQtds && !conflitos.has(kitKey)) {
+              conflitos.set(
+                kitKey,
+                `"${amb.nome} · ${comp.nome}" é compartilhado e o kit "${nomeDaOpcao(deps, opt)}" ` +
+                  `tem quantidades de sub-itens diferentes (${first.tipologia.nome}: ` +
+                  `${first.kitQtds}; ${tip.nome}: ${kitQtds}). O preço publicado usa as de ` +
+                  `${first.tipologia.nome}.`
+              );
+            }
+            const padKey = `kitpad-${comp.id}`;
+            if (
+              def &&
+              padKitQtds !== null &&
+              first.padKitQtds !== padKitQtds &&
+              !conflitos.has(padKey)
+            ) {
+              conflitos.set(
+                padKey,
+                `"${amb.nome} · ${comp.nome}" é compartilhado e o kit padrão ` +
+                  `"${nomeDaOpcao(deps, def)}" tem quantidades de sub-itens diferentes ` +
+                  `(${first.tipologia.nome}: ${first.padKitQtds}; ${tip.nome}: ${padKitQtds}). ` +
+                  `O crédito publicado usa as de ${first.tipologia.nome}.`
+              );
+            }
             continue;
           }
-          seen.set(opt.id, { tipologia: tip, qtd });
+          seen.set(opt.id, { tipologia: tip, qtd, kitQtds, padKitQtds });
           published.set(opt.id, opt.publicado);
 
           const nome = nomeDaOpcao(deps, opt);
@@ -135,9 +179,7 @@ async function resolveEnterprise(
           };
 
           const r = calcAnyRow(deps, comp, opt);
-          const pendente =
-            r == null || (r.kind === "kit" ? r.result.subItemPending : isOptionPending(deps, opt));
-          if (pendente || !r) {
+          if (!r || isRowPending(deps, comp, opt, r)) {
             rows.push({ ...base, total: null, snapshot: null });
             continue;
           }
@@ -165,6 +207,15 @@ async function resolveEnterprise(
   }
 
   return { rows, avisos: [...conflitos.values()], published };
+}
+
+/**
+ * Quantidades líquidas dos sub-itens de um kit nesta planta, como texto
+ * comparável e exibível ("18,4 / 12 / —"). "—" = pendente.
+ */
+function kitQtdsLabel(deps: BudgetDeps, comp: Componente, opt: MaterialOption): string {
+  const subs = kitSubItemsOf(deps, comp, opt) ?? [];
+  return subs.map((s) => (s.qtd === null ? "—" : fmtNum(s.qtd, 2))).join(" / ");
 }
 
 function nomeDaOpcao(deps: BudgetDeps, opt: MaterialOption): string {

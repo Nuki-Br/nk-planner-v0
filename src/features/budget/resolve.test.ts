@@ -1,14 +1,21 @@
 import { describe, expect, it } from "vitest";
 
 import { createSeed } from "@/lib/data/seed";
-import type { CustosBase, MaterialOption, PublishedPricing } from "@/shared/types/domain";
+import {
+  EMPTY_PRICING,
+  type CustosBase,
+  type MaterialOption,
+  type PublishedPricing,
+} from "@/shared/types/domain";
 
 import {
   baseCostStatus,
+  creditSideOf,
   custoBaseOf,
   isBasePending,
   isOptionOwnPending,
-  priceLookupFor,
+  kitItemQtd,
+  kitSubItemsOf,
   pricingOf,
   qtdOf,
   rowSideOf,
@@ -174,24 +181,56 @@ describe("rowSideOf", () => {
   });
 });
 
-describe("priceLookupFor", () => {
-  it("cobre só os sub-itens dos kits ofertados — opções avulsas ficam de fora", () => {
-    // Sala t3 oferta o kit Piso Barcelona (3 sub-itens) ao lado de pisos avulsos.
-    const lookup = priceLookupFor(deps(), salaPisoT3);
-    const kitPB = seed.kits.find((k) => k.codigo === "KIT-PB")!;
-    for (const it of kitPB.itens) expect(lookup.has(it.materialId)).toBe(true);
-    expect(lookup.get(mat("PB-9090-AC").id)?.valUn).toBeCloseTo(180 + 28, 10);
-    // A opção avulsa resolve pelo rowSideOf (com override), não pelo lookup.
-    expect(lookup.has(mat("PP-6060-BI").id)).toBe(false);
-    // componente sem kit (Cozinha · Piso) → lookup vazio
-    expect(priceLookupFor(deps(), t1.ambientes[1]!.componentes[0]!).size).toBe(0);
+describe("sub-itens de kit (kitItemQtd / kitSubItemsOf)", () => {
+  const kitPB = seed.kits.find((k) => k.codigo === "KIT-PB")!;
+  // Porcelanato em m², soleira em und, "reserva técnica" em m² (sem custo).
+  const [pisoBcn, solBcn] = kitPB.itens;
+  const optKitT1 = salaPisoT1.options.find((o) => o.baseId === kitPB.id)!;
+  const optKitT3 = salaPisoT3.options.find((o) => o.baseId === kitPB.id)!;
+  const semGravacao = { ...salaPisoT1, kitQtds: {} };
+
+  it("usa a quantidade gravada na planta — 0 incluso", () => {
+    expect(kitItemQtd(salaPisoT1, pisoBcn!)).toEqual({ qtd: 18.4, herdada: false });
+    expect(kitItemQtd({ ...salaPisoT1, kitQtds: { [solBcn!.id]: 0 } }, solBcn!)).toEqual({
+      qtd: 0,
+      herdada: false,
+    });
   });
 
-  it("sub-item de kit sem custo base entra como pendente", () => {
-    const kitComp = salaPisoT3;
-    const lookup = priceLookupFor(deps(), kitComp);
-    const rtBcn = mat("RT-9090-AC"); // Reserva Técnica Barcelona, sem custo no seed
-    expect(lookup.get(rtBcn.id)?.pending).toBe(true);
+  it("sem gravação herda a qtd do componente se a unidade bate; senão fica pendente", () => {
+    expect(kitItemQtd(semGravacao, pisoBcn!)).toEqual({ qtd: 18.4, herdada: true }); // m² = m²
+    expect(kitItemQtd(semGravacao, solBcn!)).toEqual({ qtd: null, herdada: false }); // und ≠ m²
+  });
+
+  it("herda a qtd DO KIT (override da aplicação), não só a do componente", () => {
+    const d = deps({ pricings: { [optKitT1.id]: { ...EMPTY_PRICING, qtd: 20 } } });
+    const subs = kitSubItemsOf(d, semGravacao, optKitT1)!;
+    expect(subs[0]).toMatchObject({ qtd: 20, herdada: true });
+    expect(subs[1]?.qtd).toBeNull();
+  });
+
+  it("preço do sub-item é o custo base do material filho; sem custo = pendente", () => {
+    const subs = kitSubItemsOf(deps(), salaPisoT3, optKitT3)!;
+    expect(subs.map((x) => x.qtd)).toEqual([36.8, 3, 3.68]);
+    expect(subs[0]?.valUn).toBeCloseTo(180 + 28, 10);
+    expect(subs[2]?.pending).toBe(true); // Reserva Técnica Barcelona, sem custo no seed
+  });
+});
+
+describe("creditSideOf (crédito do padrão)", () => {
+  it("material: valor unitário × qtd líquida", () => {
+    expect(creditSideOf(deps(), salaPisoT1)).toEqual({ credito: 84.5 * 18.4, pending: false });
+  });
+
+  it("kit padrão: Σ sub-itens na qtd líquida (sem RT)", () => {
+    const optKit = salaPisoT1.options.find((o) => o.isKit)!;
+    const c = creditSideOf(deps(), { ...salaPisoT1, padrao: optKit.id })!;
+    expect(c.credito).toBeCloseTo(208 * 18.4 + 115 * 2, 10); // rt-bcn sem custo entra 0
+    expect(c.pending).toBe(true);
+  });
+
+  it("sem padrão não há crédito", () => {
+    expect(creditSideOf(deps(), { ...salaPisoT1, padrao: null })).toBeNull();
   });
 });
 

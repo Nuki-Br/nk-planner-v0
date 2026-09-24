@@ -8,8 +8,8 @@ import type { BudgetColumn } from "@/shared/types/domain";
 /**
  * Forma comum em que um sub-item de kit e uma parcela da composição do custo
  * base se projetam: um só componente renderiza os dois, em profundidade 1 sob
- * a linha mestre. Só leitura — o kit vem do catálogo e a composição se edita
- * na aba "Itens de custo".
+ * a linha mestre. A composição é só leitura (edita-se na aba "Itens de custo");
+ * o sub-item de kit injeta os seus editores pelos slots do SubRow.
  */
 export interface SubRowCells {
   key: string;
@@ -22,13 +22,15 @@ export interface SubRowCells {
   /** valUn * qtd — já estendido. */
   line: number;
   pending: boolean;
+  /** Sub-item de kit sem quantidade nesta planta — a linha não tem valor. */
+  pendingQtd?: boolean;
   /** Selo curto à direita do nome (ex.: "Insumo"). */
   badge?: string;
   /** Linha de crédito (lado padrão) em vez de débito. */
   credito?: boolean;
 }
 
-function Td({
+export function Td({
   children,
   right = false,
   className,
@@ -57,7 +59,15 @@ function Td({
  * Sub-linha indentada sob uma linha mestre. Só qtd, valor unitário e o valor da
  * linha: colunas de taxa e total são da mestre — a parcela já está somada nela.
  */
-export function SubRow({ cells, isLast, cols, usaDebitoCredito = true, dimmed = false }: {
+export function SubRow({
+  cells,
+  isLast,
+  cols,
+  usaDebitoCredito = true,
+  dimmed = false,
+  qtdSlot,
+  actionSlot,
+}: {
   cells: SubRowCells;
   isLast: boolean;
   cols: BudgetColumn[];
@@ -65,7 +75,12 @@ export function SubRow({ cells, isLast, cols, usaDebitoCredito = true, dimmed = 
   usaDebitoCredito?: boolean;
   /** Só informativa — ex.: o valor unitário da linha-pai foi sobreposto. */
   dimmed?: boolean;
+  /** Substitui o texto da coluna Qtd (editor de quantidade do sub-item de kit). */
+  qtdSlot?: React.ReactNode;
+  /** Ação sob o nome (ex.: "Preencher custo" de um sub-item de kit). */
+  actionSlot?: React.ReactNode;
 }) {
+  const semValor = cells.pending || cells.pendingQtd;
   return (
     <tr className={cn(dimmed && "opacity-60")}>
       <Td sticky className="bg-white !pl-0">
@@ -83,7 +98,7 @@ export function SubRow({ cells, isLast, cols, usaDebitoCredito = true, dimmed = 
             <div
               className={cn(
                 "flex items-center gap-1.5 text-xs",
-                cells.pending ? "text-tint-amber-fg" : "text-neutral-gray-9"
+                semValor ? "text-tint-amber-fg" : "text-neutral-gray-9"
               )}
             >
               <span>
@@ -96,26 +111,36 @@ export function SubRow({ cells, isLast, cols, usaDebitoCredito = true, dimmed = 
                 </span>
               )}
             </div>
-            {(cells.sub || cells.pending) && (
+            {(cells.sub || cells.pending || cells.pendingQtd) && (
               <code className="text-[10px] text-neutral-gray-6">
                 {cells.sub}
                 {cells.pending && (
                   <span className="ml-1.5 font-bold text-tint-orange-fg">aguardando</span>
                 )}
+                {cells.pendingQtd && (
+                  <span className="ml-1.5 font-bold text-tint-orange-fg">
+                    {cells.pending && "· "}sem quantidade
+                  </span>
+                )}
               </code>
             )}
+            {actionSlot}
           </div>
         </div>
       </Td>
       <Td right className="bg-white text-neutral-gray-7">
-        {fmtNum(cells.qtd, 2)} {cells.unidade}
+        {qtdSlot ?? (
+          <>
+            {fmtNum(cells.qtd, 2)} {cells.unidade}
+          </>
+        )}
       </Td>
       <Td right className="bg-white text-neutral-gray-7">
         {cells.pending ? "—" : fmtBRL(cells.valUn)}
       </Td>
       {usaDebitoCredito && (
         <Td right className="bg-white">
-          {cells.pending ? (
+          {semValor ? (
             <span className="text-neutral-gray-5">—</span>
           ) : (
             <span

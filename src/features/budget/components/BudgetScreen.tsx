@@ -14,6 +14,7 @@ import { waitForSaves, type SaveGateResult } from "@/lib/hooks/writeQueue";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { useCustosBase, useSaveCustoBase, toCustosBaseMap } from "@/lib/hooks/useCustosBase";
 import { useKits } from "@/lib/hooks/useKits";
+import { useSaveKitQtd } from "@/lib/hooks/useKitQtds";
 import { useMateriais } from "@/lib/hooks/useMateriais";
 import {
   usePricing,
@@ -37,7 +38,7 @@ import {
   custoBaseOf,
   emptyScopeRefs,
   isOptionOwnPending,
-  isOptionPending,
+  isRowPending,
   padroesPendentes,
   pricingOf,
   qtdOf,
@@ -51,7 +52,7 @@ import { PricingStatusBadge } from "./PricingStatusBadge";
 import { PublishDiffList } from "./PublishDiffList";
 import { QtyPopover, type QtyValue } from "./QtyPopover";
 import { UnitCostCell } from "./UnitCostCell";
-import { composicaoSubRows, kitSubRow } from "../subRows";
+import { composicaoSubRows } from "../subRows";
 import { AddColumnTh, ColHeaderCell } from "./ColHeaderCell";
 import { BudgetScreenSkeleton } from "./BudgetScreenSkeleton";
 import { ColumnModal, type ColumnDraft } from "./ColumnModal";
@@ -59,7 +60,8 @@ import { CostBaseView } from "./CostBaseView";
 import { CostItemsView } from "./CostItemsView";
 import { FormulaCellEditor } from "./FormulaCellEditor";
 import { PublishSplitButton } from "./PublishSplitButton";
-import { SubRow, type SubRowCells } from "./SubRow";
+import { KitOptionRows } from "./KitOptionRows";
+import { SubRow, Td, type SubRowCells } from "./SubRow";
 import { VersionDrawer, VersionToast } from "./Versioning";
 
 type PendingFillMode = "inline" | "expandRow";
@@ -166,31 +168,6 @@ function Th({
   );
 }
 
-function Td({
-  children,
-  right = false,
-  className,
-  sticky = false,
-}: {
-  children?: React.ReactNode;
-  right?: boolean;
-  className?: string;
-  sticky?: boolean;
-}) {
-  return (
-    <td
-      className={cn(
-        "border-b border-neutral-gray-4 px-2.5 py-[7px] align-middle text-xs text-neutral-gray-11",
-        right ? "text-right" : "text-left",
-        sticky && "sticky left-0 z-[1] border-r border-r-neutral-gray-4",
-        className
-      )}
-    >
-      {children}
-    </td>
-  );
-}
-
 // Célula da coluna "Comentários" (extremidade direita, espelha a Visão Custos base).
 function CommentTd({
   count,
@@ -292,6 +269,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   const updateCols = useUpdateBudgetColumns();
   const saveCustoBase = useSaveCustoBase(projectId);
   const savePricing = useSavePricing(projectId);
+  const saveKitQtd = useSaveKitQtd(projectId);
   const publishBudget = usePublishBudget(projectId);
   const restoreVersion = useRestoreVersion(projectId ?? 0);
   const queryClient = useQueryClient();
@@ -452,6 +430,14 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
     savePricing.mutate({ optionId, valorUnitario });
   const saveQtd = (optionId: number, v: QtyValue) =>
     savePricing.mutate({ optionId, qtd: v.qtd, rt: v.rt, unidade: v.unidade });
+  /** Qtd de um sub-item de kit NESTA tipologia (null = volta a herdar/pendente). */
+  const saveKitItemQtd = (
+    ambienteId: number,
+    componenteId: number,
+    kitItemId: number,
+    qtd: number | null
+  ) =>
+    saveKitQtd.mutate({ tipologiaId: tip.id, ambienteId, componenteId, kitItemId, qtd });
 
   // ── preenchimento de custo pendente (grava no custo base do empreendimento) ──
   const openFill = (rowKey: string, baseId: number) => {
@@ -601,13 +587,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   for (const amb of tip.ambientes) {
     for (const comp of amb.componentes) {
       for (const opt of comp.options) {
-        if (opt.isDefault) continue;
-        if (opt.isKit) {
-          const r = calcAnyRow(deps, comp, opt);
-          if (r?.kind === "kit" && r.result.subItemPending) excludedCount++;
-        } else if (isOptionPending(deps, opt)) {
-          excludedCount++;
-        }
+        if (!opt.isDefault && isRowPending(deps, comp, opt)) excludedCount++;
       }
     }
   }
@@ -895,7 +875,8 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                 // na de upgrade se tiver ao menos uma opção não-padrão.
                 const hasPadrao = amb.componentes.some((c) => {
                   const d = c.options.find((o) => o.id === c.padrao);
-                  return Boolean(d && !d.isKit && getMaterial(materiais, d.baseId));
+                  if (!d) return false;
+                  return Boolean(d.isKit ? getKit(kits, d.baseId) : getMaterial(materiais, d.baseId));
                 });
                 const hasUpgrade = amb.componentes.some((c) =>
                   c.options.some((o) => !o.isDefault)
@@ -930,9 +911,38 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                     )}
                     {amb.componentes.map((comp) => {
                       const def = comp.options.find((o) => o.id === comp.padrao);
-                      const padMat =
-                        def && !def.isKit ? getMaterial(materiais, def.baseId) : undefined;
-                      if (!def || !padMat) return null;
+                      if (!def) return null;
+                      // Kit padrão: o crédito é a soma dos sub-itens na qtd
+                      // líquida, e cada sub-item se edita na própria sub-linha.
+                      if (def.isKit) {
+                        const padKit = getKit(kits, def.baseId);
+                        if (!padKit) return null;
+                        const key = `pad-${comp.id}`;
+                        return (
+                          <KitOptionRows
+                            key={key}
+                            modo="padrao"
+                            kit={padKit}
+                            comp={comp}
+                            opt={def}
+                            deps={deps}
+                            cols={cols}
+                            usaDC={usaDC}
+                            tipologia={tip.nome}
+                            expanded={!collapsedRows.has(key)}
+                            onToggle={() => toggleRow(key)}
+                            onSaveQtd={(v) => saveQtd(def.id, v)}
+                            onSaveItemQtd={(itemId, q) =>
+                              saveKitItemQtd(amb.blueprintRoomId, comp.id, itemId, q)
+                            }
+                            onFillCost={persistBaseCost}
+                            onSemCusto={markSemCusto}
+                            onVerItens={() => setView("itens")}
+                          />
+                        );
+                      }
+                      const padMat = getMaterial(materiais, def.baseId);
+                      if (!padMat) return null;
                       // Valor unitário EFETIVO do padrão: o override da aplicação
                       // vence o custo base do empreendimento. O crédito é o
                       // material que a construtora deixaria de instalar, na
@@ -1227,138 +1237,53 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                         if (opt.isDefault) return null;
                         const rk = rowKey(opt.id);
 
-                        // ── KIT: linha principal + sub-itens ──
+                        // ── KIT: linha principal + sub-itens editáveis ──
                         if (opt.isKit) {
                           const kit = getKit(kits, opt.baseId);
                           if (!kit) return null;
                           const rr = calcAnyRow(deps, comp, opt);
                           const r = rr?.kind === "kit" ? rr.result : null;
-                          // Pendência do kit = algum sub-item sem custo base.
-                          const pending = r ? r.subItemPending : true;
-                          const expanded = !collapsedRows.has(rk);
-                          const kitBg = pending ? "bg-functional-warning-light" : "bg-[#fbf6ff]";
-                          const kitPricing = pricingOf(deps, opt.id);
-                          const kitChildren = (r?.subItems ?? []).map(kitSubRow);
+                          const kitBg = r && !r.pending ? "bg-[#fbf6ff]" : "bg-functional-warning-light";
+                          const kitCmts = commentThreads[rk] ?? [];
                           return (
-                            <React.Fragment key={rk}>
-                              <tr className="group/row">
-                                <Td sticky className={kitBg}>
-                                  <div className="flex items-start gap-1.5">
-                                    <button
-                                      type="button"
-                                      onClick={() => toggleRow(rk)}
-                                      title={expanded ? "Recolher kit" : "Expandir kit"}
-                                      className="flex pt-px text-neutral-gray-7"
-                                    >
-                                      <Icon name={expanded ? "chevD" : "chevR"} size={15} />
-                                    </button>
-                                    <div className="flex-1">
-                                      <div className="flex flex-wrap items-center gap-[7px]">
-                                        <span
-                                          className={cn(
-                                            "text-xs font-bold",
-                                            pending ? "text-tint-amber-fg" : "text-neutral-gray-11"
-                                          )}
-                                        >
-                                          {kit.nome}
-                                        </span>
-                                        <span className="inline-flex items-center gap-[3px] rounded-full bg-primary-8 px-[7px] py-px text-[10px] font-bold text-white">
-                                          ⬡ Kit
-                                        </span>
-                                      </div>
-                                      <div
-                                        className={cn(
-                                          "mt-px text-[11px]",
-                                          pending ? "text-[#b45309]" : "text-neutral-gray-6"
-                                        )}
-                                      >
-                                        {comp.nome} · {kit.itens.length} itens
-                                        {pending && (
-                                          <span className="ml-1.5 font-bold text-tint-orange-fg">
-                                            · Sub-item aguardando custo
-                                          </span>
-                                        )}
-                                      </div>
-                                    </div>
-                                    {pending && (
-                                      <Icon name="warning" size={13} className="text-tint-orange-fg" />
-                                    )}
-                                  </div>
-                                </Td>
-                                <Td right className={cn(kitBg, "text-neutral-gray-7")}>
-                                  <QtyPopover
-                                    qtd={qtdOf(deps, comp, opt.id)}
-                                    rt={rtOf(deps, comp, opt.id)}
-                                    unidade={unidadeOf(deps, comp, opt.id)}
-                                    herdado={{ qtd: comp.qtd, rt: comp.rt, unidade: comp.unidade }}
-                                    overridden={
-                                      kitPricing.qtd != null ||
-                                      kitPricing.rt != null ||
-                                      kitPricing.unidade != null
-                                    }
-                                    comRT
-                                    onSave={(v) => saveQtd(opt.id, v)}
-                                  />
-                                </Td>
-                                {/* Kit não tem valor unitário editável: o custo é
-                                    a soma dos sub-itens, cada um com seu custo
-                                    base. Sobrescrever aqui esconderia essa conta. */}
-                                <Td right className={cn(kitBg, "text-neutral-gray-7")}>
-                                  {kit.itens.length} itens
-                                </Td>
-                                {usaDC && (
-                                  <Td right className={kitBg}>
-                                    {r && !pending ? (
-                                      <span className="font-semibold text-[#c2410c]">
-                                        Déb. {fmtBRL(r.debitoTotal)}
-                                      </span>
-                                    ) : (
-                                      "—"
-                                    )}
-                                  </Td>
-                                )}
-                                <Td right className={cn(kitBg, "text-neutral-gray-8")}>
-                                  {r && !pending ? (
-                                    <span
-                                      className={cn(
-                                        "font-semibold",
-                                        r.custoDeTroca >= 0
-                                          ? "text-neutral-gray-8"
-                                          : "text-functional-success"
-                                      )}
-                                    >
-                                      {fmtBRL(r.custoDeTroca)}
-                                    </span>
-                                  ) : (
-                                    "—"
-                                  )}
-                                </Td>
-                                {cols.map((col, colIdx) =>
-                                  renderConfigCell(col, colIdx, pending ? null : rr, opt.id, kitBg)
-                                )}
-                                <Td className={kitBg} />
-                                <Td right className={r && !pending ? "bg-primary-1" : kitBg}>
-                                  {r && !pending ? (
-                                    <span className="text-[13px] font-extrabold text-primary-7">
-                                      {fmtBRL(r.total)}
-                                    </span>
-                                  ) : (
-                                    "—"
-                                  )}
-                                </Td>
-                                <CommentTd className={kitBg} />
-                              </tr>
-                              {expanded &&
-                                kitChildren.map((c, ci) => (
-                                  <SubRow
-                                    key={`${rk}-${c.key}`}
-                                    cells={c}
-                                    isLast={ci === kitChildren.length - 1}
-                                    cols={cols}
-                                    usaDebitoCredito={usaDC}
-                                  />
-                                ))}
-                            </React.Fragment>
+                            <KitOptionRows
+                              key={rk}
+                              modo="upgrade"
+                              kit={kit}
+                              comp={comp}
+                              opt={opt}
+                              deps={deps}
+                              cols={cols}
+                              usaDC={usaDC}
+                              tipologia={tip.nome}
+                              expanded={!collapsedRows.has(rk)}
+                              onToggle={() => toggleRow(rk)}
+                              result={r}
+                              configCells={cols.map((col, colIdx) =>
+                                renderConfigCell(col, colIdx, r && !r.pending ? rr : null, opt.id, kitBg)
+                              )}
+                              commentCell={
+                                <CommentTd
+                                  count={kitCmts.length}
+                                  onOpen={() =>
+                                    setOpenThread({
+                                      key: rk,
+                                      especificacao: kit.nome,
+                                      ambiente: amb.nome,
+                                      componente: comp.nome,
+                                    })
+                                  }
+                                  className={kitBg}
+                                />
+                              }
+                              onSaveQtd={(v) => saveQtd(opt.id, v)}
+                              onSaveItemQtd={(itemId, q) =>
+                                saveKitItemQtd(amb.blueprintRoomId, comp.id, itemId, q)
+                              }
+                              onFillCost={persistBaseCost}
+                              onSemCusto={markSemCusto}
+                              onVerItens={() => setView("itens")}
+                            />
                           );
                         }
 

@@ -9,15 +9,14 @@ import {
   rowKey,
   type BudgetRowResult,
   type KitRowResult,
-  type PriceLookup,
   type RowOverrides,
 } from "@/lib/budget";
 import { normName } from "@/lib/formula";
-import { getKit } from "@/lib/data/entities";
 import { fmtBRL } from "@/lib/utils";
 import {
+  creditSideOf,
   isOptionOwnPending,
-  priceLookupFor,
+  kitSubItemsOf,
   pricingOf,
   qtdOf,
   rowSideOf,
@@ -34,9 +33,11 @@ import type {
 
 export type { PricingMap } from "./resolve";
 export {
+  creditSideOf,
   custoBaseOf,
   isBasePending,
   isOptionOwnPending,
+  kitSubItemsOf,
   pricingOf,
   qtdOf,
   rtOf,
@@ -60,31 +61,39 @@ function rowOverridesOf(deps: BudgetDeps, optionId: number): RowOverrides {
   return pricingOf(deps, optionId).colunas;
 }
 
-/** Preços dos BaseMaterials consultáveis pelo motor neste componente (sub-itens de kit). */
-export function priceLookup(deps: BudgetDeps, comp: Componente): PriceLookup {
-  return priceLookupFor(deps, comp);
-}
-
 /**
- * A linha sai dos totais quando a própria opção está sem custo: material sem
- * cotação, insumo da composição sem preço ou sub-item de kit pendente. Com a
- * composição dobrada no custo base, é o mesmo critério de isOptionOwnPending.
+ * A linha (material) sai dos totais quando a própria opção está sem custo:
+ * material sem cotação ou insumo da composição sem preço. Com a composição
+ * dobrada no custo base, é o mesmo critério de isOptionOwnPending. Kit usa
+ * `KitRowResult.pending`, que também cobre sub-item sem quantidade.
  */
 export function isOptionPending(deps: BudgetDeps, opt: MaterialOption): boolean {
   return isOptionOwnPending(deps, opt);
+}
+
+/**
+ * A linha da opção fica FORA dos totais e da publicação? Material: sem custo.
+ * Kit: sub-item sem custo ou sem quantidade nesta planta. `r` é o cálculo da
+ * linha, quando o chamador já o tem.
+ */
+export function isRowPending(
+  deps: BudgetDeps,
+  comp: Componente,
+  opt: MaterialOption,
+  r: AnyRowResult | null = calcAnyRow(deps, comp, opt)
+): boolean {
+  if (!r) return true;
+  return r.kind === "kit" ? r.result.pending : isOptionPending(deps, opt);
 }
 
 export type AnyRowResult =
   | { kind: "kit"; result: KitRowResult }
   | { kind: "material"; result: BudgetRowResult };
 
-/** Opção padrão (crédito) do componente — só conta se não for kit. */
-function padraoOption(comp: Componente): MaterialOption | undefined {
-  const def = comp.options.find((o) => o.id === comp.padrao);
-  return def && !def.isKit ? def : undefined;
-}
-
-/** Cálculo unificado da linha (opção): kit → calcKitRow; material → calcBudgetRow. */
+/**
+ * Cálculo unificado da linha (opção): kit → calcKitRow; material → calcBudgetRow.
+ * O crédito vem do padrão do componente, seja ele material ou kit.
+ */
 export function calcAnyRow(
   deps: BudgetDeps,
   comp: Componente,
@@ -92,21 +101,17 @@ export function calcAnyRow(
 ): AnyRowResult | null {
   const ovr = rowOverridesOf(deps, opt.id);
   const usaDC = deps.usaDebitoCredito ?? true;
-  const def = padraoOption(comp);
-  const pad = def ? rowSideOf(deps, comp, def) : null;
-  const prices = priceLookup(deps, comp);
+  const pad = creditSideOf(deps, comp);
 
   if (opt.isKit) {
-    const kit = getKit(deps.kits, opt.baseId);
-    if (!kit) return null;
+    const subs = kitSubItemsOf(deps, comp, opt);
+    if (!subs) return null;
     return {
       kind: "kit",
       result: calcKitRow(
-        kit,
-        comp,
+        subs,
         { qtd: qtdOf(deps, comp, opt.id), rt: rtOf(deps, comp, opt.id) },
         pad,
-        prices,
         deps.cols,
         ovr,
         usaDC
@@ -147,7 +152,8 @@ export function padroesPendentes(
         if (out.has(comp.id)) continue;
         const pad = comp.options.find((o) => o.isDefault);
         if (!pad || !comp.options.some((o) => !o.isDefault)) continue;
-        if (isOptionOwnPending(deps, pad)) {
+        // Kit padrão também conta sub-item sem quantidade: ele credita zero.
+        if (creditSideOf(deps, comp)?.pending) {
           out.set(comp.id, { compId: comp.id, ambiente: amb.nome, componente: comp.nome });
         }
       }
@@ -162,14 +168,8 @@ export function ambTotal(deps: BudgetDeps, amb: Ambiente): number {
   for (const comp of amb.componentes) {
     for (const opt of comp.options) {
       if (opt.isDefault) continue;
-      if (opt.isKit) {
-        const r = calcAnyRow(deps, comp, opt);
-        if (r?.kind === "kit" && !r.result.subItemPending) t += r.result.total;
-        continue;
-      }
-      if (isOptionPending(deps, opt)) continue;
       const r = calcAnyRow(deps, comp, opt);
-      if (r?.kind === "material") t += r.result.total;
+      if (r && !isRowPending(deps, comp, opt, r)) t += r.result.total;
     }
   }
   return t;

@@ -906,7 +906,7 @@ export async function listEnterpriseCosts(
   const costByBase = new Map(costs.map((c) => [c.BaseMaterialId, c]));
   const rows = new Map<number, CustoBaseRow>();
 
-  const add = (bm: BaseMaterialCostDb, label: string, unidadeFallback: string, indireto: boolean) => {
+  const add = (bm: BaseMaterialCostDb, label: string, unidade: string, indireto: boolean) => {
     const found = rows.get(bm.Id);
     if (found) {
       found.usos += 1;
@@ -925,7 +925,7 @@ export async function listEnterpriseCosts(
       nome: bm.Name,
       fabricante: bm.Manufacturer ?? "",
       categoria: bm.Category?.Name ?? "",
-      unidade: toUnidadeOrNull(bm.Unit ?? unidadeFallback),
+      unidade: toUnidadeOrNull(unidade),
       usos: 1,
       usadoEm: [label],
       somenteIndireto: indireto,
@@ -936,12 +936,15 @@ export async function listEnterpriseCosts(
     const label = `${opt.Room.Name} · ${opt.RoomComponent.Name}`;
     const bm = opt.BaseMaterial;
     if (bm.Type === "kit") {
-      // O kit em si não tem custo — quem precisa de preço são os sub-itens.
-      for (const ki of bm.KitItems)
-        add(ki.ChildMaterial, `${label} · ${bm.Name}`, opt.RoomComponent.Unit, true);
+      // O kit em si não tem custo — quem precisa de preço são os sub-itens, na
+      // unidade do SUB-ITEM (rodapé em ml num Piso em m²).
+      for (const ki of bm.KitItems) {
+        const unidade = ki.Unit ?? ki.ChildMaterial.Unit ?? opt.RoomComponent.Unit;
+        add(ki.ChildMaterial, `${label} · ${bm.Name}`, unidade, true);
+      }
       continue;
     }
-    add(bm, label, opt.RoomComponent.Unit, false);
+    add(bm, label, bm.Unit ?? opt.RoomComponent.Unit, false);
   }
 
   // Pendentes primeiro (é o que o usuário veio resolver), depois por nome.
@@ -1342,7 +1345,22 @@ async function loadKit(id: number): Promise<Kit> {
   return toKit(row);
 }
 
+/**
+ * Sub-itens de um kit: materiais AVULSOS (kit não aninha kit) da própria org,
+ * sem repetição. De qualquer categoria — piso + rodapé + soleira é o caso comum.
+ */
+async function assertKitChildren(organizationId: string, itens: KitInput["itens"]): Promise<void> {
+  const ids = itens.map((it) => it.materialId);
+  if (new Set(ids).size !== ids.length) throw new Error("Material repetido na composição do kit.");
+  if (ids.length === 0) return;
+  const found = await prisma.baseMaterial.count({
+    where: { Id: { in: ids }, OrganizationId: organizationId, Type: "single" },
+  });
+  if (found !== ids.length) throw new Error("Item inválido na composição do kit.");
+}
+
 export async function createKit(organizationId: string, input: KitInput): Promise<Kit> {
+  await assertKitChildren(organizationId, input.itens);
   const categoryId = await resolveCategoryId(organizationId, input.categoria);
   const row = await prisma.baseMaterial.create({
     data: {
@@ -1380,19 +1398,28 @@ export async function updateKit(
   if (patch.categoria !== undefined) {
     data.Category = { connect: { Id: await resolveCategoryId(organizationId, patch.categoria) } };
   }
+  if (patch.itens !== undefined) await assertKitChildren(organizationId, patch.itens);
   await prisma.baseMaterial.update({ where: { Id: id }, data });
   if (patch.itens !== undefined) {
-    // Recompõe os sub-itens (substitui a composição). Cascade limpa os KitItems
-    // antigos e seus MaterialKitUsage por planta.
+    // Reconcilia a composição por material filho em vez de recriá-la: o
+    // MaterialKitItem que continua no kit mantém o Id — e com ele os
+    // quantitativos por planta (MaterialKitUsage) de TODOS os empreendimentos.
+    // Só o sub-item removido leva os seus junto (cascade). Antes, qualquer
+    // salvar (até renomear o kit) apagava todas as quantidades.
+    const itens = patch.itens;
     await prisma.$transaction([
-      prisma.materialKitItem.deleteMany({ where: { ParentMaterialId: id } }),
-      prisma.materialKitItem.createMany({
-        data: patch.itens.map((it, i) => ({
-          ParentMaterialId: id,
-          ChildMaterialId: it.materialId,
-          Position: i,
-          Unit: it.unidade || null, // "" nunca persiste — cai no fallback do material
-        })),
+      prisma.materialKitItem.deleteMany({
+        where: { ParentMaterialId: id, ChildMaterialId: { notIn: itens.map((it) => it.materialId) } },
+      }),
+      ...itens.map((it, i) => {
+        const unit = it.unidade || null; // "" nunca persiste — cai no fallback do material
+        return prisma.materialKitItem.upsert({
+          where: {
+            ParentMaterialId_ChildMaterialId: { ParentMaterialId: id, ChildMaterialId: it.materialId },
+          },
+          update: { Position: i, Unit: unit },
+          create: { ParentMaterialId: id, ChildMaterialId: it.materialId, Position: i, Unit: unit },
+        });
       }),
     ]);
   }
@@ -2011,31 +2038,49 @@ export async function removeUpgrade(
   return reloadComponente(organizationId, blueprintRoomId, componenteId);
 }
 
-/** Grava os quantitativos de sub-itens de kit desta planta (keyed por KitItem id). */
+/**
+ * Grava os quantitativos de sub-itens de kit desta planta (keyed por KitItem
+ * id). `null` apaga a gravação: o sub-item volta a herdar a quantidade do
+ * componente (mesma unidade) ou fica pendente. Só aceita sub-itens de kits que
+ * são opção DESTE componente — o id vem do cliente.
+ */
 export async function setKitQtds(
   organizationId: string,
   tipologiaId: number,
   blueprintRoomId: number,
   componenteId: number,
-  qtds: Record<number, number>
+  qtds: Record<number, number | null>
 ): Promise<Componente> {
   const ctx = await findBlueprintRoomCtx(organizationId, tipologiaId, blueprintRoomId);
   await assertComponentInRoom(componenteId, ctx.roomId);
-  const brcId = await ensureBrc(ctx, componenteId);
-  const entries = Object.entries(qtds);
+  const entries = Object.entries(qtds).map(([k, q]) => [Number(k), q] as const);
+  for (const [kitItemId, q] of entries) {
+    if (!Number.isInteger(kitItemId)) throw new Error("Sub-item inválido.");
+    if (q !== null && (!Number.isFinite(q) || q < 0)) throw new Error("Quantidade inválida.");
+  }
   if (entries.length > 0) {
+    const ids = entries.map(([kitItemId]) => kitItemId);
+    const validos = await prisma.materialKitItem.count({
+      where: { Id: { in: ids }, ParentMaterial: { Options: { some: { RoomComponentId: componenteId } } } },
+    });
+    if (validos !== new Set(ids).size) throw new Error("Sub-item não pertence a um kit deste componente.");
+    const brcId = await ensureBrc(ctx, componenteId);
     await prisma.$transaction(
       entries.map(([kitItemId, q]) =>
-        prisma.materialKitUsage.upsert({
-          where: {
-            BlueprintRoomComponentId_KitItemId: {
-              BlueprintRoomComponentId: brcId,
-              KitItemId: Number(kitItemId),
-            },
-          },
-          update: { UsageQuantity: q },
-          create: { BlueprintRoomComponentId: brcId, KitItemId: Number(kitItemId), UsageQuantity: q },
-        })
+        q === null
+          ? prisma.materialKitUsage.deleteMany({
+              where: { BlueprintRoomComponentId: brcId, KitItemId: kitItemId },
+            })
+          : prisma.materialKitUsage.upsert({
+              where: {
+                BlueprintRoomComponentId_KitItemId: {
+                  BlueprintRoomComponentId: brcId,
+                  KitItemId: kitItemId,
+                },
+              },
+              update: { UsageQuantity: q },
+              create: { BlueprintRoomComponentId: brcId, KitItemId: kitItemId, UsageQuantity: q },
+            })
       )
     );
   }

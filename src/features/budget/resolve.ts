@@ -9,17 +9,27 @@
 //   reserva téc.   → MaterialPricing.rt            ?? RT da planta
 //   unidade        → MaterialPricing.unidade       ?? unidade do componente
 //   célula livre   → MaterialPricing.colunas[colId] ?? expressão da coluna
+//   sub-item de kit → qtd gravada na planta ?? qtd do kit (mesma unidade) ?? pendente
 //
 // Um override vale em TODAS as tipologias que usam o ambiente: ambiente
-// compartilhado compartilha o preço (decisão de produto, não limitação).
-import type { PriceLookup, PricedEntity, RowSide } from "@/lib/budget";
-import { getKit, getMaterial } from "@/lib/data/entities";
+// compartilhado compartilha o preço (decisão de produto, não limitação). A
+// quantidade do sub-item de kit é a exceção: é quantitativo da PLANTA
+// (MaterialKitUsage), como a qtd do componente.
+import {
+  kitCredit,
+  materialCredit,
+  type CreditSide,
+  type KitSubItemSide,
+  type RowSide,
+} from "@/lib/budget";
+import { getKit } from "@/lib/data/entities";
 import {
   EMPTY_PRICING,
   type Componente,
   type CompositionLine,
   type CustosBase,
   type Kit,
+  type KitItem,
   type Material,
   type MaterialOption,
   type MaterialPricing,
@@ -82,28 +92,30 @@ export function pricingOf(deps: ResolveDeps, optionId: number): MaterialPricing 
 /**
  * Valor unitário efetivo de uma OPÇÃO. O override vence o custo base; para kit
  * não existe valor unitário (é a soma dos sub-itens), então devolve 0 e quem
- * calcula kit usa o motor.
+ * calcula kit usa o motor. Um override que sobrou num kit (a opção era um
+ * material e foi trocada) é ignorado — a tela de kit não o mostra nem o limpa.
  */
 export function valUnOf(deps: ResolveDeps, opt: MaterialOption): number {
+  if (opt.isKit) return 0;
   const ovr = pricingOf(deps, opt.id).valorUnitario;
   if (ovr != null) return ovr;
-  if (opt.isKit) return 0;
   return custoBaseOf(deps.custosBase, opt.baseId);
 }
 
 /**
- * A opção está sem custo? Um override de valor unitário > 0 RESOLVE a pendência
+ * A opção está sem CUSTO? Um override de valor unitário > 0 RESOLVE a pendência
  * — o usuário digitou o preço direto na tabela e não deve nada ao custo base.
- * Kit é pendente quando qualquer sub-item está.
+ * Kit é pendente quando qualquer sub-item está sem custo base; a pendência de
+ * QUANTIDADE do kit é por planta e sai do motor (KitRowResult.qtdPendente).
  */
 export function isOptionOwnPending(deps: ResolveDeps, opt: MaterialOption): boolean {
-  const ovr = pricingOf(deps, opt.id).valorUnitario;
-  if (ovr != null) return ovr <= 0;
   if (opt.isKit) {
     const kit = getKit(deps.kits, opt.baseId);
     if (!kit) return false;
     return kit.itens.some((it) => isBasePending(deps.custosBase, it.materialId));
   }
+  const ovr = pricingOf(deps, opt.id).valorUnitario;
+  if (ovr != null) return ovr <= 0;
   return isBasePending(deps.custosBase, opt.baseId);
 }
 
@@ -132,28 +144,66 @@ export function rowSideOf(deps: ResolveDeps, comp: Componente, opt: MaterialOpti
   };
 }
 
-/**
- * Preços dos BaseMaterials que o motor pode precisar consultar num componente:
- * os sub-itens dos kits ofertados. São endereçados por BaseMaterial (não por
- * aplicação), então não têm override — vêm sempre do custo base do
- * empreendimento (composição inclusa).
- */
-export function priceLookupFor(deps: ResolveDeps, comp: Componente): PriceLookup {
-  const out = new Map<number, PricedEntity>();
-  const add = (baseId: number) => {
-    if (out.has(baseId)) return;
-    const m = getMaterial(deps.materiais, baseId);
-    out.set(baseId, {
-      nome: m?.nome ?? "",
-      valUn: custoBaseOf(deps.custosBase, baseId),
-      pending: isBasePending(deps.custosBase, baseId),
-    });
-  };
+/** Quantidade de um sub-item de kit numa planta, e de onde ela veio. */
+export interface KitItemQtd {
+  /** Líquida (sem RT); null = pendente (não gravada e sem herança possível). */
+  qtd: number | null;
+  /** Veio do componente, não de uma gravação para o sub-item. */
+  herdada: boolean;
+}
 
-  for (const opt of comp.options) {
-    if (!opt.isKit) continue;
-    const kit = getKit(deps.kits, opt.baseId);
-    for (const it of kit?.itens ?? []) add(it.materialId);
-  }
-  return out;
+/**
+ * Quantidade líquida de um sub-item de kit NESTA planta:
+ *   1. a gravada para o sub-item (MaterialKitUsage) — 0 é valor legítimo;
+ *   2. senão, a quantidade base (a do componente) quando o sub-item usa a MESMA
+ *      unidade — o porcelanato em m² de um Piso em m² herda a área, como um
+ *      material avulso herdaria;
+ *   3. senão, pendente — rodapé em ml ou soleira em und não têm de onde herdar.
+ *
+ * `base` é a quantidade/unidade da aplicação do kit (override ?? componente);
+ * sem ela (canvas, que não carrega o rascunho) vale a do componente.
+ */
+export function kitItemQtd(
+  comp: Pick<Componente, "kitQtds" | "qtd" | "unidade">,
+  item: KitItem,
+  base: { qtd: number; unidade: Unidade } = comp
+): KitItemQtd {
+  const gravada = comp.kitQtds[item.id];
+  if (gravada !== undefined) return { qtd: gravada, herdada: false };
+  if (item.unidade === base.unidade) return { qtd: base.qtd, herdada: true };
+  return { qtd: null, herdada: false };
+}
+
+/**
+ * Sub-itens de uma opção KIT resolvidos para o motor: preço do material filho
+ * (custo base do empreendimento, composição inclusa — sem override, porque o
+ * sub-item não é uma aplicação) e quantidade nesta planta. Null se o kit sumiu
+ * do catálogo.
+ */
+export function kitSubItemsOf(
+  deps: ResolveDeps,
+  comp: Componente,
+  opt: MaterialOption
+): KitSubItemSide[] | null {
+  const kit = getKit(deps.kits, opt.baseId);
+  if (!kit) return null;
+  const base = { qtd: qtdOf(deps, comp, opt.id), unidade: unidadeOf(deps, comp, opt.id) };
+  return kit.itens.map((item) => ({
+    item,
+    ...kitItemQtd(comp, item, base),
+    valUn: custoBaseOf(deps.custosBase, item.materialId),
+    pending: isBasePending(deps.custosBase, item.materialId),
+  }));
+}
+
+/**
+ * Crédito do PADRÃO do componente, material ou kit, na quantidade líquida.
+ * Null quando não há padrão — o motor decide o que isso significa.
+ */
+export function creditSideOf(deps: ResolveDeps, comp: Componente): CreditSide | null {
+  const def = comp.options.find((o) => o.id === comp.padrao);
+  if (!def) return null;
+  if (!def.isKit) return materialCredit(rowSideOf(deps, comp, def));
+  const subs = kitSubItemsOf(deps, comp, def);
+  return subs ? kitCredit(subs) : null;
 }

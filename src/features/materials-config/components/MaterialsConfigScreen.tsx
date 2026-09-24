@@ -15,7 +15,7 @@ import {
   StatusBadge,
 } from "@/components/ui";
 import { MaterialImageModal } from "@/features/catalog";
-import { baseCostStatus, custoBaseOf } from "@/features/budget/resolve";
+import { baseCostStatus, custoBaseOf, kitItemQtd } from "@/features/budget/resolve";
 import { getMaterial, getOptionEntity } from "@/lib/data/entities";
 import { useCustosBase, toCustosBaseMap } from "@/lib/hooks/useCustosBase";
 import { useKits } from "@/lib/hooks/useKits";
@@ -31,20 +31,17 @@ import { useTipologia } from "@/lib/hooks/useTipologias";
 import { fmtBRL, fmtNum } from "@/lib/utils";
 import { useRequireActiveProject } from "@/lib/hooks/useRequireActiveProject";
 import { KitBadge } from "@/features/catalog/components/KitBadge";
-import type { Material, Unidade } from "@/shared/types/domain";
+import type { Componente, KitItem, Material } from "@/shared/types/domain";
 
 import { SelectEntityModal, type SelectionResult } from "./SelectEntityModal";
 
-function SubItemRow({
-  mat,
-  qty,
-  unidade,
-}: {
-  mat: Material;
-  qty: number | undefined;
-  /** Unidade do sub-item do kit (KitItem.unidade — o material não tem unidade). */
-  unidade: Unidade;
-}) {
+/**
+ * Sub-item de kit com a quantidade DESTA planta: gravada, herdada do componente
+ * (mesma unidade) ou pendente — a mesma regra do Construtor de Preço, onde ela
+ * se edita.
+ */
+function SubItemRow({ mat, item, comp }: { mat: Material; item: KitItem; comp: Componente }) {
+  const { qtd, herdada } = kitItemQtd(comp, item);
   return (
     <div className="relative flex items-center gap-2.5 py-1.5 pl-3.5">
       <span className="absolute bottom-0 left-[3px] top-0 w-px bg-neutral-gray-5" />
@@ -52,9 +49,14 @@ function SubItemRow({
       <div className="flex-1">
         <span className="text-xs font-semibold text-neutral-gray-9">{mat.nome}</span>
         <code className="ml-2 text-[10px] text-neutral-gray-6">{mat.codigo}</code>
-        {qty !== undefined && (
+        {qtd === null ? (
+          <span className="mt-px block text-[11px] font-bold text-tint-orange-fg">
+            sem quantidade ({item.unidade}) — informe no Construtor de Preço
+          </span>
+        ) : (
           <span className="mt-px block text-[11px] text-primary-7">
-            {fmtNum(qty, 2)} {unidade}
+            {fmtNum(qtd, 2)} {item.unidade}
+            {herdada && <span className="text-neutral-gray-6"> · herdada do componente</span>}
           </span>
         )}
       </div>
@@ -157,33 +159,34 @@ export function MaterialsConfigScreen({
       return next;
     });
 
+  // O kit entra na paleta ANTES dos quantitativos: o servidor só aceita
+  // quantidade de sub-item de um kit que já é opção do componente.
   const applySelection = (result: SelectionResult) => {
     const finish = () => setModal(null);
-    const after = () => {
-      if (modal === "padrao") {
-        setPadraoMut.mutate({ ...path, padraoBaseId: result.id }, { onSuccess: finish });
+    const qtds = result.kitQtds;
+    const saveQtds = () => {
+      if (qtds && Object.keys(qtds).length > 0) {
+        setKitQtdsMut.mutate({ ...path, qtds }, { onSuccess: finish });
       } else {
-        addUpgradeMut.mutate(
-          { ...path, baseId: result.id },
-          {
-            onSuccess: (updated) => {
-              if (result.kitQtds) {
-                const added = updated.options.find(
-                  (o) => !o.isDefault && o.baseId === result.id
-                );
-                if (added) setExpandedUpg((prev) => new Set(prev).add(added.id));
-              }
-              finish();
-            },
-          }
-        );
+        finish();
       }
     };
-    if (result.kitQtds) {
-      setKitQtdsMut.mutate({ ...path, qtds: result.kitQtds }, { onSuccess: after });
-    } else {
-      after();
+    if (modal === "padrao") {
+      setPadraoMut.mutate({ ...path, padraoBaseId: result.id }, { onSuccess: saveQtds });
+      return;
     }
+    addUpgradeMut.mutate(
+      { ...path, baseId: result.id },
+      {
+        onSuccess: (updated) => {
+          if (qtds) {
+            const added = updated.options.find((o) => !o.isDefault && o.baseId === result.id);
+            if (added) setExpandedUpg((prev) => new Set(prev).add(added.id));
+          }
+          saveQtds();
+        },
+      }
+    );
   };
 
   const usedIds = new Set(comp.options.map((o) => o.baseId));
@@ -281,7 +284,7 @@ export function MaterialsConfigScreen({
               {padrao.itens.map((it) => {
                 const m = getMaterial(materiais, it.materialId);
                 if (!m) return null;
-                return <SubItemRow key={it.id} mat={m} qty={kitQtds[it.id]} unidade={it.unidade} />;
+                return <SubItemRow key={it.id} mat={m} item={it} comp={comp} />;
               })}
             </div>
           </div>
@@ -391,12 +394,7 @@ export function MaterialsConfigScreen({
                               const m = getMaterial(materiais, it.materialId);
                               if (!m) return null;
                               return (
-                                <SubItemRow
-                                  key={it.id}
-                                  mat={m}
-                                  qty={kitQtds[it.id]}
-                                  unidade={it.unidade}
-                                />
+                                <SubItemRow key={it.id} mat={m} item={it} comp={comp} />
                               );
                             })}
                           </td>
@@ -475,6 +473,8 @@ export function MaterialsConfigScreen({
         materiais={materiais}
         excludeIds={excludeIds}
         existingKitQtds={kitQtds}
+        compQtd={comp.qtd}
+        compUnidade={comp.unidade}
         compNome={comp.nome}
         tipNome={tipologia.nome}
         confirming={mutating}

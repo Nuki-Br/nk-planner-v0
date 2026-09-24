@@ -17,7 +17,8 @@ interface Params {
 /**
  * Operações sobre a paleta do componente (payload discriminado). Ids em `number`:
  * setPadrao/addUpgrade(s) recebem BaseMaterial (catálogo); replace/remove recebem
- * o id da linha de opção (Material); setKitQtds mapeia KitItem id → quantitativo.
+ * o id da linha de opção (Material); setKitQtds mapeia KitItem id → quantitativo
+ * (null = apaga a gravação e o sub-item volta a herdar/ficar pendente).
  */
 type OpcaoBody =
   | { op: "setPadrao"; padraoBaseId: number | null }
@@ -25,7 +26,7 @@ type OpcaoBody =
   | { op: "addUpgrades"; baseIds: number[] }
   | { op: "replaceUpgrade"; optionId: number; newBaseId: number }
   | { op: "removeUpgrade"; optionId: number }
-  | { op: "setKitQtds"; qtds: Record<number, number> };
+  | { op: "setKitQtds"; qtds: Record<number, number | null> };
 
 export async function POST(req: NextRequest, { params }: Params) {
   const body = (await req.json()) as OpcaoBody;
@@ -50,6 +51,12 @@ export async function POST(req: NextRequest, { params }: Params) {
     case "removeUpgrade":
       return withOrg((org) => removeUpgrade(org, toInt(id), toInt(ambId), toInt(compId), body.optionId));
     case "setKitQtds":
+      if (
+        typeof body.qtds !== "object" ||
+        body.qtds === null ||
+        !Object.values(body.qtds).every((q) => q === null || typeof q === "number")
+      )
+        return fail("Parâmetro inválido: qtds.", 400);
       return withOrg((org) => setKitQtds(org, toInt(id), toInt(ambId), toInt(compId), body.qtds));
     default:
       return fail("Operação inválida.", 400);

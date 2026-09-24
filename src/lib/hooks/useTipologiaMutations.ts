@@ -232,7 +232,7 @@ export function useSetKitQtds() {
       ambienteId,
       componenteId,
       qtds,
-    }: CompPath & { qtds: Record<number, number> }) =>
+    }: CompPath & { qtds: Record<number, number | null> }) =>
       setKitQtds(tipologiaId, ambienteId, componenteId, qtds)
   );
 }

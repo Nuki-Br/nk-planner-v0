@@ -93,4 +93,6 @@ export const mutationKeys = {
   saveCostItem: (projectId: number) => ["save-cost-item", projectId] as const,
   /** Operações estruturais da composição e criação/remoção de insumos. */
   composicao: (projectId: number) => ["composicao", projectId] as const,
+  /** Quantidade de sub-item de kit por planta (otimista, na tabela de preço). */
+  kitQtds: (projectId: number) => ["kit-qtds", projectId] as const,
 };

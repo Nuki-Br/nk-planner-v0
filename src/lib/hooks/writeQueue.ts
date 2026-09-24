@@ -67,12 +67,14 @@ export function waitForSaves(
   timeoutMs = SAVE_GATE_TIMEOUT_MS
 ): Promise<SaveGateResult> {
   const cache = qc.getMutationCache();
-  // Preço de insumo e composição movem o preço final tanto quanto o custo base.
+  // Preço de insumo, composição e qtd de sub-item de kit movem o preço final
+  // tanto quanto o custo base.
   const keys = [
     mutationKeys.savePricing(projectId),
     mutationKeys.saveCusto(projectId),
     mutationKeys.saveCostItem(projectId),
     mutationKeys.composicao(projectId),
+    mutationKeys.kitQtds(projectId),
   ];
   const watched = new Set<Mutation>();
 

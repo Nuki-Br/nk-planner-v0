@@ -5,15 +5,19 @@ import React from "react";
 import { Button, Modal } from "@/components/ui";
 import { getMaterial } from "@/lib/data/entities";
 import { useCategoriaIdByNome } from "@/lib/hooks/useCategorias";
-import { parseBR } from "@/lib/utils";
+import { fmtNum } from "@/lib/utils";
 import { EntityPickerList } from "@/features/catalog/components/EntityPickerList";
 import { KitBadge } from "@/features/catalog/components/KitBadge";
-import type { CatalogEntity, Material } from "@/shared/types/domain";
+import type { CatalogEntity, Material, Unidade } from "@/shared/types/domain";
 
 export interface SelectionResult {
   /** Id de catálogo (BaseMaterial) escolhido. */
   id: number;
-  /** Quantitativos por sub-item (keyed por KitItem id) quando a seleção é um kit. */
+  /**
+   * Quantitativos por sub-item (keyed por KitItem id) quando a seleção é um kit.
+   * Campo deixado em branco não entra: o sub-item herda a qtd do componente
+   * (mesma unidade) ou fica pendente — em vez de virar 0 em silêncio.
+   */
   kitQtds: Record<number, number> | null;
 }
 
@@ -33,6 +37,9 @@ interface SelectEntityModalProps {
   excludeIds: Set<number>;
   /** Quantitativos já gravados (keyed por KitItem id) — pré-preenche o passo 2. */
   existingKitQtds: Record<number, number>;
+  /** Quantidade/unidade do componente nesta planta — o que o sub-item herda. */
+  compQtd: number;
+  compUnidade: Unidade;
   compNome: string;
   tipNome: string;
   confirming?: boolean;
@@ -49,6 +56,8 @@ export function SelectEntityModal({
   materiais,
   excludeIds,
   existingKitQtds,
+  compQtd,
+  compUnidade,
   compNome,
   tipNome,
   confirming,
@@ -100,7 +109,11 @@ export function SelectEntityModal({
   const confirmKitQtds = () => {
     if (picked === null) return;
     const parsed: Record<number, number> = {};
-    for (const [mid, raw] of Object.entries(qtds)) parsed[Number(mid)] = parseBR(raw);
+    for (const [itemId, raw] of Object.entries(qtds)) {
+      if (raw.trim() === "") continue;
+      const n = parseFloat(raw.replace(",", "."));
+      if (Number.isFinite(n) && n >= 0) parsed[Number(itemId)] = n;
+    }
     onConfirm({ id: picked, kitQtds: parsed });
   };
 
@@ -173,16 +186,18 @@ export function SelectEntityModal({
             <span className="text-[13px] font-bold text-primary-8">{pickedKit.nome}</span>
           </div>
           <p className="mb-3.5 text-xs text-neutral-gray-7">
-            Informe o quantitativo de cada sub-item para{" "}
+            Informe o quantitativo líquido de cada sub-item para{" "}
             <strong>
               {compNome} · {tipNome}
-            </strong>
-            .
+            </strong>{" "}
+            (a RT do componente entra no débito). Em branco, o item na unidade do componente
+            herda {fmtNum(compQtd, 2)} {compUnidade}; os demais ficam pendentes no Construtor de
+            Preço.
           </p>
           <div className="flex flex-col gap-2">
             {pickedKit.itens.map((it) => {
               const m = getMaterial(materiais, it.materialId);
-              if (!m) return null;
+              const herda = it.unidade === compUnidade;
               return (
                 <div
                   key={it.id}
@@ -190,9 +205,11 @@ export function SelectEntityModal({
                 >
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[13px] font-semibold text-neutral-gray-11">
-                      {m.nome}
+                      {m?.nome ?? it.nome}
                     </p>
-                    <code className="text-[10px] text-neutral-gray-6">{m.codigo}</code>
+                    <code className="text-[10px] text-neutral-gray-6">
+                      {m?.codigo ?? it.fabricante}
+                    </code>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <input
@@ -200,7 +217,7 @@ export function SelectEntityModal({
                       onChange={(e) =>
                         setQtds((prev) => ({ ...prev, [it.id]: e.target.value }))
                       }
-                      placeholder="0,00"
+                      placeholder={herda ? fmtNum(compQtd, 2) : "pendente"}
                       className="h-9 w-[90px] rounded-lg border border-neutral-gray-5 px-2.5 text-right text-[13px] text-neutral-gray-11 outline-none focus:border-primary-7"
                     />
                     <span className="w-7 text-xs text-neutral-gray-7">{it.unidade}</span>

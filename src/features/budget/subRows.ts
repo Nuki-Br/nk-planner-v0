@@ -1,22 +1,30 @@
 // Projeção de sub-itens de kit e da composição de um material na forma comum
-// de sub-linha (SubRowCells). As sub-linhas são só leitura: o kit vem do
-// catálogo e a composição se edita na aba "Itens de custo".
+// de sub-linha (SubRowCells). A composição é só leitura (edita-se na aba
+// "Itens de custo"); o sub-item de kit ganha editores de qtd e custo na tela.
 import type { KitSubItemResult } from "@/lib/budget";
 import { fmtNum } from "@/lib/utils";
 import type { CustoBase } from "@/shared/types/domain";
 
 import type { SubRowCells } from "./components/SubRow";
 
-export function kitSubRow(s: KitSubItemResult): SubRowCells {
+/**
+ * Sub-item de kit. No upgrade a linha é o DÉBITO (qtd com a RT do kit); no
+ * padrão, a parcela do CRÉDITO (qtd líquida, sem RT) — a mesma regra do
+ * material avulso.
+ */
+export function kitSubRow(s: KitSubItemResult, lado: "debito" | "credito"): SubRowCells {
+  const credito = lado === "credito";
   return {
     key: `kit-${s.item.id}`,
     nome: s.item.nome,
     sub: s.item.fabricante,
-    qtd: s.subQtd,
+    qtd: credito ? (s.qtd ?? 0) : s.qtdComRT,
     unidade: s.item.unidade,
     valUn: s.valUn,
-    line: s.line,
+    line: credito ? s.lineCredito : s.line,
     pending: s.pending,
+    pendingQtd: s.qtd === null,
+    credito,
   };
 }
 

@@ -60,7 +60,8 @@ pendente. `0` **não** é pendente: é "sem custo" marcado de propósito (só pa
 composição). Uma linha pendente **sai dos totais** do orçamento (o rodapé conta quantas).
 
 **Origens da lista "Custos base"**, de-duplicadas por material: **opções de componente** e
-**sub-itens de kit** (o kit não tem custo próprio — quem tem é o material filho). Os insumos não
+**sub-itens de kit** (o kit não tem custo próprio — quem tem é o material filho; a unidade exibida é
+a do sub-item). Os insumos não
 viram linha aqui: entram por dentro do material que os usa e têm a própria aba.
 
 **Aba "Itens de custo"** (3º segmento do Construtor de Preço): lista editável dos insumos da org
@@ -101,6 +102,26 @@ direto na tabela **resolve a pendência** — preço digitado é preço.
 
 **Kit não tem `valorUnitario` editável**: o custo é a soma dos sub-itens, cada um com seu custo
 base. Sobrescrever ali esconderia a conta. Qtd, RT e unidade continuam sobrescritíveis.
+
+### Kits: sub-itens, RT e crédito
+
+```
+débito do kit  = Σ custo base do sub-item × qtd líquida do sub-item × (1 + RT do kit)
+crédito (kit padrão) = Σ custo base do sub-item × qtd líquida do sub-item
+```
+
+- **Quantidade do sub-item** — líquida e **por planta** (`MaterialKitUsage`), editada na sub-linha
+  do kit na aba "Preço final" (vale só para a tipologia da aba). Sem gravação, **herda a quantidade
+  do kit** (override da aplicação ?? qtd do componente) quando a unidade do sub-item é a mesma;
+  com outra unidade fica **"sem quantidade"**. `0` gravado é valor legítimo.
+- **Pendência do kit** — sub-item sem custo base **ou** sem quantidade: a linha sai dos totais e da
+  publicação. O popover de custo da sub-linha grava o custo base do material filho.
+- **Qtd/RT/unidade da linha do kit** — override da aplicação (vale em todas as tipologias): a qtd e
+  a unidade são o que os sub-itens de mesma unidade herdam; a RT incide sobre todos no débito.
+- **Kit padrão** — linha na seção de padrão com o crédito acima; credita tanto upgrades de kit
+  quanto de material.
+- **Ambiente compartilhado** — o preço publicado usa as quantidades de sub-item da primeira
+  tipologia; se diferirem entre tipologias, o diff avisa.
 
 ### ⭐ O override vale em TODAS as tipologias
 

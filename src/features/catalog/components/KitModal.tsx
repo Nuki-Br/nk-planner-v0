@@ -4,7 +4,7 @@ import React from "react";
 
 import { Button, Icon, Input, Modal, Select } from "@/components/ui";
 import { getMaterial } from "@/lib/data/entities";
-import { useCategoriaIdByNome, useCategorias } from "@/lib/hooks/useCategorias";
+import { useCategorias } from "@/lib/hooks/useCategorias";
 import { useCreateKit, useUpdateKit } from "@/lib/hooks/useKits";
 import { UNIDADE_OPTIONS, type Unidade } from "@/shared/constants/unidades";
 import type { CatalogEntity, Kit, KitItem, Material } from "@/shared/types/domain";
@@ -33,10 +33,13 @@ function kitCodigo(nome: string): string {
   return `KIT-${initials || "NOVO"}`;
 }
 
-// Modal Criar/Editar kit (largura 640). Trocar a categoria reseta a
-// composição, como no protótipo. A unidade de cada sub-item é escolhida AQUI
-// (select por item, persistida em MaterialKitItem.Unit) — o material não
-// carrega unidade; ela pertence ao contexto de uso.
+// Modal Criar/Editar kit (largura 640). A categoria classifica o KIT (ex.:
+// "Piso"); os itens vêm de qualquer categoria — piso + rodapé + soleira é o
+// caso comum, então o picker não trava nela e trocar a categoria não mexe na
+// composição. A unidade de cada sub-item é escolhida AQUI (select por item,
+// persistida em MaterialKitItem.Unit) — o material não carrega unidade; ela
+// pertence ao contexto de uso, e é ela que decide se o sub-item herda a
+// quantidade do componente (mesma unidade) ou pede a sua.
 export function KitModal({ open, onClose, kit, materiais }: KitModalProps) {
   const { data: categorias = [] } = useCategorias();
   const createKit = useCreateKit();
@@ -79,10 +82,6 @@ export function KitModal({ open, onClose, kit, materiais }: KitModalProps) {
     if (e.isKit) return;
     addItem(e);
   }, []);
-
-  // A categoria do kit trava o picker. Categoria não escolhida ainda (ou nome
-  // que não resolve) → sem trava.
-  const lockedCategoriaId = useCategoriaIdByNome(categoria);
 
   const excludeIds = React.useMemo(() => itens.map((it) => it.materialId), [itens]);
 
@@ -127,22 +126,15 @@ export function KitModal({ open, onClose, kit, materiais }: KitModalProps) {
             onValueChange={setNome}
             placeholder="Ex: Metais Bronze"
           />
-          <CategoryCombobox
-            value={categoria}
-            onChange={(v) => {
-              setCategoria(v);
-              setItens([]);
-            }}
-            // Rename da categoria selecionada NÃO reseta a composição.
-            onRenamed={setCategoria}
-          />
+          <CategoryCombobox value={categoria} onChange={setCategoria} onRenamed={setCategoria} />
         </div>
 
         <div className="border-t border-neutral-gray-4 pt-3.5">
           <p className="text-[13px] font-bold text-neutral-gray-9">Composição do kit</p>
           <p className="mb-3 mt-0.5 text-xs text-neutral-gray-7">
-            Adicione os materiais que compõem este kit
-            {categoria !== "" ? ` — categoria ${categoria}` : ""}.
+            Adicione os materiais que compõem este kit, de qualquer categoria. A unidade de cada
+            item define a quantidade: a mesma do componente herda a dele; outra (ex.: rodapé em
+            ml num piso em m²) é informada por tipologia.
           </p>
 
           {itens.length === 0 ? (
@@ -152,8 +144,9 @@ export function KitModal({ open, onClose, kit, materiais }: KitModalProps) {
           ) : (
             <div className="mb-3.5 flex flex-col gap-1.5">
               {itens.map((it) => {
+                // O sub-item sempre aparece: sem o material na lista em memória
+                // (ex.: catálogo ainda carregando), cai no que o KitItem já traz.
                 const m = getMaterial(materiais, it.materialId);
-                if (!m) return null;
                 return (
                   <div
                     key={it.materialId}
@@ -162,15 +155,19 @@ export function KitModal({ open, onClose, kit, materiais }: KitModalProps) {
                     <span className="h-[7px] w-[7px] shrink-0 rounded-full bg-primary-7" />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-[13px] font-semibold text-neutral-gray-11">
-                        {m.nome}
+                        {m?.nome ?? it.nome}
                       </p>
-                      <code className="text-[10px] text-neutral-gray-6">{m.codigo}</code>
+                      <code className="text-[10px] text-neutral-gray-6">
+                        {m?.codigo ?? it.fabricante}
+                      </code>
                     </div>
-                    <CategoryChip
-                      nome={m.categoria}
-                      categorias={categorias}
-                      className="!text-[10px]"
-                    />
+                    {m && (
+                      <CategoryChip
+                        nome={m.categoria}
+                        categorias={categorias}
+                        className="!text-[10px]"
+                      />
+                    )}
                     <Select
                       aria-label="Unidade de medida deste item"
                       options={UNIDADE_OPTIONS}
@@ -199,7 +196,6 @@ export function KitModal({ open, onClose, kit, materiais }: KitModalProps) {
 
           <EntityPickerList
             tipo="single"
-            lockedCategoriaId={lockedCategoriaId}
             excludeIds={excludeIds}
             mode="add"
             onSelect={addEntity}

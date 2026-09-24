@@ -56,9 +56,10 @@ custo** — o custo é sempre derivado da soma dos itens. **Kit não pode conter
 aninhamento).
 
 ### Item de kit
-Cada linha da composição de um kit: aponta para um material, e carrega **unidade própria por
-item**. As quantidades do item são definidas **por tipologia**, não no kit; o custo é o do material
-apontado, no empreendimento em questão.
+Cada linha da composição de um kit: aponta para um material (de **qualquer categoria**), e carrega
+**unidade própria por item**. As quantidades do item são definidas **por tipologia**, não no kit —
+o item na mesma unidade do componente herda a quantidade dele; os demais pedem a sua (ver
+`docs/features/pricing.md`, "Kits"). O custo é o do material apontado, no empreendimento em questão.
 
 ### Item de custo (insumo)
 | Campo | Significado |
@@ -108,10 +109,11 @@ preenchidos diretamente na revisão ou via link de preenchimento."
 
 ### Criar / editar kit
 Formulário: **Nome do kit**, **Categoria**, **Composição** (lista de itens).
-- Adiciona itens escolhendo materiais avulsos (não kits) da **mesma categoria** do kit; cada item
-  tem seletor de **unidade própria**. Material repetido é ignorado.
-- **Trocar a categoria do kit zera a composição**; **renomear** a categoria selecionada **não**
-  zera (só troca o nome). Distinção proposital.
+- Adiciona itens escolhendo materiais avulsos (não kits) de **qualquer categoria** — piso +
+  rodapé + soleira é o caso comum; a categoria classifica o kit, não filtra os itens. Cada item tem
+  seletor de **unidade própria** (é ela que decide se o item herda a quantidade do componente).
+  Material repetido é ignorado.
+- Trocar ou renomear a categoria do kit **não** mexe na composição.
 - Válido com **nome + categoria + ao menos 1 item**.
 
 ### Criar / editar / excluir categoria
@@ -161,8 +163,8 @@ regra de bloqueio quando em uso, mas não há botão hoje.)
 - **Material/kit em uso não pode ser excluído** — quem está sendo usado como opção (ou como filho
   de kit) é protegido; a mensagem orienta remover os usos antes. Apagar um material **leva a
   composição junto**; apagar um insumo o remove de todas as composições.
-- **Editar a composição do kit substitui a lista inteira** (some as quantidades por tipologia do
-  kit).
+- **Editar a composição do kit preserva as quantidades por tipologia** dos itens que continuam; só
+  o item removido leva as suas junto.
 - **Ordenação:** na listagem unificada, **kits aparecem antes de materiais**.
 
 ---

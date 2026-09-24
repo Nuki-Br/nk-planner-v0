@@ -10,6 +10,7 @@ import {
   calcAnyRow,
   isOptionOwnPending,
   isOptionPending,
+  isRowPending,
   padroesPendentes,
   qtdOf,
   unidadeOf,
@@ -141,10 +142,35 @@ describe("calcAnyRow", () => {
     const r = calcAnyRow(deps(), salaPisoT3, opt);
     expect(r?.kind).toBe("kit");
     if (r?.kind === "kit") {
-      // 208*36.8 + 115*3 + 0*3.68 (rt-bcn pendente)
-      expect(r.result.debitoTotal).toBeCloseTo(7999.4, 10);
-      expect(r.result.subItemPending).toBe(true);
+      // (208*36.8 + 115*3 + 0*3.68) × 1,15 de RT (rt-bcn pendente)
+      expect(r.result.debitoTotal).toBeCloseTo(7999.4 * 1.15, 10);
+      expect(r.result.custoPendente).toBe(true);
+      expect(r.result.pending).toBe(true);
     }
+  });
+
+  it("kit sem quantidade de sub-item nesta planta fica pendente e fora do total", () => {
+    // Sala T2 oferta o mesmo kit sem quantitativos gravados: o porcelanato (m²)
+    // herda a área; a soleira (und) não tem de onde herdar.
+    const salaPisoT2 = seed.tipologias[1]!.ambientes[0]!.componentes[0]!;
+    const r = calcAnyRow(deps(), salaPisoT2, optByCodigo(salaPisoT2, "KIT-PB"));
+    if (r?.kind !== "kit") throw new Error("esperava kit");
+    expect(r.result.subItems[0]).toMatchObject({ qtd: 28.4, herdada: true });
+    expect(r.result.subItems[1]?.qtd).toBeNull();
+    expect(r.result.qtdPendente).toBe(true);
+    expect(isRowPending(deps(), salaPisoT2, optByCodigo(salaPisoT2, "KIT-PB"), r)).toBe(true);
+  });
+
+  it("kit como PADRÃO credita os upgrades de material (antes deixava a linha sem preço)", () => {
+    const kitOpt = optByCodigo(salaPisoT1, "KIT-PB");
+    // Kit todo precificado: dá custo à "reserva técnica" que o seed deixa pendente.
+    const rtBcn = seed.materiais.find((m) => m.codigo === "RT-9090-AC")!;
+    const d = deps({ custosBase: comCusto(rtBcn.id, 50, 0) });
+    const comp = { ...salaPisoT1, padrao: kitOpt.id };
+    const r = calcAnyRow(d, comp, optByCodigo(salaPisoT1, "PP-6060-BI"));
+    if (r?.kind !== "material") throw new Error("esperava material");
+    // crédito = 208*18,4 + 115*2 + 50*1,84 (qtd líquida, sem RT)
+    expect(r.result.creditoTotal).toBeCloseTo(208 * 18.4 + 115 * 2 + 50 * 1.84, 10);
   });
 });
 
@@ -200,6 +226,23 @@ describe("padroesPendentes (aviso antes de publicar)", () => {
   it("padrão marcado 'sem custo' não é aviso — é decisão", () => {
     const d = deps({ custosBase: comCusto(pad.baseId, 0, 0) });
     expect(listados(d)).not.toContain(salaPisoT1.id);
+  });
+
+  it("kit padrão com sub-item sem quantidade é aviso (credita a menos)", () => {
+    const kitOpt = optByCodigo(salaPisoT1, "KIT-PB");
+    const rtBcn = seed.materiais.find((m) => m.codigo === "RT-9090-AC")!;
+    const custos = comCusto(rtBcn.id, 50, 0);
+    const semQtd = (kitQtds: Record<number, number>) =>
+      padroesPendentes(deps({ custosBase: custos }), [
+        {
+          ...t1,
+          ambientes: [
+            { ...t1.ambientes[0]!, componentes: [{ ...salaPisoT1, padrao: kitOpt.id, kitQtds }] },
+          ],
+        },
+      ]).map((p) => p.compId);
+    expect(semQtd(salaPisoT1.kitQtds)).toEqual([]);
+    expect(semQtd({})).toEqual([salaPisoT1.id]); // soleira (und) sem de onde herdar
   });
 
   it("sem débito/crédito não avisa (não há crédito a perder)", () => {

@@ -7,7 +7,7 @@ import { getMaterial, getOptionEntity } from "@/lib/data/entities";
 import { CV, NODE_TRANSITION, type AmbNode as AmbNodeT, type CompNode as CompNodeT, type OptNode as OptNodeT, type SubNode as SubNodeT } from "@/lib/canvas/buildLayout";
 import { cn, fmtBRL, fmtNum } from "@/lib/utils";
 import { AmbIcon } from "@/features/typologies/components/AmbIcon";
-import { custoBaseOf } from "@/features/budget/resolve";
+import { custoBaseOf, kitItemQtd } from "@/features/budget/resolve";
 import type { Ambiente, Componente, CustosBase, Kit, Material } from "@/shared/types/domain";
 
 import { optionPending, subitemPending } from "../pending";
@@ -394,9 +394,19 @@ export function SubItemNode({
   const { item, cy } = node;
   const m = getMaterial(materiais, item.materialId);
   const pending = subitemPending(custosBase, item);
+  // Quantidade desta planta (gravada ou herdada do componente); a edição é no
+  // Construtor de Preço. Sem quantidade o kit fica fora do orçamento — o nó avisa.
+  const { qtd, herdada } = kitItemQtd(node.comp, item);
   return (
     <div
       style={{ left: CV.x4, top: cy - 16, width: CV.w4, height: 32, transition: NODE_TRANSITION }}
+      title={
+        qtd === null
+          ? "Sem quantidade nesta tipologia — informe no Construtor de Preço"
+          : herdada
+            ? "Quantidade herdada do componente"
+            : undefined
+      }
       className={cn(
         "absolute z-[4] flex items-center gap-1.5 rounded-md bg-neutral-gray-2 px-2.5",
         pending ? "border-[1.5px] border-functional-error" : "border border-neutral-gray-4"
@@ -404,6 +414,18 @@ export function SubItemNode({
     >
       <span className="flex-1 truncate text-[11.5px] font-medium text-neutral-gray-9">
         {m?.nome ?? item.nome}
+      </span>
+      <span
+        className={cn(
+          "shrink-0 text-[10px]",
+          qtd === null
+            ? "font-bold text-tint-orange-fg"
+            : herdada
+              ? "italic text-neutral-gray-6"
+              : "text-neutral-gray-7"
+        )}
+      >
+        {qtd === null ? "sem qtd" : `${fmtNum(qtd, 2)} ${item.unidade}`}
       </span>
       {pending && <span className="h-[7px] w-[7px] shrink-0 rounded-full bg-functional-error" />}
     </div>

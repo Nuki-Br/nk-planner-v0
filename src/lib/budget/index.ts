@@ -1,8 +1,9 @@
 // Motor de cálculo do Construtor de Preço — puro (sem React/DOM/dados). O
 // CHAMADOR resolve TUDO antes de chamar: valor unitário efetivo, quantidade e
-// reserva técnica de cada lado (RowSide) e o preço de cada BaseMaterial
-// referenciado (PricedEntity). O motor não conhece catálogo, custo base do
-// empreendimento nem override de aplicação — só aritmética e fórmulas. Ver
+// reserva técnica de cada lado (RowSide), o crédito do padrão (CreditSide) e o
+// preço/quantidade de cada sub-item de kit (KitSubItemSide). O motor não
+// conhece catálogo, custo base do empreendimento nem override de aplicação —
+// só aritmética e fórmulas. Ver
 // features/budget/resolve.ts para a cadeia de resolução.
 //
 // CONVENÇÃO ESTENDIDA (alinhada à planilha do cliente): todas as colunas
@@ -14,24 +15,11 @@
 // A RT é perda extra do upgrade: o crédito é o material que a construtora
 // deixaria de instalar, na quantidade líquida. Ver docs — decisão "crédito sem
 // RT", extraída do Hall da planilha (padrão 2,25 m² × upgrade 3,375 m²).
+//
+// KIT segue a MESMA regra, sub-item a sub-item: cada um tem quantidade LÍQUIDA
+// por planta; o débito aplica a RT do kit, o crédito (kit padrão) não.
 import { evalCell, normName, type Scope } from "@/lib/formula";
-import type { BudgetColumn, Componente, Kit, KitItem } from "@/shared/types/domain";
-
-/**
- * Um BaseMaterial já precificado para o motor. `valUn` é o custo unitário
- * EFETIVO (custo base do empreendimento, ou o override da aplicação) — o motor
- * nunca soma material + mão de obra, isso é da alçada do resolvedor.
- */
-export interface PricedEntity {
-  nome: string;
-  /** R$/unidade efetivo. */
-  valUn: number;
-  /** Sem custo preenchido → a linha sai dos totais. */
-  pending: boolean;
-}
-
-/** baseId (BaseMaterial) → preço efetivo. */
-export type PriceLookup = ReadonlyMap<number, PricedEntity>;
+import type { BudgetColumn, KitItem } from "@/shared/types/domain";
 
 /**
  * Um lado do cálculo (upgrade ou padrão) com tudo resolvido. Quantidade e RT
@@ -51,6 +39,39 @@ export interface RowSide {
 
 /** Lado de um KIT: o valor unitário é a soma dos sub-itens, não um campo. */
 export type KitSide = Pick<RowSide, "qtd" | "rt">;
+
+/**
+ * Lado do CRÉDITO (a opção padrão do componente) já reduzido ao valor que a
+ * construtora deixa de instalar — estendido, na quantidade LÍQUIDA (sem RT).
+ * Material: valor unitário × qtd; kit: Σ sub-itens (ver kitCredit).
+ */
+export interface CreditSide {
+  /** R$ já estendido. */
+  credito: number;
+  /** Custo ou quantidade do padrão faltando — o crédito entra parcial. */
+  pending: boolean;
+}
+
+/** Crédito de um padrão MATERIAL: valor unitário × qtd líquida. */
+export function materialCredit(side: RowSide): CreditSide {
+  return { credito: side.valUn * side.qtd, pending: side.pending };
+}
+
+/**
+ * Sub-item de kit já resolvido pelo chamador: preço do material filho no
+ * empreendimento e quantidade LÍQUIDA nesta planta.
+ */
+export interface KitSubItemSide {
+  item: KitItem;
+  /** Quantidade líquida (sem RT); null = não informada e sem herança possível. */
+  qtd: number | null;
+  /** A quantidade veio herdada do componente (não foi gravada para o sub-item). */
+  herdada: boolean;
+  /** R$/unidade efetivo (custo base do material filho). */
+  valUn: number;
+  /** Sem custo base. */
+  pending: boolean;
+}
 
 export interface ColResult {
   value: number;
@@ -91,24 +112,26 @@ export interface BaseRowResult {
   total: number;
 }
 
-export interface BudgetRowResult extends BaseRowResult {
-  /** R$/un. do padrão — exibição. */
-  valUnPad: number;
-}
+export type BudgetRowResult = BaseRowResult;
 
-export interface KitSubItemResult {
-  item: KitItem;
-  subQtd: number;
-  valUn: number;
+export interface KitSubItemResult extends KitSubItemSide {
+  /** qtd × (1 + rt/100) — base do débito; 0 sem quantidade. */
+  qtdComRT: number;
+  /** valUn × qtdComRT — débito do sub-item. */
   line: number;
-  pending: boolean;
+  /** valUn × qtd líquida — a parcela do crédito quando o kit é o padrão. */
+  lineCredito: number;
 }
 
 export interface KitRowResult extends BaseRowResult {
   isKit: true;
   subItems: KitSubItemResult[];
-  /** Algum sub-item do kit sem custo — a linha sai dos totais. */
-  subItemPending: boolean;
+  /** Algum sub-item sem custo base. */
+  custoPendente: boolean;
+  /** Algum sub-item sem quantidade nesta planta. */
+  qtdPendente: boolean;
+  /** custoPendente || qtdPendente — a linha sai dos totais e da publicação. */
+  pending: boolean;
 }
 
 /** rowKey de override/comentário: o id da opção (linha Material). */
@@ -158,13 +181,14 @@ function baseScope(
 }
 
 /**
- * Cálculo por linha (upgrade de MATERIAL). Recebe os dois lados já resolvidos —
- * valor unitário, quantidade e RT efetivos de cada um. Null quando falta o lado
- * padrão. A exclusão de itens pendentes dos totais é contrato do CHAMADOR.
+ * Cálculo por linha (upgrade de MATERIAL). Recebe o upgrade resolvido (valor
+ * unitário, quantidade e RT efetivos) e o crédito do padrão já estendido. Null
+ * quando falta o lado padrão. A exclusão de itens pendentes dos totais é
+ * contrato do CHAMADOR.
  */
 export function calcBudgetRow(
   upg: RowSide,
-  pad: RowSide | null,
+  pad: CreditSide | null,
   cols: BudgetColumn[],
   rowOverrides: RowOverrides = {},
   // Empreendimentos que não usam débito/crédito zeram o lado do crédito: o
@@ -174,12 +198,11 @@ export function calcBudgetRow(
   if (!pad) return null;
   const qtdComRT = upg.qtd * (1 + upg.rt / 100);
   const valUnUpg = upg.valUn;
-  const valUnPad = pad.valUn;
 
   const debitoItem = valUnUpg * qtdComRT;
   // Crédito sem RT e na quantidade DO PADRÃO: a reserva técnica é perda extra do
   // upgrade, e o padrão pode ter quantitativo próprio (override da aplicação).
-  const creditoItem = usaDebitoCredito ? valUnPad * pad.qtd : 0;
+  const creditoItem = usaDebitoCredito ? pad.credito : 0;
   const debitoTotal = debitoItem;
   const creditoTotal = creditoItem;
   const custoDeTroca = trocaNaoNegativa(debitoTotal, creditoTotal);
@@ -190,7 +213,6 @@ export function calcBudgetRow(
   return {
     qtdComRT,
     valUnUpg,
-    valUnPad,
     debitoItem,
     creditoItem,
     debitoTotal,
@@ -203,36 +225,55 @@ export function calcBudgetRow(
 }
 
 /**
- * Cálculo por linha (upgrade de KIT): as colunas monetárias são a soma dos
- * sub-itens (quantitativos por planta em comp.kitQtds, keyed por KitItem id).
+ * Estende os sub-itens de um kit: débito com a RT do kit (perda extra do
+ * upgrade, como no material), crédito na quantidade líquida. Sem quantidade o
+ * sub-item vale 0 e marca a pendência — nunca vira um kit "de graça" em silêncio.
+ */
+export function resolveKitSubItems(subs: readonly KitSubItemSide[], rt: number): KitSubItemResult[] {
+  return subs.map((s) => {
+    const liquida = s.qtd ?? 0;
+    const qtdComRT = liquida * (1 + rt / 100);
+    return {
+      ...s,
+      qtdComRT,
+      line: s.valUn * qtdComRT,
+      lineCredito: s.valUn * liquida,
+    };
+  });
+}
+
+/** Crédito de um padrão KIT: Σ valor × qtd líquida dos sub-itens. */
+export function kitCredit(subs: readonly KitSubItemSide[]): CreditSide {
+  let credito = 0;
+  let pending = false;
+  for (const s of subs) {
+    credito += s.valUn * (s.qtd ?? 0);
+    if (s.pending || s.qtd === null) pending = true;
+  }
+  return { credito, pending };
+}
+
+/**
+ * Cálculo por linha (upgrade de KIT): o débito é a soma dos sub-itens, cada um
+ * na sua quantidade líquida por planta × (1 + RT do kit). `upg.qtd` não entra no
+ * débito — é o `quantitativo` das fórmulas (a quantidade do componente).
  */
 export function calcKitRow(
-  kit: Kit,
-  comp: Pick<Componente, "kitQtds">,
+  subs: readonly KitSubItemSide[],
   upg: KitSide,
-  pad: RowSide | null,
-  prices: PriceLookup,
+  pad: CreditSide | null,
   cols: BudgetColumn[],
   rowOverrides: RowOverrides = {},
   usaDebitoCredito = true
 ): KitRowResult {
-  const qtds = comp.kitQtds ?? {};
-  const subItems: KitSubItemResult[] = [];
-  for (const item of kit.itens) {
-    const subQtd = qtds[item.id] ?? 0;
-    const priced = prices.get(item.materialId);
-    const valUn = priced?.valUn ?? 0;
-    const line = valUn * subQtd;
-    subItems.push({ item, subQtd, valUn, line, pending: !priced || priced.pending });
-  }
+  const subItems = resolveKitSubItems(subs, upg.rt);
+  const custoPendente = subItems.some((s) => s.pending);
+  const qtdPendente = subItems.some((s) => s.qtd === null);
 
   const qtdComRT = upg.qtd * (1 + upg.rt / 100);
-  const kitTotal = subItems.reduce((a, s) => a + s.line, 0);
-  const valUnPad = pad?.valUn ?? 0;
-
   // O débito do "item" de um kit é a soma dos sub-itens: eles SÃO o item.
-  const debitoItem = kitTotal;
-  const creditoItem = usaDebitoCredito && pad ? valUnPad * pad.qtd : 0;
+  const debitoItem = subItems.reduce((a, s) => a + s.line, 0);
+  const creditoItem = usaDebitoCredito && pad ? pad.credito : 0;
   const debitoTotal = debitoItem;
   const creditoTotal = creditoItem;
   const custoDeTroca = trocaNaoNegativa(debitoTotal, creditoTotal);
@@ -243,7 +284,9 @@ export function calcKitRow(
   return {
     isKit: true,
     subItems,
-    subItemPending: subItems.some((s) => s.pending),
+    custoPendente,
+    qtdPendente,
+    pending: custoPendente || qtdPendente,
     qtdComRT,
     valUnUpg: debitoItem,
     debitoItem,

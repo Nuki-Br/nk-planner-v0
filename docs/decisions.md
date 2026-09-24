@@ -70,11 +70,26 @@ casos convivem na mesma fórmula.
 | **Quantitativo do material** | `BaseMaterial.CostQuantity` (padrão 1): a primeira linha da composição é o próprio material (1,2 = 20 % de quebra). A RT por tipologia continua existindo e multiplica o valor unitário inteiro. |
 | **Fórmula** | `custo base = custoMat × custoQtd + custoMO + Σ(qtd × preço do insumo)` — única implementação em `src/shared/utils/custoBase.ts`, usada pela aba, pelo motor e pela publicação. |
 | **Pendência** | Custo de material **NULL** *ou* **qualquer insumo sem preço** neste empreendimento. "Sem custo" (0 marcado) só vale para material **sem** composição. Um override de "Valor un." > 0 continua resolvendo a pendência. |
-| **Satélites e registros removidos** | `RoomComponentCostItem` (espelho/fixo, padrão/upgrade, escopo por opção) e `RoomCostRegistro` **dropados sem conversão** — eram um workaround do modelo "custo cheio". Piso + rodapé + soleira é **kit** (a revisar depois). O diff mostra as linhas afetadas como "alterado" na primeira publicação depois da migration. |
+| **Satélites e registros removidos** | `RoomComponentCostItem` (espelho/fixo, padrão/upgrade, escopo por opção) e `RoomCostRegistro` **dropados sem conversão** — eram um workaround do modelo "custo cheio". Piso + rodapé + soleira é **kit** (revisto em 2026-09-24, ver abaixo). O diff mostra as linhas afetadas como "alterado" na primeira publicação depois da migration. |
 | **Cadastro em lote** | Grade multi-linha "Adicionar itens" (Cód, Nome, Unidade, Qtd, Valor) que aceita item existente ou novo e **colar do Excel** (TSV). "Aplicar composição em…" copia a composição para outros materiais da mesma categoria (substituir ou mesclar), ajustando só os quantitativos. |
 | **Unidades** | Lista ganha `m³ · l · vb · dia · h · sc` (planilha da construtora usa M3, VB, DIA). `normalizeUnidade` traduz grafias de planilha (M2, UN, KG…). |
 | **Portal do terceiro** | Inalterado: preenche mat/MO dos materiais. Preço de insumo é preenchido dentro do app — material pendente só por insumo continua pendente após o envio do terceiro (a aba Custos base aponta "insumo sem preço"). |
 | **Cascatas** | Apagar insumo → some das composições (a UI confirma "usado em N materiais"); apagar material → composição vai junto; apagar empreendimento → preços vão junto. |
+
+## Decisões travadas (Kits, 2026-09-24)
+Revisão completa dos kits depois da composição de custo: piso + rodapé + soleira virou o caso
+comum (BIOOS), e o kit precisava funcionar como padrão, ter quantidade editável por sub-item e
+misturar categorias.
+
+| Tema | Decisão |
+|------|---------|
+| **Composição** | Sub-itens de **qualquer categoria** (a categoria classifica o kit, não trava o picker); trocar a categoria não zera a composição. Só materiais avulsos da própria org, sem repetição — validado no servidor. |
+| **Quantidade do sub-item** | **Líquida e por planta** (`MaterialKitUsage`), editável na sub-linha do Construtor de Preço. Sem gravação: **herda a qtd do kit/componente quando a unidade do sub-item é a mesma** (porcelanato m² num Piso m²); com outra unidade (rodapé ml, soleira und) fica **"sem quantidade"** — pendência que tira a linha dos totais e da publicação, como custo pendente. `0` gravado é legítimo ("não vai nesta planta"). |
+| **RT** | A RT do kit (a do componente, sobrescritível no popover da linha do kit) incide sobre **cada sub-item no débito**, como no material avulso. Substitui o modelo antigo de "quantidade final" (o seed ainda tem um sub-item "Reserva Técnica Porcelanato", que agora duplica a perda). |
+| **Kit como padrão** | Aparece na seção de padrão e **credita** `Σ custo × qtd líquida` dos sub-itens. Antes ele sumia e os upgrades de material do componente ficavam sem preço. Um upgrade de material sobre um kit padrão recebe o crédito do kit inteiro. |
+| **Custo do sub-item** | Sub-linha pendente oferece **"Preencher custo"** (grava o custo base do empreendimento do material filho); no kit padrão, também "Sem custo". |
+| **Editar o kit no catálogo** | Reconcilia a composição por material filho: quem continua mantém o id — e as quantidades por planta. Antes qualquer salvar (até renomear) apagava as quantidades de todas as tipologias. |
+| **Publicação** | Kit com ambiente compartilhado e quantidades de sub-item diferentes entre tipologias **avisa** no diff (usa as da primeira tipologia). |
 
 ## Questões em aberto (do módulo doc §7 — resolver quando pesarem)
 | # | Questão | Impacto | Resolver em |
