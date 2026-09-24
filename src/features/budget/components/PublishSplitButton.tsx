@@ -3,7 +3,7 @@
 import React from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@heroui/react";
 
-import { Icon } from "@/components/ui";
+import { Icon, Spinner } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
 import { HistoryGlyph } from "./Versioning";
@@ -13,14 +13,26 @@ interface PublishSplitButtonProps {
   onOpenVersions: () => void;
   /** Rótulo da versão atual (ex.: "v3"), mostrado no item de histórico. */
   versionLabel: string;
+  /** Baixa a tabela "Preço final" em Excel; o menu fica aberto até terminar. */
+  onExport: () => Promise<void>;
+  exporting: boolean;
 }
+
+const itemClass =
+  "flex w-full items-center gap-2.5 rounded px-3 py-2.5 text-left text-[13px] font-semibold text-neutral-gray-11 hover:bg-neutral-gray-2";
 
 /**
  * Split button do Construtor de Preço: ação primária "Publicar orçamento" (que
- * também salva uma versão) + menu secundário "Histórico de versões" — mesmo
- * padrão do "Criar kit" no catálogo (AddSplitButton).
+ * também salva uma versão) + menu secundário "Histórico de versões" e
+ * "Exportar Excel" — mesmo padrão do "Criar kit" no catálogo (AddSplitButton).
  */
-export function PublishSplitButton({ onPublish, onOpenVersions, versionLabel }: PublishSplitButtonProps) {
+export function PublishSplitButton({
+  onPublish,
+  onOpenVersions,
+  versionLabel,
+  onExport,
+  exporting,
+}: PublishSplitButtonProps) {
   const [open, setOpen] = React.useState(false);
   return (
     <div className="inline-flex">
@@ -49,7 +61,7 @@ export function PublishSplitButton({ onPublish, onOpenVersions, versionLabel }: 
               setOpen(false);
               onOpenVersions();
             }}
-            className="flex w-full items-center gap-2.5 rounded px-3 py-2.5 text-left text-[13px] font-semibold text-neutral-gray-11 hover:bg-neutral-gray-2"
+            className={itemClass}
           >
             <span className="text-neutral-gray-9">
               <HistoryGlyph size={16} />
@@ -58,6 +70,20 @@ export function PublishSplitButton({ onPublish, onOpenVersions, versionLabel }: 
             <span className="ml-auto text-[11px] font-semibold text-neutral-gray-6">
               {versionLabel}
             </span>
+          </button>
+          {/* A geração leva ~1s (o exceljs carrega sob demanda): o item mostra o
+              spinner e o menu só fecha quando o download sai. */}
+          <button
+            type="button"
+            disabled={exporting}
+            onClick={() => void onExport().finally(() => setOpen(false))}
+            title="Baixa a tabela de preço final em Excel — uma aba por tipologia"
+            className={cn(itemClass, "disabled:cursor-wait disabled:opacity-70")}
+          >
+            <span className="flex text-neutral-gray-9">
+              {exporting ? <Spinner size={16} className="text-current" /> : <Icon name="download" size={16} />}
+            </span>
+            Exportar Excel
           </button>
         </PopoverContent>
       </Popover>

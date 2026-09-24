@@ -47,6 +47,8 @@ import {
   valUnOf,
   type BudgetDeps,
 } from "../calc";
+import { buildPrecoFinalSheet } from "../precoFinalExport";
+import { downloadPrecoFinalXlsx } from "../precoFinalXlsx";
 import { linhasPendentesOf } from "../resolve";
 import { PricingStatusBadge } from "./PricingStatusBadge";
 import { PublishDiffList } from "./PublishDiffList";
@@ -133,6 +135,38 @@ function EmptySectionRow({
       <td colSpan={colSpan} className="bg-white px-3.5 py-5 text-center">
         <p className="text-[12.5px] font-semibold text-neutral-gray-9">{title}</p>
         <p className="mt-0.5 text-[11.5px] text-neutral-gray-6">{subtitle}</p>
+      </td>
+    </tr>
+  );
+}
+
+/**
+ * Cabeçalho discreto de um componente na seção de personalizados: os upgrades
+ * vêm agrupados por componente, e esta linha marca onde cada grupo começa. No
+ * padrão não precisa — ali já é uma linha por componente.
+ */
+function ComponentGroupRow({
+  colSpan,
+  nome,
+  opcoes,
+}: {
+  colSpan: number;
+  nome: string;
+  opcoes: number;
+}) {
+  return (
+    <tr>
+      <td
+        colSpan={colSpan}
+        className="border-b border-neutral-gray-4 bg-neutral-gray-2 px-3.5 pb-[3px] pt-[7px]"
+      >
+        <div className="flex items-center gap-1.5">
+          <span className="h-2.5 w-[3px] shrink-0 rounded-full bg-[#fdba74]" />
+          <span className="text-[11px] font-bold text-neutral-gray-9">{nome}</span>
+          <span className="text-[10.5px] text-neutral-gray-6">
+            · {opcoes} {opcoes === 1 ? "opção" : "opções"}
+          </span>
+        </div>
       </td>
     </tr>
   );
@@ -304,6 +338,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   const [restoreTarget, setRestoreTarget] = React.useState<BudgetVersion | null>(null);
   const [toastMsg, setToastMsg] = React.useState("");
   const [convWarnDismissed, setConvWarnDismissed] = React.useState(false);
+  const [exporting, setExporting] = React.useState(false);
   const toastTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fireToast = (m: string) => {
@@ -582,6 +617,25 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
     });
   };
 
+  // ── exportar "Preço final" (.xlsx, uma aba por tipologia) ──
+  // Mesmo rascunho que a tabela mostra — não a versão publicada.
+  const handleExport = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      await downloadPrecoFinalXlsx({
+        projeto: project?.nome ?? "Projeto",
+        sheets: tipologias.map((t) => buildPrecoFinalSheet(deps, t)),
+        cols,
+        usaDC,
+      });
+    } catch {
+      fireToast("Não foi possível gerar a planilha — tente de novo");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   // ── contagem de pendentes da tipologia ativa (aviso do rodapé) ──
   let excludedCount = 0;
   for (const amb of tip.ambientes) {
@@ -690,6 +744,8 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
               onPublish={openPublishModal}
               onOpenVersions={() => setShowDrawer(true)}
               versionLabel={currentVersion?.label ?? "—"}
+              onExport={handleExport}
+              exporting={exporting}
             />
           </>
         }
@@ -1232,346 +1288,357 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                         subtitle="Adicione opções de upgrade aos componentes deste ambiente para cobrar do cliente."
                       />
                     )}
-                    {amb.componentes.map((comp) =>
-                      comp.options.map((opt) => {
-                        if (opt.isDefault) return null;
-                        const rk = rowKey(opt.id);
+                    {amb.componentes.map((comp) => {
+                      const nUpg = comp.options.filter(
+                        (o) =>
+                          !o.isDefault &&
+                          Boolean(o.isKit ? getKit(kits, o.baseId) : getMaterial(materiais, o.baseId))
+                      ).length;
+                      if (nUpg === 0) return null;
+                      return (
+                        <React.Fragment key={`upg-${comp.id}`}>
+                          <ComponentGroupRow colSpan={colCount} nome={comp.nome} opcoes={nUpg} />
+                          {comp.options.map((opt) => {
+                            if (opt.isDefault) return null;
+                            const rk = rowKey(opt.id);
 
-                        // ── KIT: linha principal + sub-itens editáveis ──
-                        if (opt.isKit) {
-                          const kit = getKit(kits, opt.baseId);
-                          if (!kit) return null;
-                          const rr = calcAnyRow(deps, comp, opt);
-                          const r = rr?.kind === "kit" ? rr.result : null;
-                          const kitBg = r && !r.pending ? "bg-[#fbf6ff]" : "bg-functional-warning-light";
-                          const kitCmts = commentThreads[rk] ?? [];
-                          return (
-                            <KitOptionRows
-                              key={rk}
-                              modo="upgrade"
-                              kit={kit}
-                              comp={comp}
-                              opt={opt}
-                              deps={deps}
-                              cols={cols}
-                              usaDC={usaDC}
-                              tipologia={tip.nome}
-                              expanded={expandedRows.has(rk)}
-                              onToggle={() => toggleRow(rk)}
-                              result={r}
-                              configCells={cols.map((col, colIdx) =>
-                                renderConfigCell(col, colIdx, r && !r.pending ? rr : null, opt.id, kitBg)
-                              )}
-                              commentCell={
-                                <CommentTd
-                                  count={kitCmts.length}
-                                  onOpen={() =>
-                                    setOpenThread({
-                                      key: rk,
-                                      especificacao: kit.nome,
-                                      ambiente: amb.nome,
-                                      componente: comp.nome,
-                                    })
-                                  }
-                                  className={kitBg}
-                                />
-                              }
-                              onSaveQtd={(v) => saveQtd(opt.id, v)}
-                              onSaveItemQtd={(itemId, q) =>
-                                saveKitItemQtd(amb.blueprintRoomId, comp.id, itemId, q)
-                              }
-                              onFillCost={persistBaseCost}
-                              onSemCusto={markSemCusto}
-                              onVerItens={() => setView("itens")}
-                            />
-                          );
-                        }
-
-                        // ── MATERIAL: linha + preenchimento de custo base ──
-                        const upgMat = getMaterial(materiais, opt.baseId);
-                        if (!upgMat) return null;
-                        // Pendente = o custo base desta opção está incompleto:
-                        // material sem cotação OU insumo da composição sem
-                        // preço. A dica distingue os dois — no segundo caso o
-                        // material está preenchido e a correção é na aba
-                        // "Itens de custo", não aqui.
-                        const pending = isOptionOwnPending(deps, opt);
-                        const optPricing = pricingOf(deps, opt.id);
-                        const custo = custosBase[opt.baseId];
-                        const matSemCusto = pending && (custo?.custoMat ?? null) === null;
-                        const insumosPendentes = pending ? linhasPendentesOf(custosBase, opt.baseId) : [];
-                        const rr = pending ? null : calcAnyRow(deps, comp, opt);
-                        const r = rr?.kind === "material" ? rr.result : null;
-                        const rowBg = pending ? "bg-functional-warning-light" : "bg-white";
-                        const cmts = commentThreads[rk] ?? [];
-                        const filling = fillOpen.has(rk);
-                        const inlineFill = pending && filling && fillMode === "inline";
-                        const draft = fillDraft[opt.baseId] ?? { mat: "", mo: "" };
-                        const fillCell = inlineFill ? "bg-primary-1" : rowBg;
-                        // Composição do custo base aberta sob a linha (só
-                        // leitura), estendida pela qtd com RT — de onde saiu o
-                        // valor unitário. Com valor sobreposto é só informativa.
-                        const qtdComRT =
-                          qtdOf(deps, comp, opt.id) * (1 + rtOf(deps, comp, opt.id) / 100);
-                        const overridden = optPricing.valorUnitario != null;
-                        const composicao = composicaoSubRows(
-                          custo,
-                          qtdComRT,
-                          unidadeOf(deps, comp, opt.id)
-                        );
-                        const matChildren = overridden ? noteOverride(composicao) : composicao;
-                        const matExpanded = expandedRows.has(rk);
-
-                        return (
-                          <React.Fragment key={rk}>
-                            <tr className="group/row">
-                              <Td sticky className={rowBg}>
-                                <div className="flex items-start gap-1.5">
-                                  {matChildren.length > 0 && (
-                                    <button
-                                      type="button"
-                                      onClick={() => toggleRow(rk)}
-                                      title={matExpanded ? "Recolher composição" : "Expandir composição"}
-                                      className="mt-px text-neutral-gray-7"
-                                    >
-                                      <Icon name={matExpanded ? "chevD" : "chevR"} size={15} />
-                                    </button>
-                                  )}
-                                  <div className="flex-1">
-                                    <div
-                                      className={cn(
-                                        "text-xs font-semibold",
-                                        pending ? "text-tint-amber-fg" : "text-neutral-gray-11"
-                                      )}
-                                    >
-                                      {upgMat.nome}
-                                    </div>
-                                    <div
-                                      className={cn(
-                                        "mt-px text-[11px]",
-                                        pending ? "text-[#b45309]" : "text-neutral-gray-6"
-                                      )}
-                                    >
-                                      {comp.nome} · {upgMat.fabricante}
-                                      {matSemCusto && (
-                                        <span className="ml-1.5 font-bold text-tint-orange-fg">
-                                          · Aguardando custo
-                                        </span>
-                                      )}
-                                      <InsumoPendenteHint linhas={insumosPendentes} onVer={() => setView("itens")} />
-                                    </div>
-                                    {matSemCusto && !inlineFill && !(filling && fillMode === "expandRow") && (
-                                      <button
-                                        type="button"
-                                        onClick={() => openFill(rk, opt.baseId)}
-                                        className="mt-1.5 inline-flex items-center gap-[5px] rounded-full border border-primary-7 bg-white px-2.5 py-1 text-[11px] font-bold text-primary-7"
-                                      >
-                                        <Icon name="plus" size={12} /> Preencher custo base
-                                      </button>
-                                    )}
-                                  </div>
-                                  {pending && (
-                                    <Icon name="warning" size={13} className="text-tint-orange-fg" />
-                                  )}
-                                </div>
-                              </Td>
-                              <Td right className={cn(fillCell, "text-neutral-gray-7")}>
-                                {inlineFill ? (
-                                  <span className="text-[9.5px] font-bold uppercase tracking-wide text-primary-7">
-                                    Custo base →
-                                  </span>
-                                ) : (
-                                  <QtyPopover
-                                    qtd={qtdOf(deps, comp, opt.id)}
-                                    rt={rtOf(deps, comp, opt.id)}
-                                    unidade={unidadeOf(deps, comp, opt.id)}
-                                    herdado={{ qtd: comp.qtd, rt: comp.rt, unidade: comp.unidade }}
-                                    overridden={
-                                      optPricing.qtd != null ||
-                                      optPricing.rt != null ||
-                                      optPricing.unidade != null
-                                    }
-                                    comRT
-                                    onSave={(v) => saveQtd(opt.id, v)}
-                                  />
-                                )}
-                              </Td>
-                              <Td right className={cn(fillCell, "text-neutral-gray-7")}>
-                                {inlineFill ? (
-                                  <div className="flex flex-col items-end gap-0.5">
-                                    <span className="text-[8.5px] font-bold tracking-wide text-primary-7">
-                                      CUSTO MAT.
-                                    </span>
-                                    <FillInput
-                                      autoFocus
-                                      value={draft.mat}
-                                      onChange={(v) => setDraftField(opt.baseId, "mat", v)}
-                                      onEnter={() => commitFill(rk, opt.baseId)}
-                                      onEscape={() => closeFill(rk)}
-                                    />
-                                  </div>
-                                ) : (
-                                  <UnitCostCell
-                                    value={valUnOf(deps, opt)}
-                                    base={custoBaseOf(custosBase, opt.baseId)}
-                                    overridden={overridden}
-                                    pending={pending}
-                                    onSave={(v) => saveValorUnitario(opt.id, v)}
-                                  />
-                                )}
-                              </Td>
-                              {usaDC && (
-                                <Td right className={fillCell}>
-                                  {inlineFill ? (
-                                    <div className="flex flex-col items-end gap-0.5">
-                                      <span className="text-[8.5px] font-bold tracking-wide text-primary-7">
-                                        CUSTO MO
-                                      </span>
-                                      <FillInput
-                                        value={draft.mo}
-                                        onChange={(v) => setDraftField(opt.baseId, "mo", v)}
-                                        onEnter={() => commitFill(rk, opt.baseId)}
-                                        onEscape={() => closeFill(rk)}
-                                      />
-                                    </div>
-                                  ) : r ? (
-                                    <span className="font-semibold text-[#c2410c]">
-                                      Déb. {fmtBRL(r.debitoTotal)}
-                                    </span>
-                                  ) : (
-                                    "—"
-                                  )}
-                                </Td>
-                              )}
-                              <Td right className={cn(fillCell, "text-neutral-gray-8")}>
-                                {inlineFill ? (
-                                  <div className="flex justify-end gap-1">
-                                    <button
-                                      type="button"
-                                      onClick={() => commitFill(rk, opt.baseId)}
-                                      title="Salvar"
-                                      className="rounded bg-primary-7 px-[9px] py-1 text-[11px] font-bold text-white"
-                                    >
-                                      ✓
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => closeFill(rk)}
-                                      title="Cancelar"
-                                      className="rounded border border-neutral-gray-5 px-[7px] py-1 text-[11px] text-neutral-gray-7"
-                                    >
-                                      ✕
-                                    </button>
-                                  </div>
-                                ) : r && !pending ? (
-                                  // custoDeTroca já é estendido — multiplicar de
-                                  // novo por qtdComRT duplicaria a extensão.
-                                  <span
-                                    className={cn(
-                                      "font-semibold",
-                                      r.custoDeTroca >= 0
-                                        ? "text-neutral-gray-8"
-                                        : "text-functional-success"
-                                    )}
-                                  >
-                                    {fmtBRL(r.custoDeTroca)}
-                                  </span>
-                                ) : (
-                                  "—"
-                                )}
-                              </Td>
-                              {cols.map((col, colIdx) =>
-                                renderConfigCell(col, colIdx, pending ? null : rr, opt.id, rowBg)
-                              )}
-                              <Td className={rowBg} />
-                              <Td right className={r && !pending ? "bg-primary-1" : rowBg}>
-                                {r && !pending ? (
-                                  <span className="text-[13px] font-extrabold text-primary-7">
-                                    {fmtBRL(r.total)}
-                                  </span>
-                                ) : (
-                                  "—"
-                                )}
-                              </Td>
-                              <CommentTd
-                                count={cmts.length}
-                                onOpen={() =>
-                                  setOpenThread({
-                                    key: rk,
-                                    especificacao: upgMat.nome,
-                                    ambiente: amb.nome,
-                                    componente: comp.nome,
-                                  })
-                                }
-                                className={rowBg}
-                              />
-                            </tr>
-                            {matExpanded &&
-                              matChildren.map((c, ci) => (
-                                <SubRow
-                                  key={`${rk}-${c.key}`}
-                                  cells={c}
-                                  isLast={ci === matChildren.length - 1}
+                            // ── KIT: linha principal + sub-itens editáveis ──
+                            if (opt.isKit) {
+                              const kit = getKit(kits, opt.baseId);
+                              if (!kit) return null;
+                              const rr = calcAnyRow(deps, comp, opt);
+                              const r = rr?.kind === "kit" ? rr.result : null;
+                              const kitBg = r && !r.pending ? "bg-[#fbf6ff]" : "bg-functional-warning-light";
+                              const kitCmts = commentThreads[rk] ?? [];
+                              return (
+                                <KitOptionRows
+                                  key={rk}
+                                  modo="upgrade"
+                                  kit={kit}
+                                  comp={comp}
+                                  opt={opt}
+                                  deps={deps}
                                   cols={cols}
-                                  usaDebitoCredito={usaDC}
-                                  dimmed={overridden}
+                                  usaDC={usaDC}
+                                  tipologia={tip.nome}
+                                  expanded={expandedRows.has(rk)}
+                                  onToggle={() => toggleRow(rk)}
+                                  result={r}
+                                  configCells={cols.map((col, colIdx) =>
+                                    renderConfigCell(col, colIdx, r && !r.pending ? rr : null, opt.id, kitBg)
+                                  )}
+                                  commentCell={
+                                    <CommentTd
+                                      count={kitCmts.length}
+                                      onOpen={() =>
+                                        setOpenThread({
+                                          key: rk,
+                                          especificacao: kit.nome,
+                                          ambiente: amb.nome,
+                                          componente: comp.nome,
+                                        })
+                                      }
+                                      className={kitBg}
+                                    />
+                                  }
+                                  onSaveQtd={(v) => saveQtd(opt.id, v)}
+                                  onSaveItemQtd={(itemId, q) =>
+                                    saveKitItemQtd(amb.blueprintRoomId, comp.id, itemId, q)
+                                  }
+                                  onFillCost={persistBaseCost}
+                                  onSemCusto={markSemCusto}
+                                  onVerItens={() => setView("itens")}
                                 />
-                              ))}
-                            {pending && filling && fillMode === "expandRow" && (
-                              <tr>
-                                <td
-                                  colSpan={colCount}
-                                  className="border-b border-neutral-gray-4 bg-[#fffdf5] p-0"
-                                >
-                                  <div className="flex items-end gap-[18px] border-l-[3px] border-functional-warning px-[18px] py-3.5">
-                                    <div className="shrink-0">
-                                      <div className="mb-[3px] text-[10.5px] font-bold uppercase tracking-wider text-tint-amber-fg">
-                                        Preencher custo base
+                              );
+                            }
+
+                            // ── MATERIAL: linha + preenchimento de custo base ──
+                            const upgMat = getMaterial(materiais, opt.baseId);
+                            if (!upgMat) return null;
+                            // Pendente = o custo base desta opção está incompleto:
+                            // material sem cotação OU insumo da composição sem
+                            // preço. A dica distingue os dois — no segundo caso o
+                            // material está preenchido e a correção é na aba
+                            // "Itens de custo", não aqui.
+                            const pending = isOptionOwnPending(deps, opt);
+                            const optPricing = pricingOf(deps, opt.id);
+                            const custo = custosBase[opt.baseId];
+                            const matSemCusto = pending && (custo?.custoMat ?? null) === null;
+                            const insumosPendentes = pending ? linhasPendentesOf(custosBase, opt.baseId) : [];
+                            const rr = pending ? null : calcAnyRow(deps, comp, opt);
+                            const r = rr?.kind === "material" ? rr.result : null;
+                            const rowBg = pending ? "bg-functional-warning-light" : "bg-white";
+                            const cmts = commentThreads[rk] ?? [];
+                            const filling = fillOpen.has(rk);
+                            const inlineFill = pending && filling && fillMode === "inline";
+                            const draft = fillDraft[opt.baseId] ?? { mat: "", mo: "" };
+                            const fillCell = inlineFill ? "bg-primary-1" : rowBg;
+                            // Composição do custo base aberta sob a linha (só
+                            // leitura), estendida pela qtd com RT — de onde saiu o
+                            // valor unitário. Com valor sobreposto é só informativa.
+                            const qtdComRT =
+                              qtdOf(deps, comp, opt.id) * (1 + rtOf(deps, comp, opt.id) / 100);
+                            const overridden = optPricing.valorUnitario != null;
+                            const composicao = composicaoSubRows(
+                              custo,
+                              qtdComRT,
+                              unidadeOf(deps, comp, opt.id)
+                            );
+                            const matChildren = overridden ? noteOverride(composicao) : composicao;
+                            const matExpanded = expandedRows.has(rk);
+
+                            return (
+                              <React.Fragment key={rk}>
+                                <tr className="group/row">
+                                  <Td sticky className={rowBg}>
+                                    <div className="flex items-start gap-1.5">
+                                      {matChildren.length > 0 && (
+                                        <button
+                                          type="button"
+                                          onClick={() => toggleRow(rk)}
+                                          title={matExpanded ? "Recolher composição" : "Expandir composição"}
+                                          className="mt-px text-neutral-gray-7"
+                                        >
+                                          <Icon name={matExpanded ? "chevD" : "chevR"} size={15} />
+                                        </button>
+                                      )}
+                                      <div className="flex-1">
+                                        <div
+                                          className={cn(
+                                            "text-xs font-semibold",
+                                            pending ? "text-tint-amber-fg" : "text-neutral-gray-11"
+                                          )}
+                                        >
+                                          {upgMat.nome}
+                                        </div>
+                                        <div
+                                          className={cn(
+                                            "mt-px text-[11px]",
+                                            pending ? "text-[#b45309]" : "text-neutral-gray-6"
+                                          )}
+                                        >
+                                          {comp.nome} · {upgMat.fabricante}
+                                          {matSemCusto && (
+                                            <span className="ml-1.5 font-bold text-tint-orange-fg">
+                                              · Aguardando custo
+                                            </span>
+                                          )}
+                                          <InsumoPendenteHint linhas={insumosPendentes} onVer={() => setView("itens")} />
+                                        </div>
+                                        {matSemCusto && !inlineFill && !(filling && fillMode === "expandRow") && (
+                                          <button
+                                            type="button"
+                                            onClick={() => openFill(rk, opt.baseId)}
+                                            className="mt-1.5 inline-flex items-center gap-[5px] rounded-full border border-primary-7 bg-white px-2.5 py-1 text-[11px] font-bold text-primary-7"
+                                          >
+                                            <Icon name="plus" size={12} /> Preencher custo base
+                                          </button>
+                                        )}
                                       </div>
-                                      <div className="max-w-[220px] text-xs text-neutral-gray-7">
-                                        {upgMat.nome} · {comp.nome}
-                                      </div>
+                                      {pending && (
+                                        <Icon name="warning" size={13} className="text-tint-orange-fg" />
+                                      )}
                                     </div>
-                                    <label className="flex flex-col gap-1">
-                                      <span className="text-[10px] font-bold uppercase tracking-wide text-neutral-gray-7">
-                                        Custo material (R$)
+                                  </Td>
+                                  <Td right className={cn(fillCell, "text-neutral-gray-7")}>
+                                    {inlineFill ? (
+                                      <span className="text-[9.5px] font-bold uppercase tracking-wide text-primary-7">
+                                        Custo base →
                                       </span>
-                                      <FillInput
-                                        autoFocus
-                                        big
-                                        value={draft.mat}
-                                        onChange={(v) => setDraftField(opt.baseId, "mat", v)}
-                                        onEnter={() => commitFill(rk, opt.baseId)}
-                                        onEscape={() => closeFill(rk)}
+                                    ) : (
+                                      <QtyPopover
+                                        qtd={qtdOf(deps, comp, opt.id)}
+                                        rt={rtOf(deps, comp, opt.id)}
+                                        unidade={unidadeOf(deps, comp, opt.id)}
+                                        herdado={{ qtd: comp.qtd, rt: comp.rt, unidade: comp.unidade }}
+                                        overridden={
+                                          optPricing.qtd != null ||
+                                          optPricing.rt != null ||
+                                          optPricing.unidade != null
+                                        }
+                                        comRT
+                                        onSave={(v) => saveQtd(opt.id, v)}
                                       />
-                                    </label>
-                                    <label className="flex flex-col gap-1">
-                                      <span className="text-[10px] font-bold uppercase tracking-wide text-neutral-gray-7">
-                                        Custo mão de obra (R$)
+                                    )}
+                                  </Td>
+                                  <Td right className={cn(fillCell, "text-neutral-gray-7")}>
+                                    {inlineFill ? (
+                                      <div className="flex flex-col items-end gap-0.5">
+                                        <span className="text-[8.5px] font-bold tracking-wide text-primary-7">
+                                          CUSTO MAT.
+                                        </span>
+                                        <FillInput
+                                          autoFocus
+                                          value={draft.mat}
+                                          onChange={(v) => setDraftField(opt.baseId, "mat", v)}
+                                          onEnter={() => commitFill(rk, opt.baseId)}
+                                          onEscape={() => closeFill(rk)}
+                                        />
+                                      </div>
+                                    ) : (
+                                      <UnitCostCell
+                                        value={valUnOf(deps, opt)}
+                                        base={custoBaseOf(custosBase, opt.baseId)}
+                                        overridden={overridden}
+                                        pending={pending}
+                                        onSave={(v) => saveValorUnitario(opt.id, v)}
+                                      />
+                                    )}
+                                  </Td>
+                                  {usaDC && (
+                                    <Td right className={fillCell}>
+                                      {inlineFill ? (
+                                        <div className="flex flex-col items-end gap-0.5">
+                                          <span className="text-[8.5px] font-bold tracking-wide text-primary-7">
+                                            CUSTO MO
+                                          </span>
+                                          <FillInput
+                                            value={draft.mo}
+                                            onChange={(v) => setDraftField(opt.baseId, "mo", v)}
+                                            onEnter={() => commitFill(rk, opt.baseId)}
+                                            onEscape={() => closeFill(rk)}
+                                          />
+                                        </div>
+                                      ) : r ? (
+                                        <span className="font-semibold text-[#c2410c]">
+                                          Déb. {fmtBRL(r.debitoTotal)}
+                                        </span>
+                                      ) : (
+                                        "—"
+                                      )}
+                                    </Td>
+                                  )}
+                                  <Td right className={cn(fillCell, "text-neutral-gray-8")}>
+                                    {inlineFill ? (
+                                      <div className="flex justify-end gap-1">
+                                        <button
+                                          type="button"
+                                          onClick={() => commitFill(rk, opt.baseId)}
+                                          title="Salvar"
+                                          className="rounded bg-primary-7 px-[9px] py-1 text-[11px] font-bold text-white"
+                                        >
+                                          ✓
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => closeFill(rk)}
+                                          title="Cancelar"
+                                          className="rounded border border-neutral-gray-5 px-[7px] py-1 text-[11px] text-neutral-gray-7"
+                                        >
+                                          ✕
+                                        </button>
+                                      </div>
+                                    ) : r && !pending ? (
+                                      // custoDeTroca já é estendido — multiplicar de
+                                      // novo por qtdComRT duplicaria a extensão.
+                                      <span
+                                        className={cn(
+                                          "font-semibold",
+                                          r.custoDeTroca >= 0
+                                            ? "text-neutral-gray-8"
+                                            : "text-functional-success"
+                                        )}
+                                      >
+                                        {fmtBRL(r.custoDeTroca)}
                                       </span>
-                                      <FillInput
-                                        big
-                                        value={draft.mo}
-                                        onChange={(v) => setDraftField(opt.baseId, "mo", v)}
-                                        onEnter={() => commitFill(rk, opt.baseId)}
-                                        onEscape={() => closeFill(rk)}
-                                      />
-                                    </label>
-                                    <div className="flex-1" />
-                                    <Button variant="bordered" size="sm" onPress={() => closeFill(rk)}>
-                                      Cancelar
-                                    </Button>
-                                    <Button size="sm" icon="check" onPress={() => commitFill(rk, opt.baseId)}>
-                                      Salvar custo base
-                                    </Button>
-                                  </div>
-                                </td>
-                              </tr>
-                            )}
-                          </React.Fragment>
-                        );
-                      })
-                    )}
+                                    ) : (
+                                      "—"
+                                    )}
+                                  </Td>
+                                  {cols.map((col, colIdx) =>
+                                    renderConfigCell(col, colIdx, pending ? null : rr, opt.id, rowBg)
+                                  )}
+                                  <Td className={rowBg} />
+                                  <Td right className={r && !pending ? "bg-primary-1" : rowBg}>
+                                    {r && !pending ? (
+                                      <span className="text-[13px] font-extrabold text-primary-7">
+                                        {fmtBRL(r.total)}
+                                      </span>
+                                    ) : (
+                                      "—"
+                                    )}
+                                  </Td>
+                                  <CommentTd
+                                    count={cmts.length}
+                                    onOpen={() =>
+                                      setOpenThread({
+                                        key: rk,
+                                        especificacao: upgMat.nome,
+                                        ambiente: amb.nome,
+                                        componente: comp.nome,
+                                      })
+                                    }
+                                    className={rowBg}
+                                  />
+                                </tr>
+                                {matExpanded &&
+                                  matChildren.map((c, ci) => (
+                                    <SubRow
+                                      key={`${rk}-${c.key}`}
+                                      cells={c}
+                                      isLast={ci === matChildren.length - 1}
+                                      cols={cols}
+                                      usaDebitoCredito={usaDC}
+                                      dimmed={overridden}
+                                    />
+                                  ))}
+                                {pending && filling && fillMode === "expandRow" && (
+                                  <tr>
+                                    <td
+                                      colSpan={colCount}
+                                      className="border-b border-neutral-gray-4 bg-[#fffdf5] p-0"
+                                    >
+                                      <div className="flex items-end gap-[18px] border-l-[3px] border-functional-warning px-[18px] py-3.5">
+                                        <div className="shrink-0">
+                                          <div className="mb-[3px] text-[10.5px] font-bold uppercase tracking-wider text-tint-amber-fg">
+                                            Preencher custo base
+                                          </div>
+                                          <div className="max-w-[220px] text-xs text-neutral-gray-7">
+                                            {upgMat.nome} · {comp.nome}
+                                          </div>
+                                        </div>
+                                        <label className="flex flex-col gap-1">
+                                          <span className="text-[10px] font-bold uppercase tracking-wide text-neutral-gray-7">
+                                            Custo material (R$)
+                                          </span>
+                                          <FillInput
+                                            autoFocus
+                                            big
+                                            value={draft.mat}
+                                            onChange={(v) => setDraftField(opt.baseId, "mat", v)}
+                                            onEnter={() => commitFill(rk, opt.baseId)}
+                                            onEscape={() => closeFill(rk)}
+                                          />
+                                        </label>
+                                        <label className="flex flex-col gap-1">
+                                          <span className="text-[10px] font-bold uppercase tracking-wide text-neutral-gray-7">
+                                            Custo mão de obra (R$)
+                                          </span>
+                                          <FillInput
+                                            big
+                                            value={draft.mo}
+                                            onChange={(v) => setDraftField(opt.baseId, "mo", v)}
+                                            onEnter={() => commitFill(rk, opt.baseId)}
+                                            onEscape={() => closeFill(rk)}
+                                          />
+                                        </label>
+                                        <div className="flex-1" />
+                                        <Button variant="bordered" size="sm" onPress={() => closeFill(rk)}>
+                                          Cancelar
+                                        </Button>
+                                        <Button size="sm" icon="check" onPress={() => commitFill(rk, opt.baseId)}>
+                                          Salvar custo base
+                                        </Button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </React.Fragment>
+                            );
+                          })}
+                        </React.Fragment>
+                      );
+                    })}
 
                     <tr>
                       <td
