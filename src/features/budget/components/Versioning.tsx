@@ -5,7 +5,9 @@ import { FocusScope } from "@react-aria/focus";
 
 import { Button, Icon } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import type { BudgetVersion, Change, VersionChanges } from "@/shared/types/domain";
+import type { BudgetVersion, Change, PricingDiffRow } from "@/shared/types/domain";
+
+import { DiffMotivos, DiffPrice, ORDEM } from "./PublishDiffList";
 
 export function HistoryGlyph({ size = 15 }: { size?: number }) {
   return (
@@ -22,7 +24,8 @@ export function SaveGlyph({ size = 15 }: { size?: number }) {
   );
 }
 
-const CHANGE_SECTIONS: { key: keyof VersionChanges; label: string }[] = [
+type LegacySection = "materiais" | "custos" | "taxas" | "tipologias";
+const CHANGE_SECTIONS: { key: LegacySection; label: string }[] = [
   { key: "materiais", label: "Materiais" },
   { key: "custos", label: "Custos" },
   { key: "taxas", label: "Taxas" },
@@ -74,6 +77,128 @@ function ChangeSection({ label, items }: { label: string; items: Change[] }) {
   );
 }
 
+const PRECO_SECTIONS: Record<PricingDiffRow["tipo"], { label: string; sym: Change["tipo"] }> = {
+  removido: { label: "Saíram do orçamento", sym: "removido" },
+  alterado: { label: "Preços alterados", sym: "alterado" },
+  novo: { label: "Novos preços", sym: "adicionado" },
+};
+const precoCountLabel = (n: number) => (n === 1 ? "1 linha" : `${n} linhas`);
+
+/** "+3 ~5 −1" no cabeçalho do card — dá para varrer o histórico sem expandir. */
+function PrecoTally({ precos }: { precos: PricingDiffRow[] }) {
+  const n = (t: PricingDiffRow["tipo"]) => precos.filter((p) => p.tipo === t).length;
+  const novos = n("novo");
+  const alterados = n("alterado");
+  const removidos = n("removido");
+  if (novos + alterados + removidos === 0) return null;
+  return (
+    <span
+      className="flex items-center gap-1.5 text-[11px] font-bold"
+      title={`${novos} novos · ${alterados} alterados · ${removidos} saíram do orçamento`}
+    >
+      {novos > 0 && <span className="text-functional-success">+{novos}</span>}
+      {alterados > 0 && <span className="text-primary-7">~{alterados}</span>}
+      {removidos > 0 && <span className="text-functional-error">−{removidos}</span>}
+    </span>
+  );
+}
+
+/**
+ * O diff de preço que a publicação gravou — o mesmo que o modal "Publicar
+ * orçamento" mostrou na hora, agrupado por tipo.
+ */
+function PrecoChanges({ precos, avisos }: { precos: PricingDiffRow[]; avisos: string[] }) {
+  return (
+    <>
+      {precos.length === 0 && (
+        <p className="mb-[11px] text-[11.5px] text-neutral-gray-7">
+          Nenhum preço mudou nesta publicação.
+        </p>
+      )}
+      {ORDEM.map((tipo) => {
+        const items = precos.filter((p) => p.tipo === tipo);
+        if (items.length === 0) return null;
+        const sec = PRECO_SECTIONS[tipo];
+        const cfg = VTYPE_CFG[sec.sym];
+        return (
+          <div key={tipo} className="mb-[11px]">
+            <div className="mb-[7px] flex items-center gap-[7px]">
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary-7" />
+              <span className="text-xs font-bold text-neutral-gray-9">{sec.label}</span>
+              <span className="text-[11px] font-semibold text-neutral-gray-6">
+                {precoCountLabel(items.length)}
+              </span>
+            </div>
+            <div className="flex flex-col gap-2.5 pl-[13px]">
+              {items.map((r) => (
+                <div key={r.optionId} className="flex items-start gap-2">
+                  <span
+                    className={cn(
+                      "mt-px flex h-[15px] w-[15px] shrink-0 items-center justify-center rounded text-xs font-extrabold",
+                      cfg.className
+                    )}
+                  >
+                    {cfg.sym}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="min-w-0 text-[11.5px] font-semibold leading-snug text-neutral-gray-11">
+                        {r.especificacao}
+                      </span>
+                      <span className="shrink-0 text-[11px]">
+                        <DiffPrice row={r} />
+                      </span>
+                    </div>
+                    <div className="mt-px text-[10.5px] text-neutral-gray-6">
+                      {r.ambiente} · {r.componente}
+                    </div>
+                    <DiffMotivos motivos={r.motivos} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+      {avisos.length > 0 && (
+        <div className="mb-[11px] flex flex-col gap-1.5">
+          {avisos.map((aviso, i) => (
+            <div
+              key={i}
+              className="flex items-start gap-2 rounded-lg border border-[#fde68a] bg-functional-warning-light px-2.5 py-2"
+            >
+              <Icon name="warning" size={12} className="mt-0.5 shrink-0 text-tint-orange-fg" />
+              <p className="text-[11px] leading-snug text-neutral-gray-9">{aviso}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+function VersionChangesBody({ v }: { v: BudgetVersion }) {
+  const { precos, avisos } = v.changes;
+  if (precos !== null) return <PrecoChanges precos={precos} avisos={avisos} />;
+  if (CHANGE_SECTIONS.some((s) => v.changes[s.key].length > 0)) {
+    return (
+      <>
+        {CHANGE_SECTIONS.map((s) => (
+          <ChangeSection key={s.key} label={s.label} items={v.changes[s.key]} />
+        ))}
+      </>
+    );
+  }
+  // Publicada antes de a versão guardar o diff — o preço de então foi
+  // sobrescrito no Material, então não há como reconstruir o "de → para".
+  return (
+    <p className="mb-[11px] text-[11.5px] leading-relaxed text-neutral-gray-7">
+      As alterações desta versão não foram registradas — ela foi publicada antes de o histórico
+      passar a guardar o diff de preços.
+    </p>
+  );
+}
+
 function VersionCard({
   v,
   expanded,
@@ -101,6 +226,7 @@ function VersionCard({
               Atual
             </span>
           )}
+          {v.changes.precos && <PrecoTally precos={v.changes.precos} />}
           <span className="flex-1" />
           <span className="whitespace-nowrap text-[11px] text-neutral-gray-7">
             {dateOnly} · {v.createdBy}
@@ -118,10 +244,8 @@ function VersionCard({
       </div>
       {expanded && (
         <div className="border-t border-neutral-gray-4 px-3.5 pb-3.5 pt-3">
-          <div className="max-h-[280px] overflow-y-auto pr-1">
-            {CHANGE_SECTIONS.map((s) => (
-              <ChangeSection key={s.key} label={s.label} items={v.changes[s.key]} />
-            ))}
+          <div className="max-h-[360px] overflow-y-auto pr-1">
+            <VersionChangesBody v={v} />
           </div>
           {!v.isCurrent && (
             <div className="mt-1">
@@ -195,7 +319,7 @@ export function VersionDrawer({
         aria-modal="true"
         aria-labelledby="version-drawer-title"
         className={cn(
-          "fixed right-0 top-0 z-[901] flex h-screen w-[400px] max-w-[92vw] flex-col bg-white shadow-[-8px_0_32px_rgba(0,0,0,0.14)] transition-transform duration-200 ease-out",
+          "fixed right-0 top-0 z-[901] flex h-screen w-[480px] max-w-[92vw] flex-col bg-white shadow-[-8px_0_32px_rgba(0,0,0,0.14)] transition-transform duration-200 ease-out",
           shown ? "translate-x-0" : "translate-x-full"
         )}
       >
@@ -205,7 +329,7 @@ export function VersionDrawer({
               Histórico de versões
             </div>
             <div className="mt-0.5 text-xs text-neutral-gray-7">
-              {projetoNome} · {versions.length} versões
+              {projetoNome} · {versions.length} {versions.length === 1 ? "versão" : "versões"}
             </div>
           </div>
           <button

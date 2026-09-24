@@ -31,6 +31,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { assertMediaFileInOrg } from "@/lib/server/media";
 import { resolveMediaUrl } from "@/lib/server/mediaRules";
+import { parseVersionChanges, type PublishedSnapshotJson } from "@/lib/server/pricingDiff";
 import { EMPTY_PRICING } from "@/shared/types/domain";
 import type {
   Ambiente,
@@ -380,18 +381,10 @@ type OptionRow = RoomComponentRow["Options"][number];
 type BrcRow = BlueprintRoomRow["Components"][number];
 
 /**
- * Metade do snapshot de publicação que mora no Json — o resto (preço, data,
- * versão) vem das colunas de Material. Separar evita duplicar o preço em dois
- * lugares que poderiam divergir.
+ * Metade do snapshot de publicação que mora no Json (PublishedSnapshotJson) — o
+ * resto (preço, data, versão) vem das colunas de Material. Separar evita
+ * duplicar o preço em dois lugares que poderiam divergir.
  */
-interface PublishedSnapshotJson {
-  valorUnitario: number;
-  qtd: number;
-  rt: number;
-  unidade: string;
-  colunas: Record<string, { nome: string; valor: number }>;
-}
-
 function isPublishedSnapshot(v: unknown): v is PublishedSnapshotJson {
   if (typeof v !== "object" || v === null) return false;
   const s = v as Record<string, unknown>;
@@ -441,6 +434,7 @@ function toPublished(m: OptionRow): PublishedPricing | null {
     rt: s.rt,
     unidade: s.unidade as Unidade,
     colunas: s.colunas,
+    credito: typeof s.credito === "number" ? s.credito : null,
     publicadoEm: m.PublishedAt ? formatBR(m.PublishedAt) : "",
     versaoLabel: m.PublishedVersion?.Label ?? "",
   };
@@ -2500,7 +2494,7 @@ function toVersion(row: Prisma.BudgetVersionGetPayload<object>): BudgetVersion {
     createdBy: row.CreatedBy,
     isCurrent: row.IsCurrent,
     summary: row.Summary,
-    changes: row.Changes as unknown as VersionChanges,
+    changes: parseVersionChanges(row.Changes),
   };
 }
 

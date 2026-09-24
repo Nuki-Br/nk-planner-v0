@@ -246,6 +246,7 @@ describe("publicado × rascunho", () => {
       rt: 15,
       unidade: "m²",
       colunas: {},
+      credito: null,
       publicadoEm: "23/07/2026 10:00",
       versaoLabel: "v1",
     };

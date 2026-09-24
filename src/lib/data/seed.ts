@@ -422,6 +422,9 @@ export function createSeed(): SeedData {
       isCurrent: true,
       summary: "Ajuste de margem incorporadora de 20% para 25%. Adicionadas 3 opções de piso para a Planta A.",
       changes: {
+        // Formato descritivo antigo — publicações reais gravam `precos`.
+        precos: null,
+        avisos: [],
         materiais: [
           { tipo: "adicionado", desc: "Porcelanato Nero Marquina 60×60 — Planta A, Sala, Piso" },
           { tipo: "adicionado", desc: "Porcelanato Calacatta Gold 60×60 — Planta A, Sala, Piso" },
@@ -443,6 +446,8 @@ export function createSeed(): SeedData {
       isCurrent: false,
       summary: "Revisão de custos após retorno da Construtora Vertex. 8 itens com custo atualizado.",
       changes: {
+        precos: null,
+        avisos: [],
         materiais: [],
         custos: [
           { tipo: "alterado", desc: "Granito Negro São Gabriel — R$ 260,00 → R$ 280,00 (+7,7%)" },
@@ -460,6 +465,8 @@ export function createSeed(): SeedData {
       isCurrent: false,
       summary: "Versão inicial — Plantas A e B configuradas.",
       changes: {
+        precos: null,
+        avisos: [],
         materiais: [],
         custos: [],
         taxas: [],

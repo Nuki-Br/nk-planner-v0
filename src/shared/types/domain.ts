@@ -215,6 +215,8 @@ export interface PublishedPricing {
   unidade: Unidade;
   /** colId → nome e valor da coluna livre no momento da publicação. */
   colunas: Record<string, { nome: string; valor: number }>;
+  /** Crédito do padrão abatido (R$); null em snapshots anteriores a 2026-09-24. */
+  credito: number | null;
   /** "DD/MM/AAAA HH:mm". */
   publicadoEm: string;
   /** Rótulo da versão que congelou este preço ("v3"); "" se a versão sumiu. */
@@ -376,7 +378,17 @@ export interface Change {
   desc: string;
 }
 
+/**
+ * O que uma versão mudou — mora no Json de BudgetVersion.Changes. A publicação
+ * grava `precos`: o MESMO diff que o modal "Publicar orçamento" mostrou. As
+ * seções descritivas (materiais…tipologias) são do formato antigo (seed/
+ * protótipo) e só são lidas para exibir versões que já foram gravadas assim.
+ */
 export interface VersionChanges {
+  /** Diff de preço congelado na publicação; null = versão sem diff registrado. */
+  precos: PricingDiffRow[] | null;
+  /** Avisos de ambiente compartilhado vigentes no momento da publicação. */
+  avisos: string[];
   materiais: Change[];
   custos: Change[];
   taxas: Change[];
@@ -412,6 +424,21 @@ export interface PricingDiffRow {
    */
   para: number | null;
   tipo: "novo" | "alterado" | "removido";
+  /**
+   * O que moveu o preço (só em "alterado"): os campos do snapshot publicado que
+   * diferem do que será publicado. Pode vir vazio quando o snapshot antigo não
+   * guarda o campo que mudou (ex.: crédito do padrão antes de 2026-09-24).
+   */
+  motivos: PricingDiffField[];
+}
+
+/** Um campo do snapshot que mudou numa linha ("Qtd: 18,00 → 20,00"). */
+export interface PricingDiffField {
+  /** "Valor unitário", "Qtd", "RT", "Unidade", "Crédito do padrão" ou o nome da coluna. */
+  campo: string;
+  /** Valores já formatados em PT-BR; "—" quando o campo não existia de um dos lados. */
+  de: string;
+  para: string;
 }
 
 /** Resultado da comparação de todo o empreendimento. */

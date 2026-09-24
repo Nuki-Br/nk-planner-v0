@@ -16,7 +16,6 @@ import type {
   Componente,
   MaterialOption,
   PricingDiff,
-  PricingDiffRow,
   Tipologia,
 } from "@/shared/types/domain";
 
@@ -31,35 +30,13 @@ import {
   listPricing,
   listTipologias,
 } from "./store";
-
-/** Uma aplicação resolvida para publicação: o que grava e como se chama. */
-interface ResolvedRow {
-  optionId: number;
-  especificacao: string;
-  ambiente: string;
-  componente: string;
-  /** null = a linha não é publicável agora (pendente de custo). */
-  total: number | null;
-  /** Valores congelados; null quando total é null. */
-  snapshot: {
-    valorUnitario: number;
-    qtd: number;
-    rt: number;
-    unidade: string;
-    colunas: Record<string, { nome: string; valor: number }>;
-  } | null;
-}
+import { diffRows, type ResolvedRow } from "./pricingDiff";
 
 interface ResolvedEnterprise {
   rows: ResolvedRow[];
   avisos: string[];
   /** optionId → publicado atual, para o diff. */
   published: Map<number, MaterialOption["publicado"]>;
-}
-
-/** Diferença de centavo não é mudança de preço — evita diff que nunca zera. */
-function precoMudou(de: number, para: number): boolean {
-  return Math.abs(de - para) >= 0.005;
 }
 
 /**
@@ -199,6 +176,7 @@ async function resolveEnterprise(
               rt: rtOf(deps, comp, opt.id),
               unidade: unidadeOf(deps, comp, opt.id),
               colunas,
+              credito: r.result.creditoTotal,
             },
           });
         }
@@ -230,24 +208,8 @@ export async function getPricingDiff(
 ): Promise<PricingDiff> {
   await assertEnterprise(organizationId, projectId);
   const { rows, avisos, published } = await resolveEnterprise(organizationId, projectId);
-
-  const diff: PricingDiffRow[] = [];
-  let algumPublicado = false;
-  for (const row of rows) {
-    const pub = published.get(row.optionId) ?? null;
-    if (pub) algumPublicado = true;
-
-    if (!pub && row.total != null) {
-      diff.push({ ...row, de: null, para: row.total, tipo: "novo" });
-    } else if (pub && row.total == null) {
-      // Deixou de ser calculável (custo apagado): publicar vai LIMPAR o preço.
-      diff.push({ ...row, de: pub.preco, para: null, tipo: "removido" });
-    } else if (pub && row.total != null && precoMudou(pub.preco, row.total)) {
-      diff.push({ ...row, de: pub.preco, para: row.total, tipo: "alterado" });
-    }
-  }
-
-  return { rows: diff, avisos, nuncaPublicado: !algumPublicado };
+  const diff = diffRows(rows, published);
+  return { rows: diff.rows, avisos, nuncaPublicado: !diff.algumPublicado };
 }
 
 export interface PublishBudgetInput {
@@ -269,7 +231,10 @@ export async function publishBudget(
   input: PublishBudgetInput
 ): Promise<BudgetVersion> {
   await assertEnterprise(organizationId, projectId);
-  const { rows } = await resolveEnterprise(organizationId, projectId);
+  const { rows, avisos, published } = await resolveEnterprise(organizationId, projectId);
+  // O diff sai da MESMA resolução que vai ser gravada: o histórico registra
+  // exatamente o que esta publicação mudou (e é o que o modal acabou de mostrar).
+  const diff = diffRows(rows, published);
 
   const now = new Date();
   const publicaveis = rows.filter((r) => r.total != null && r.snapshot != null);
@@ -286,7 +251,14 @@ export async function publishBudget(
       const version = await createVersionWithin(tx, projectId, {
         summary: input.summary,
         createdBy: input.createdBy,
-        changes: { materiais: [], custos: [], taxas: [], tipologias: [] },
+        changes: {
+          precos: diff.rows,
+          avisos,
+          materiais: [],
+          custos: [],
+          taxas: [],
+          tipologias: [],
+        },
       });
 
       for (const r of publicaveis) {

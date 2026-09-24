@@ -166,7 +166,19 @@ Botão do Construtor de Preço. Dois passos num ato só:
    `Material`.
 
 O diff é calculado **no servidor**, percorrendo o mesmo resolvedor que a publicação usa: o que o
-modal promete é o que o publish grava.
+modal promete é o que o publish grava. Cada linha alterada traz os **motivos** — os campos do
+snapshot que mudaram (valor unitário, qtd, RT, unidade, crédito do padrão, colunas livres).
+
+### Histórico de versões
+
+A publicação grava o **mesmo diff** no Json da `BudgetVersion` (`Changes.precos` + `avisos`), e o
+drawer "Histórico de versões" o exibe agrupado em *saíram do orçamento / alterados / novos*. Diff e
+lógica de leitura vivem em `lib/server/pricingDiff.ts` (puro, testado).
+
+Versões publicadas antes de 2026-09-24 não guardaram o diff (`precos` ausente) e o preço de então
+foi sobrescrito no `Material` — não há como reconstruí-lo; a tela diz isso em vez de mostrar
+"nenhuma alteração". O crédito do padrão só entra nos motivos quando os dois snapshots o têm
+(passou a ser gravado na mesma data).
 
 ### Badge de status
 

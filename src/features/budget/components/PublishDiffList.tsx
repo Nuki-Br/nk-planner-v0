@@ -4,9 +4,9 @@ import React from "react";
 
 import { Icon } from "@/components/ui";
 import { cn, fmtBRL } from "@/lib/utils";
-import type { PricingDiff, PricingDiffRow } from "@/shared/types/domain";
+import type { PricingDiff, PricingDiffField, PricingDiffRow } from "@/shared/types/domain";
 
-const TIPO_META: Record<PricingDiffRow["tipo"], { label: string; className: string }> = {
+export const TIPO_META: Record<PricingDiffRow["tipo"], { label: string; className: string }> = {
   novo: {
     label: "Novo",
     className: "bg-functional-success-light text-functional-success",
@@ -24,7 +24,39 @@ const TIPO_META: Record<PricingDiffRow["tipo"], { label: string; className: stri
 };
 
 /** Ordem de leitura: o que quebra primeiro, o que é novidade por último. */
-const ORDEM: PricingDiffRow["tipo"][] = ["removido", "alterado", "novo"];
+export const ORDEM: PricingDiffRow["tipo"][] = ["removido", "alterado", "novo"];
+
+/** "R$ 1.200,00 → R$ 1.350,00" — riscado quando a linha sai do orçamento. */
+export function DiffPrice({ row }: { row: PricingDiffRow }) {
+  return (
+    <span className="whitespace-nowrap">
+      {row.de != null && (
+        <span className={cn("text-neutral-gray-6", row.tipo === "removido" && "line-through")}>
+          {fmtBRL(row.de)}
+        </span>
+      )}
+      {row.de != null && row.para != null && <span className="mx-1.5 text-neutral-gray-5">→</span>}
+      {row.para != null && <span className="font-bold text-neutral-gray-11">{fmtBRL(row.para)}</span>}
+    </span>
+  );
+}
+
+/** Por que o preço mudou: os campos do snapshot que diferem ("Qtd 18,00 → 20,00"). */
+export function DiffMotivos({ motivos }: { motivos: PricingDiffField[] }) {
+  if (motivos.length === 0) return null;
+  return (
+    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10.5px] leading-snug text-neutral-gray-7">
+      {motivos.map((m, i) => (
+        <span key={i}>
+          <span className="text-neutral-gray-6">{m.campo}</span>{" "}
+          <span className="whitespace-nowrap">{m.de}</span>
+          <span className="mx-1 text-neutral-gray-5">→</span>
+          <span className="whitespace-nowrap font-semibold text-neutral-gray-9">{m.para}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
 
 /**
  * O que "Publicar orçamento" vai gravar. Vem do servidor, do MESMO resolvedor
@@ -65,33 +97,19 @@ export function PublishDiffList({ diff }: { diff: PricingDiff | undefined }) {
                 const meta = TIPO_META[r.tipo];
                 return (
                   <tr key={r.optionId} className="border-b border-neutral-gray-4 last:border-b-0">
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2 align-top">
                       <div className="text-[12px] font-semibold text-neutral-gray-11">
                         {r.especificacao}
                       </div>
                       <div className="mt-px text-[10.5px] text-neutral-gray-6">
                         {r.ambiente} · {r.componente}
                       </div>
+                      <DiffMotivos motivos={r.motivos} />
                     </td>
-                    <td className="whitespace-nowrap px-3 py-2 text-right text-[11.5px]">
-                      {r.de != null && (
-                        <span
-                          className={cn(
-                            "text-neutral-gray-6",
-                            r.tipo === "removido" ? "line-through" : ""
-                          )}
-                        >
-                          {fmtBRL(r.de)}
-                        </span>
-                      )}
-                      {r.de != null && r.para != null && (
-                        <span className="mx-1.5 text-neutral-gray-5">→</span>
-                      )}
-                      {r.para != null && (
-                        <span className="font-bold text-neutral-gray-11">{fmtBRL(r.para)}</span>
-                      )}
+                    <td className="px-3 py-2 text-right align-top text-[11.5px]">
+                      <DiffPrice row={r} />
                     </td>
-                    <td className="w-[110px] px-3 py-2 text-right">
+                    <td className="w-[110px] px-3 py-2 text-right align-top">
                       <span
                         className={cn(
                           "rounded px-1.5 py-px text-[9.5px] font-bold uppercase tracking-wide",
