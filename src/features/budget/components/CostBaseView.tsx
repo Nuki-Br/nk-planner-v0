@@ -1,84 +1,46 @@
 "use client";
 
 import React from "react";
-import { Input as HeroInput } from "@heroui/react";
 
-import { Button, EmptyState, Icon, StatusBadge, Switch } from "@/components/ui";
-import { useCategorias } from "@/lib/hooks/useCategorias";
-import { useDebounce } from "@/lib/hooks/useDebounce";
+import { Button, EmptyState, Icon, Input, StatusBadge, Switch } from "@/components/ui";
 import { CategoryChip } from "@/features/catalog/components/CategoryChip";
 import { ActiveChip, FilterMenu } from "@/features/catalog/components/FilterMenu";
+import { useCategorias } from "@/lib/hooks/useCategorias";
+import { useComposicaoOp } from "@/lib/hooks/useComposicao";
+import { useCostItems } from "@/lib/hooks/useCostItems";
+import { useDebounce } from "@/lib/hooks/useDebounce";
 import { byCategoria, cn, fmtBRL, norm } from "@/lib/utils";
-import type { CustoBaseRow } from "@/shared/types/domain";
+import type { CustoBase, CustoBaseRow } from "@/shared/types/domain";
+import {
+  composicaoSubtotal,
+  custoBasePendente,
+  custoBaseStatus,
+  custoBaseTotal,
+  linhasPendentes,
+  type CustoBaseStatus,
+} from "@/shared/utils/custoBase";
+
+import { ApplyCompositionModal } from "./ApplyCompositionModal";
+import { CompositionPanel } from "./CompositionPanel";
+import { CostField, precoToInput, TH } from "./CostField";
+import { CostItemsGridModal } from "./CostItemsGridModal";
 
 /** Campo de custo em edição — "" enquanto o usuário limpa para redigitar. */
 type Draft = Record<number, { mat?: string; mo?: string }>;
 
 /** "" = todos. "sem_custo" = zero marcado de propósito (ex.: "Não entregue"). */
-type StatusFilter = "" | "pendente" | "preenchido" | "sem_custo";
+type StatusFilter = "" | CustoBaseStatus;
 
-/** Status de uma linha pelo custo de material gravado (null = pendente, 0 = sem custo). */
-function rowStatus(row: CustoBaseRow): Exclude<StatusFilter, ""> {
-  if (row.custoMat === null) return "pendente";
-  return row.custoMat === 0 ? "sem_custo" : "preenchido";
-}
-
-const STATUS_LABEL: Record<Exclude<StatusFilter, "">, string> = {
+const STATUS_LABEL: Record<CustoBaseStatus, string> = {
   pendente: "Pendente",
   preenchido: "Com custo",
   sem_custo: "Sem custo",
 };
-/** "" = todos; "opcao" = ofertável; "item" = só sub-item de kit / item de custo. */
-type TipoFilter = "" | "opcao" | "item";
 
-function CostField({
-  value,
-  isPending,
-  disabled = false,
-  onChange,
-  onCommit,
-}: {
-  value: string;
-  isPending: boolean;
-  /** Linha "sem custo": não há o que digitar — desfazer volta a pendente. */
-  disabled?: boolean;
-  onChange: (v: string) => void;
-  onCommit: (v: string) => void;
-}) {
-  const filledNow = value !== "" && parseFloat(value) > 0;
-  if (disabled) {
-    return (
-      <span className="inline-block w-[118px] pr-2 text-right text-[12.5px] text-neutral-gray-5">
-        —
-      </span>
-    );
-  }
-  return (
-    <div className="relative inline-block">
-      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] text-neutral-gray-6">
-        R$
-      </span>
-      <input
-        type="number"
-        step="0.01"
-        value={value}
-        placeholder="0,00"
-        onChange={(e) => onChange(e.target.value)}
-        onBlur={(e) => onCommit(e.target.value)}
-        className={cn(
-          "h-[34px] w-[118px] rounded-md border py-0 pl-[26px] pr-2 text-right text-[12.5px] outline-none",
-          isPending && !filledNow
-            ? "border-functional-error bg-functional-error-light text-neutral-gray-9"
-            : filledNow
-              ? "border-primary-7 bg-white font-bold text-primary-8"
-              : "border-neutral-gray-5 bg-white text-neutral-gray-9"
-        )}
-      />
-    </div>
-  );
-}
+const COLS = 7;
 
 interface CostBaseViewProps {
+  projectId: number;
   /** Todo material que precisa de custo NESTE empreendimento (todas as tipologias). */
   rows: CustoBaseRow[];
   /**
@@ -89,37 +51,41 @@ interface CostBaseViewProps {
 }
 
 /**
- * Visão "Custos base" — grade editável de custo material/MO POR EMPREENDIMENTO.
+ * Visão "Custos base" — grade editável de custo material/MO POR EMPREENDIMENTO,
+ * agora com a COMPOSIÇÃO de cada material (insumos × quantitativo, como na
+ * planilha da construtora): total = custoMat × custoQtd + custoMO + Σ insumos.
  *
  * Lista de-duplicada: um material usado em cinco componentes aparece uma vez só,
- * porque o custo é um só. Antes esta grade era por tipologia e repetia o mesmo
- * material em cada ambiente, dando a impressão de que dava para cobrar preços
- * diferentes — não dá, e não deveria dar.
+ * porque o custo é um só. A linha expande (chevron ou coluna Composição) para
+ * o painel de composição; a grade "Adicionar itens" e o "Aplicar em…" são
+ * modais deste componente — o BudgetScreen só entrega as linhas e o persist do
+ * custo mat/MO.
  *
- * Filtros (busca, categoria, status, tipo) + agrupamento por categoria com
- * subtotal e contagem de pendentes por grupo. O agrupamento é o padrão; o
- * interruptor "Agrupar por categoria" volta à lista plana quando incomoda.
- *
- * SEM coluna de comentários, ao contrário da versão por tipologia: a thread é
- * por APLICAÇÃO (Material), e aqui uma linha pode ser cinco aplicações. Um
- * contador somado abriria uma thread escolhida a esmo. Os comentários seguem na
- * aba "Preço final", onde cada linha é uma aplicação só.
+ * Filtros (busca, categoria, status) + agrupamento por categoria com subtotal e
+ * contagem de pendentes por grupo. SEM coluna de comentários: a thread é por
+ * APLICAÇÃO (Material), e aqui uma linha pode ser cinco aplicações.
  */
-export function CostBaseView({ rows, onPersist }: CostBaseViewProps) {
-  // Só o que está sendo digitado: o valor de verdade vem do servidor. Guardar a
-  // grade inteira em estado local traria de volta o bug de custo que sumia no
-  // reload — o rascunho aqui vive entre o keystroke e o blur, mais nada.
+export function CostBaseView({ projectId, rows, onPersist }: CostBaseViewProps) {
+  // Só o que está sendo digitado: o valor de verdade vem do servidor. O
+  // rascunho vive entre o keystroke e o blur, mais nada.
   const [draft, setDraft] = React.useState<Draft>({});
 
   const { data: categorias = [] } = useCategorias();
+  const { data: costItemsData } = useCostItems(projectId);
+  const costItems = React.useMemo(() => costItemsData ?? [], [costItemsData]);
+  const composicao = useComposicaoOp(projectId);
 
   const [search, setSearch] = React.useState("");
   const debouncedSearch = useDebounce(search, 250);
   const [catFilters, setCatFilters] = React.useState<string[]>([]);
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>("");
-  const [tipoFilter, setTipoFilter] = React.useState<TipoFilter>("");
   const [grouped, setGrouped] = React.useState(true);
   const [collapsed, setCollapsed] = React.useState<Set<string>>(new Set());
+
+  // Composição: linhas expandidas + modais (grade de itens / aplicar em…).
+  const [expanded, setExpanded] = React.useState<Set<number>>(new Set());
+  const [gridFor, setGridFor] = React.useState<CustoBaseRow | null>(null);
+  const [applyFrom, setApplyFrom] = React.useState<CustoBaseRow | null>(null);
 
   const setField = (baseId: number, fld: "mat" | "mo", val: string) =>
     setDraft((p) => ({ ...p, [baseId]: { ...p[baseId], [fld]: val } }));
@@ -127,24 +93,29 @@ export function CostBaseView({ rows, onPersist }: CostBaseViewProps) {
   const valOf = (row: CustoBaseRow, fld: "mat" | "mo"): string => {
     const d = draft[row.baseId]?.[fld];
     if (d !== undefined) return d;
-    const v = fld === "mat" ? row.custoMat : row.custoMO;
-    return v !== null && v > 0 ? String(v) : "";
+    return precoToInput(fld === "mat" ? row.custoMat : row.custoMO);
   };
 
   const commit = (row: CustoBaseRow, fld: "mat" | "mo", raw: string) => {
-    const n = parseFloat(raw.replace(",", ".")) || 0;
-    if (fld === "mat") {
-      // Digitar 0 ou limpar volta a PENDENTE, não a "sem custo": um zero
-      // acidental não pode virar material grátis. "Sem custo" é a ação explícita.
-      const mat = n > 0 ? n : null;
-      if (mat !== row.custoMat) onPersist(row.baseId, { custoMat: mat });
-    } else if (n !== row.custoMO) {
-      // Sai do campo sem ter mudado nada → nenhum request.
-      onPersist(row.baseId, { custoMO: n });
+    // Blur sem ter digitado nada (sem rascunho) → nenhum request. Importa para
+    // custoMat 0 com composição: o campo mostra "" e não pode virar null no blur.
+    if (draft[row.baseId]?.[fld] !== undefined) {
+      const n = parseFloat(raw.replace(",", ".")) || 0;
+      if (fld === "mat") {
+        // Digitar 0 ou limpar volta a PENDENTE, não a "sem custo": um zero
+        // acidental não pode virar material grátis. "Sem custo" é a ação explícita.
+        const mat = n > 0 ? n : null;
+        if (mat !== row.custoMat) onPersist(row.baseId, { custoMat: mat });
+      } else if (n !== row.custoMO) {
+        onPersist(row.baseId, { custoMO: n });
+      }
     }
     setDraft((p) => {
       const next = { ...p };
-      delete next[row.baseId];
+      const cur = { ...next[row.baseId] };
+      delete cur[fld];
+      if (cur.mat === undefined && cur.mo === undefined) delete next[row.baseId];
+      else next[row.baseId] = cur;
       return next;
     });
   };
@@ -157,15 +128,22 @@ export function CostBaseView({ rows, onPersist }: CostBaseViewProps) {
       return next;
     });
 
+  const toggleExpand = (baseId: number) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(baseId)) next.delete(baseId);
+      else next.add(baseId);
+      return next;
+    });
+
   const clearFilters = () => {
     setSearch("");
     setCatFilters([]);
     setStatusFilter("");
-    setTipoFilter("");
   };
 
-  const countBy = (status: Exclude<StatusFilter, "">) =>
-    rows.filter((r) => rowStatus(r) === status).length;
+  const countBy = (status: CustoBaseStatus) =>
+    rows.filter((r) => custoBaseStatus(r) === status).length;
   const pendentesTotal = countBy("pendente");
 
   // Opções do filtro de categoria a partir das linhas presentes (com contagem).
@@ -191,16 +169,19 @@ export function CostBaseView({ rows, onPersist }: CostBaseViewProps) {
       rows.filter((r) => {
         if (
           q &&
-          !(norm(r.nome).includes(q) || norm(r.fabricante).includes(q) || norm(r.categoria).includes(q))
+          !(
+            norm(r.nome).includes(q) ||
+            norm(r.codigo).includes(q) ||
+            norm(r.fabricante).includes(q) ||
+            norm(r.categoria).includes(q)
+          )
         )
           return false;
         if (catFilters.length > 0 && !catFilters.includes(r.categoria)) return false;
-        if (statusFilter !== "" && rowStatus(r) !== statusFilter) return false;
-        if (tipoFilter === "item" && !r.somenteIndireto) return false;
-        if (tipoFilter === "opcao" && r.somenteIndireto) return false;
+        if (statusFilter !== "" && custoBaseStatus(r) !== statusFilter) return false;
         return true;
       }),
-    [rows, q, catFilters, statusFilter, tipoFilter]
+    [rows, q, catFilters, statusFilter]
   );
 
   // Grupos ordenados por categoria (sem categoria por último); a ordem das
@@ -215,138 +196,204 @@ export function CostBaseView({ rows, onPersist }: CostBaseViewProps) {
     return [...m.entries()].sort(([a], [b]) => byCategoria(a, b));
   }, [filtered]);
 
-  const pendentesFiltrados = filtered.filter((r) => rowStatus(r) === "pendente").length;
-  const totalBase = filtered.reduce((s, r) => s + (r.custoMat ?? 0) + r.custoMO, 0);
-  const hasFilters =
-    search !== "" || catFilters.length > 0 || statusFilter !== "" || tipoFilter !== "";
+  const pendentesFiltrados = filtered.filter(custoBasePendente).length;
+  const totalBase = filtered.reduce((s, r) => s + custoBaseTotal(r), 0);
+  const hasFilters = search !== "" || catFilters.length > 0 || statusFilter !== "";
 
-  const TH = ({
-    children,
-    right = false,
-    teal = false,
-  }: {
-    children?: React.ReactNode;
-    right?: boolean;
-    teal?: boolean;
-  }) => (
-    <th
-      className={cn(
-        "whitespace-nowrap px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider",
-        right ? "text-right" : "text-left",
-        teal ? "bg-primary-1 text-primary-7" : "text-neutral-gray-7"
-      )}
-    >
-      {children}
-    </th>
-  );
+  // Destinos do "Aplicar em…": mesma categoria (todos quando não há categoria).
+  const applyCandidates = React.useMemo(() => {
+    if (!applyFrom) return [];
+    return rows.filter(
+      (r) =>
+        r.baseId !== applyFrom.baseId &&
+        (applyFrom.categoria === "" || r.categoria === applyFrom.categoria)
+    );
+  }, [rows, applyFrom]);
 
-  /** Uma linha de material. `showCat` mostra o chip de categoria (só na lista plana). */
+  /** Uma linha de material (+ painel de composição quando expandida). `showCat` só na lista plana. */
   const renderRow = (row: CustoBaseRow, showCat: boolean) => {
     const matV = valOf(row, "mat");
     const moV = valOf(row, "mo");
     const matN = parseFloat(matV) || 0;
     const moN = parseFloat(moV) || 0;
-    const semCusto = row.custoMat === 0;
-    const isPending = row.custoMat === null && !(matN > 0);
+    const d = draft[row.baseId];
+    // Total/status ao vivo: o rascunho digitado entra antes do blur.
+    const eff: CustoBase = d
+      ? {
+          ...row,
+          custoMat: d.mat !== undefined ? (matN > 0 ? matN : null) : row.custoMat,
+          custoMO: d.mo !== undefined ? moN : row.custoMO,
+        }
+      : row;
+    const status = custoBaseStatus(eff);
+    const total = custoBaseTotal(eff);
+    const semCusto = status === "sem_custo";
+    const isPending = status === "pendente";
+    const matPending = eff.custoMat === null;
+    const isOpen = expanded.has(row.baseId);
+    const nLinhas = row.composicao.length;
+    const nPend = linhasPendentes(row).length;
+    const subComp = composicaoSubtotal(row.composicao);
+
     return (
-      <tr
-        key={row.baseId}
-        className={cn(
-          "border-b border-neutral-gray-4",
-          isPending ? "bg-functional-warning-light" : matN > 0 ? "bg-[#f7fffe]" : "bg-white"
-        )}
-      >
-        <td className="min-w-[240px] px-3.5 py-[9px]">
-          <div
-            className={cn(
-              "text-xs font-semibold",
-              isPending ? "text-tint-amber-fg" : "text-neutral-gray-11"
-            )}
-          >
-            {row.nome}
-          </div>
-          <div
-            className={cn(
-              "mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px]",
-              isPending ? "text-[#b45309]" : "text-neutral-gray-6"
-            )}
-          >
-            <span>{row.fabricante || "sem fabricante"}</span>
-            {showCat && row.categoria !== "" && (
-              <CategoryChip nome={row.categoria} categorias={categorias} />
-            )}
-            {/* Não é uma opção ofertada ao cliente: entra no custo por dentro
-                (sub-item de kit ou item de custo), e por isso não aparece como
-                linha própria na aba "Preço final". */}
-            {row.somenteIndireto && (
-              <span className="rounded bg-neutral-gray-3 px-1 py-px text-[9px] font-bold uppercase tracking-wide text-neutral-gray-7">
-                Item de custo
-              </span>
-            )}
-            {isPending && <span className="font-bold text-tint-orange-fg">Aguardando custo</span>}
-          </div>
-        </td>
-        <td className="min-w-[200px] px-3.5 py-[9px] text-[11px] text-neutral-gray-7">
-          {/* Três já dizem "é usado em vários lugares"; a lista inteira vira
-              parede de texto numa grade densa. */}
-          {row.usadoEm.slice(0, 3).join(", ")}
-          {row.usadoEm.length > 3 && (
-            <span className="text-neutral-gray-6"> +{row.usadoEm.length - 3}</span>
-          )}
-        </td>
-        <td className="px-3 py-[5px] text-right">
-          <CostField
-            value={matV}
-            isPending={isPending}
-            disabled={semCusto}
-            onChange={(v) => setField(row.baseId, "mat", v)}
-            onCommit={(v) => commit(row, "mat", v)}
-          />
-        </td>
-        <td className="px-3 py-[5px] text-right">
-          <CostField
-            value={moV}
-            isPending={isPending}
-            disabled={semCusto}
-            onChange={(v) => setField(row.baseId, "mo", v)}
-            onCommit={(v) => commit(row, "mo", v)}
-          />
-        </td>
-        <td
+      <React.Fragment key={row.baseId}>
+        <tr
           className={cn(
-            "whitespace-nowrap px-3 py-[9px] text-right text-xs font-bold",
-            matN + moN > 0 || semCusto ? "text-neutral-gray-11" : "text-neutral-gray-5"
+            "border-b border-neutral-gray-4",
+            isPending ? "bg-functional-warning-light" : matN > 0 ? "bg-[#f7fffe]" : "bg-white",
+            isOpen && "border-b-0"
           )}
         >
-          {matN + moN > 0 || semCusto ? fmtBRL(matN + moN) : "—"}
-        </td>
-        <td className="px-3 py-[9px]">
-          <div className="flex flex-col items-start gap-1">
-            <StatusBadge status={semCusto ? "sem_custo" : isPending ? "pendente" : "preenchido"} />
-            {/* Só pendente ↔ sem custo: marcar "sem custo" numa linha COM custo
-                apagaria uma cotação real — para isso, limpe o campo antes. */}
-            {row.custoMat === null && !(matN > 0) && (
+          <td className="min-w-[260px] px-3.5 py-[9px]">
+            <div className="flex items-start gap-1.5">
               <button
                 type="button"
-                onClick={() => onPersist(row.baseId, { custoMat: 0, custoMO: 0 })}
-                title="Material sem custo (ex.: padrão “Não entregue”): deixa de ficar pendente e some do portal do terceiro."
-                className="whitespace-nowrap text-[11px] font-semibold text-primary-7 hover:underline"
+                onClick={() => toggleExpand(row.baseId)}
+                aria-expanded={isOpen}
+                aria-label={isOpen ? "Recolher composição" : "Ver composição"}
+                title={isOpen ? "Recolher composição" : "Ver composição"}
+                className="-ml-1 mt-px flex shrink-0 rounded p-0.5 text-neutral-gray-6 hover:bg-neutral-gray-3 hover:text-neutral-gray-9"
               >
-                Marcar sem custo
+                <Icon name={isOpen ? "chevD" : "chevR"} size={14} />
               </button>
+              <div className="min-w-0">
+                <div
+                  className={cn(
+                    "text-xs font-semibold",
+                    isPending ? "text-tint-amber-fg" : "text-neutral-gray-11"
+                  )}
+                >
+                  {row.nome}
+                </div>
+                <div
+                  className={cn(
+                    "mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px]",
+                    isPending ? "text-[#b45309]" : "text-neutral-gray-6"
+                  )}
+                >
+                  {row.codigo !== "" && (
+                    <code className="font-mono text-[10.5px] text-neutral-gray-6">{row.codigo}</code>
+                  )}
+                  <span>{row.fabricante || "sem fabricante"}</span>
+                  {showCat && row.categoria !== "" && (
+                    <CategoryChip nome={row.categoria} categorias={categorias} />
+                  )}
+                  {/* Não é uma opção ofertada ao cliente: entra no custo por dentro
+                      de um kit, e por isso não aparece como linha própria na aba
+                      "Preço final". */}
+                  {row.somenteIndireto && (
+                    <span className="rounded bg-neutral-gray-3 px-1 py-px text-[9px] font-bold uppercase tracking-wide text-neutral-gray-7">
+                      Sub-item de kit
+                    </span>
+                  )}
+                  {isPending && (
+                    <span className="font-bold text-tint-orange-fg">
+                      {matPending ? "Aguardando custo" : "Insumo sem preço"}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </td>
+          <td className="min-w-[180px] px-3.5 py-[9px] text-[11px] text-neutral-gray-7">
+            {/* Três já dizem "é usado em vários lugares"; a lista inteira vira
+                parede de texto numa grade densa. */}
+            {row.usadoEm.slice(0, 3).join(", ")}
+            {row.usadoEm.length > 3 && (
+              <span className="text-neutral-gray-6"> +{row.usadoEm.length - 3}</span>
             )}
-            {semCusto && (
-              <button
-                type="button"
-                onClick={() => onPersist(row.baseId, { custoMat: null })}
-                className="whitespace-nowrap text-[11px] font-semibold text-neutral-gray-7 hover:underline"
-              >
-                Desfazer
-              </button>
+          </td>
+          <td className="px-3 py-[5px] text-right">
+            <CostField
+              aria-label={`Custo de material de ${row.nome}`}
+              value={matV}
+              isPending={matPending}
+              disabled={semCusto}
+              onChange={(v) => setField(row.baseId, "mat", v)}
+              onCommit={(v) => commit(row, "mat", v)}
+            />
+          </td>
+          <td className="px-3 py-[5px] text-right">
+            <CostField
+              aria-label={`Custo de mão de obra de ${row.nome}`}
+              value={moV}
+              isPending={matPending}
+              disabled={semCusto}
+              onChange={(v) => setField(row.baseId, "mo", v)}
+              onCommit={(v) => commit(row, "mo", v)}
+            />
+          </td>
+          <td className="px-3 py-[9px]">
+            <button
+              type="button"
+              onClick={() => toggleExpand(row.baseId)}
+              title={isOpen ? "Recolher composição" : "Ver composição"}
+              className="text-left"
+            >
+              {nLinhas === 0 ? (
+                <span className="text-[12.5px] text-neutral-gray-5">—</span>
+              ) : (
+                <span className="whitespace-nowrap text-[12.5px] font-semibold text-neutral-gray-9">
+                  {nLinhas} {nLinhas === 1 ? "item" : "itens"} · {fmtBRL(subComp)}
+                </span>
+              )}
+              {nPend > 0 && (
+                <span className="block whitespace-nowrap text-[11px] font-bold text-tint-orange-fg">
+                  {nPend} {nPend === 1 ? "insumo sem preço" : "insumos sem preço"}
+                </span>
+              )}
+            </button>
+          </td>
+          <td
+            className={cn(
+              "whitespace-nowrap px-3 py-[9px] text-right text-xs font-bold",
+              total > 0 || semCusto ? "text-neutral-gray-11" : "text-neutral-gray-5"
             )}
-          </div>
-        </td>
-      </tr>
+          >
+            {total > 0 || semCusto ? fmtBRL(total) : "—"}
+          </td>
+          <td className="px-3 py-[9px]">
+            <div className="flex flex-col items-start gap-1">
+              <StatusBadge status={status} />
+              {/* Só pendente ↔ sem custo, e só sem composição: com insumos o
+                  zero do material é só uma parcela; marcar "sem custo" numa
+                  linha COM custo apagaria uma cotação real. */}
+              {row.custoMat === null && nLinhas === 0 && !(matN > 0) && (
+                <button
+                  type="button"
+                  onClick={() => onPersist(row.baseId, { custoMat: 0, custoMO: 0 })}
+                  title="Material sem custo (ex.: padrão “Não entregue”): deixa de ficar pendente e some do portal do terceiro."
+                  className="whitespace-nowrap text-[11px] font-semibold text-primary-7 hover:underline"
+                >
+                  Marcar sem custo
+                </button>
+              )}
+              {semCusto && (
+                <button
+                  type="button"
+                  onClick={() => onPersist(row.baseId, { custoMat: null })}
+                  className="whitespace-nowrap text-[11px] font-semibold text-neutral-gray-7 hover:underline"
+                >
+                  Desfazer
+                </button>
+              )}
+            </div>
+          </td>
+        </tr>
+        {isOpen && (
+          <tr className="border-b border-neutral-gray-4">
+            <td colSpan={COLS} className="p-0">
+              <CompositionPanel
+                projectId={projectId}
+                row={row}
+                costItems={costItems}
+                onAddItems={() => setGridFor(row)}
+                onApply={() => setApplyFrom(row)}
+              />
+            </td>
+          </tr>
+        )}
+      </React.Fragment>
     );
   };
 
@@ -367,14 +414,13 @@ export function CostBaseView({ rows, onPersist }: CostBaseViewProps) {
     <div className="mb-6 overflow-hidden rounded-b-lg border border-neutral-gray-4 bg-white">
       {/* Toolbar: busca + filtros + agrupar */}
       <div className="flex flex-wrap items-center gap-3 border-b border-neutral-gray-4 px-4 py-3">
-        <HeroInput
+        <Input
+          small
           value={search}
           onValueChange={setSearch}
           aria-label="Buscar custo base"
-          placeholder="Buscar por especificação ou fabricante..."
-          variant="bordered"
+          placeholder="Buscar por código, especificação ou fabricante..."
           radius="sm"
-          size="sm"
           isClearable
           onClear={() => setSearch("")}
           startContent={<Icon name="search" size={14} className="text-neutral-gray-6" />}
@@ -405,18 +451,11 @@ export function CostBaseView({ rows, onPersist }: CostBaseViewProps) {
               { value: "sem_custo", label: `Sem custo (${countBy("sem_custo")})` },
             ]}
             value={statusFilter}
-            onChange={(v) => setStatusFilter(v as StatusFilter)}
-          />
-          <FilterMenu
-            label="Tipo"
-            icon="tune"
-            options={[
-              { value: "", label: "Todos" },
-              { value: "opcao", label: "Opções de acabamento" },
-              { value: "item", label: "Itens de custo" },
-            ]}
-            value={tipoFilter}
-            onChange={(v) => setTipoFilter(v as TipoFilter)}
+            onChange={(v) =>
+              setStatusFilter(
+                v === "pendente" || v === "preenchido" || v === "sem_custo" ? v : ""
+              )
+            }
           />
         </div>
         <label className="ml-auto flex cursor-pointer items-center gap-2 text-[12px] font-medium text-neutral-gray-8">
@@ -439,12 +478,6 @@ export function CostBaseView({ rows, onPersist }: CostBaseViewProps) {
           {statusFilter !== "" && (
             <ActiveChip label={STATUS_LABEL[statusFilter]} onRemove={() => setStatusFilter("")} />
           )}
-          {tipoFilter !== "" && (
-            <ActiveChip
-              label={tipoFilter === "opcao" ? "Opções de acabamento" : "Itens de custo"}
-              onRemove={() => setTipoFilter("")}
-            />
-          )}
           <button
             type="button"
             onClick={clearFilters}
@@ -459,7 +492,8 @@ export function CostBaseView({ rows, onPersist }: CostBaseViewProps) {
       <div className="flex items-center gap-2 border-b border-neutral-gray-4 bg-neutral-gray-2 px-4 py-[9px]">
         <Icon name="edit" size={13} className="text-primary-7" />
         <span className="text-xs font-semibold text-primary-7">
-          Custo de material e mão de obra deste empreendimento — vale para todas as tipologias
+          Custo de material, mão de obra e composição deste empreendimento — vale para todas as
+          tipologias
         </span>
         <span className="ml-auto whitespace-nowrap text-[11px] text-neutral-gray-7">
           {hasFilters ? `${filtered.length} de ${rows.length}` : filtered.length}{" "}
@@ -490,8 +524,13 @@ export function CostBaseView({ rows, onPersist }: CostBaseViewProps) {
               <tr className="border-b-2 border-neutral-gray-4 bg-neutral-gray-2">
                 <TH>Especificação</TH>
                 <TH>Onde é usado</TH>
-                <TH right teal>Custo mat.</TH>
-                <TH right teal>Custo MO</TH>
+                <TH right teal>
+                  Custo mat.
+                </TH>
+                <TH right teal>
+                  Custo MO
+                </TH>
+                <TH>Composição</TH>
                 <TH right>Total base</TH>
                 <TH>Status</TH>
               </tr>
@@ -500,12 +539,12 @@ export function CostBaseView({ rows, onPersist }: CostBaseViewProps) {
             {grouped ? (
               groups.map(([cat, groupRows]) => {
                 const isCollapsed = collapsed.has(cat);
-                const sub = groupRows.reduce((s, r) => s + (r.custoMat ?? 0) + r.custoMO, 0);
-                const subPend = groupRows.filter((r) => rowStatus(r) === "pendente").length;
+                const sub = groupRows.reduce((s, r) => s + custoBaseTotal(r), 0);
+                const subPend = groupRows.filter(custoBasePendente).length;
                 return (
                   <tbody key={cat || "__sem__"}>
                     <tr className="border-b border-neutral-gray-4 bg-neutral-gray-2">
-                      <td colSpan={6} className="p-0">
+                      <td colSpan={COLS} className="p-0">
                         <button
                           type="button"
                           onClick={() => toggleCollapse(cat)}
@@ -546,7 +585,7 @@ export function CostBaseView({ rows, onPersist }: CostBaseViewProps) {
             <tfoot>
               <tr className="border-t-2 border-neutral-gray-4 bg-neutral-gray-2">
                 <td
-                  colSpan={4}
+                  colSpan={COLS - 2}
                   className="px-3.5 py-2.5 text-[10px] font-bold uppercase tracking-wider text-neutral-gray-7"
                 >
                   Total base — soma dos custos unitários
@@ -559,6 +598,54 @@ export function CostBaseView({ rows, onPersist }: CostBaseViewProps) {
             </tfoot>
           </table>
         </div>
+      )}
+
+      {/* Grade "Adicionar itens" no contexto de um material. Montada só quando
+          aberta: cada abertura nasce limpa. */}
+      {gridFor && (
+        <CostItemsGridModal
+          open
+          onClose={() => setGridFor(null)}
+          costItems={costItems}
+          saving={composicao.isPending}
+          material={{
+            baseId: gridFor.baseId,
+            nome: gridFor.nome,
+            excludeItemIds: gridFor.composicao.map((l) => l.itemId),
+          }}
+          onSubmit={(lines) =>
+            composicao
+              .mutateAsync({ baseId: gridFor.baseId, body: { op: "addLines", lines } })
+              .then(() => setGridFor(null))
+              // O toast global já avisou; o modal fica aberto para corrigir.
+              .catch(() => undefined)
+          }
+        />
+      )}
+
+      {applyFrom && (
+        <ApplyCompositionModal
+          open
+          onClose={() => setApplyFrom(null)}
+          source={applyFrom}
+          candidates={applyCandidates}
+          saving={composicao.isPending}
+          onApply={(i) =>
+            composicao
+              .mutateAsync({
+                baseId: applyFrom.baseId,
+                body: {
+                  op: "applyTo",
+                  targetBaseIds: i.targetBaseIds,
+                  mode: i.mode,
+                  lines: i.lines,
+                  copiarCustoQtd: i.copiarCustoQtd,
+                },
+              })
+              .then(() => setApplyFrom(null))
+              .catch(() => undefined)
+          }
+        />
       )}
     </div>
   );

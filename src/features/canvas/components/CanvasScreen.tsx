@@ -91,7 +91,6 @@ const EMPTY_COMP: Componente = {
   ghost: false,
   ordem: 1,
   kitQtds: {},
-  custoComponentes: [],
 };
 
 // Tela 4 — Visualizador editável (protótipo: TypologyCanvasScreen).

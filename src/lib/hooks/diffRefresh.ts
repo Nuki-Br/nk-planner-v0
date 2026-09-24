@@ -26,6 +26,7 @@ function reconcileKeys(projectId: number) {
   return [
     queryKeys.pricing(projectId),
     queryKeys.custosBase(projectId),
+    queryKeys.costItems(projectId),
     queryKeys.pricingDiff(projectId),
   ];
 }
@@ -48,7 +49,9 @@ export function scheduleReconcile(qc: QueryClient, projectId: number, delay = 70
       // gravação em voo chama scheduleReconcile de novo quando ela assentar.
       const busy =
         qc.isMutating({ mutationKey: mutationKeys.savePricing(projectId) }) +
-        qc.isMutating({ mutationKey: mutationKeys.saveCusto(projectId) });
+        qc.isMutating({ mutationKey: mutationKeys.saveCusto(projectId) }) +
+        qc.isMutating({ mutationKey: mutationKeys.saveCostItem(projectId) }) +
+        qc.isMutating({ mutationKey: mutationKeys.composicao(projectId) });
       if (busy > 0) return;
       for (const key of reconcileKeys(projectId)) {
         void qc.invalidateQueries({ queryKey: key });

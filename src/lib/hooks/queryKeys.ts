@@ -36,8 +36,10 @@ export const queryKeys = {
   unitGroupsRoot: ["unit-groups"] as const,
   torres: (projectId: number) => ["torres", projectId] as const,
   budgetColumns: (projectId: number) => ["budget-columns", projectId] as const,
-  /** Custo base por empreendimento (aba "Custos base"). */
+  /** Custo base por empreendimento (aba "Custos base"), já com a composição. */
   custosBase: (projectId: number) => ["custos-base", projectId] as const,
+  /** Insumos da org com o preço deste empreendimento (aba "Itens de custo"). */
+  costItems: (projectId: number) => ["itens-de-custo", projectId] as const,
   /** Rascunho de precificação (optionId → overrides). */
   pricing: (projectId: number) => ["pricing", projectId] as const,
   /** Diff rascunho × publicado — badge de status e modal de publicar. */
@@ -85,5 +87,10 @@ export const queryKeys = {
 // a proteção em silêncio, por isso a fábrica única.
 export const mutationKeys = {
   savePricing: (projectId: number) => ["save-pricing", projectId] as const,
+  /** Custo mat/MO, coeficiente do material e qtd de linha de composição (otimistas). */
   saveCusto: (projectId: number) => ["save-custo", projectId] as const,
+  /** Identidade/preço de um insumo (otimista). */
+  saveCostItem: (projectId: number) => ["save-cost-item", projectId] as const,
+  /** Operações estruturais da composição e criação/remoção de insumos. */
+  composicao: (projectId: number) => ["composicao", projectId] as const,
 };

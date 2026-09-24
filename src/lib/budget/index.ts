@@ -15,14 +15,7 @@
 // deixaria de instalar, na quantidade líquida. Ver docs — decisão "crédito sem
 // RT", extraída do Hall da planilha (padrão 2,25 m² × upgrade 3,375 m²).
 import { evalCell, normName, type Scope } from "@/lib/formula";
-import type {
-  BudgetColumn,
-  Componente,
-  CostComponent,
-  CostComponentSide,
-  Kit,
-  KitItem,
-} from "@/shared/types/domain";
+import type { BudgetColumn, Componente, Kit, KitItem } from "@/shared/types/domain";
 
 /**
  * Um BaseMaterial já precificado para o motor. `valUn` é o custo unitário
@@ -79,100 +72,29 @@ export interface BaseRowResult {
   /** R$/un. do upgrade (kit: total do kit) — exibição. */
   valUnUpg: number;
   /**
-   * Débito do ITEM: valor unitário × qtd com RT. É `G51` na planilha. Só o
-   * material; a coluna "Déb./Créd." exibe `debitoTotal` (item + satélites).
+   * Débito do ITEM: valor unitário × qtd com RT. É `G51` na planilha. O valor
+   * unitário já traz a composição do material (custo base do empreendimento),
+   * então não há mais nada a somar por fora.
    */
   debitoItem: number;
   /** Crédito do ITEM padrão: valor unitário × qtd líquida (sem RT). */
   creditoItem: number;
-  /**
-   * debitoItem + Σ satélites do lado upgrade. A coluna "Déb./Créd." da linha-pai
-   * mostra ISTO — o subtotal do grupo; cada satélite mantém sua sub-linha.
-   */
+  /** Débito da linha (= debitoItem). É o que a coluna "Déb./Créd." exibe. */
   debitoTotal: number;
-  /** creditoItem + Σ satélites do lado padrão — o `H41` da planilha. */
+  /** Crédito da linha (= creditoItem) — o `H41` da planilha. */
   creditoTotal: number;
   /** debitoTotal − creditoTotal — JÁ estendido. É o `H51`. */
   custoDeTroca: number;
-  /** Componentes de custo (satélites) resolvidos, dos dois lados. */
-  satellites: CostSatelliteResult[];
-  /**
-   * Algum satélite "fixo" sem preço. A linha sai dos totais, mas o material da
-   * OPÇÃO pode estar perfeitamente preenchido — quem exibe precisa distinguir,
-   * senão acusa falta de custo em item que já tem.
-   */
-  satellitePending: boolean;
   colResults: ColResults;
   sumFree: number;
   /** custoDeTroca + sumFree — NÃO multiplica por qtdComRT. */
   total: number;
 }
 
-/**
- * O que o motor precisa do Componente. Quantidade e RT NÃO entram aqui: vêm
- * resolvidas por lado em RowSide, porque cada aplicação pode sobrepô-las.
- */
-export type CompCalcInput = Pick<Componente, "custoComponentes">;
-
 export interface BudgetRowResult extends BaseRowResult {
   /** R$/un. do padrão — exibição. */
   valUnPad: number;
 }
-
-/** Linha de um componente de custo já resolvida para uma opção. */
-export interface CostSatelliteResult {
-  item: CostComponent;
-  /** Nome exibido: o do material (fixo) ou o do próprio satélite (espelho). */
-  nome: string;
-  qtd: number;
-  valUn: number;
-  /** valUn * qtd — já estendido. */
-  line: number;
-  pending: boolean;
-}
-
-/** Um item de custo se aplica a esta opção? Avulso → só à sua; null → todas. */
-export function costItemAppliesTo(cc: CostComponent, optionId: number | null): boolean {
-  return cc.materialOptionId == null || cc.materialOptionId === optionId;
-}
-
-/**
- * Resolve os componentes de custo de um lado, para UMA opção. `espelho` usa o
- * valor unitário da opção daquele lado (a de upgrade no débito, a padrão no
- * crédito); `fixo` usa o material de catálogo, igual para todas as opções.
- *
- * Só entram os itens que se aplicam à opção (`optionId`): avulso aparece só na
- * sua opção; item de escopo "todas" (materialOptionId null) aparece em todas.
- *
- * Um `fixo` sem custo (ou sem material) fica pendente — e como a linha entra no
- * débito da opção, derruba a linha (mesmo critério do sub-item de kit).
- */
-export function resolveSatellites(
-  comp: Pick<Componente, "custoComponentes">,
-  lado: CostComponentSide,
-  valUnEspelho: number,
-  prices: PriceLookup,
-  optionId: number | null
-): CostSatelliteResult[] {
-  const out: CostSatelliteResult[] = [];
-  for (const cc of comp.custoComponentes ?? []) {
-    if (cc.lado !== lado) continue;
-    if (!costItemAppliesTo(cc, optionId)) continue;
-    const fixo = cc.baseId != null ? prices.get(cc.baseId) : undefined;
-    const valUn = cc.tipo === "espelho" ? valUnEspelho : (fixo?.valUn ?? 0);
-    out.push({
-      item: cc,
-      nome: cc.tipo === "fixo" && fixo ? fixo.nome : cc.nome,
-      qtd: cc.qtd,
-      valUn,
-      line: valUn * cc.qtd,
-      pending: cc.tipo === "fixo" && (!fixo || fixo.pending),
-    });
-  }
-  return out;
-}
-
-const sumLines = (xs: CostSatelliteResult[]): number => xs.reduce((a, s) => a + s.line, 0);
 
 export interface KitSubItemResult {
   item: KitItem;
@@ -185,7 +107,7 @@ export interface KitSubItemResult {
 export interface KitRowResult extends BaseRowResult {
   isKit: true;
   subItems: KitSubItemResult[];
-  /** Algum sub-item do kit sem custo (distinto de satellitePending). */
+  /** Algum sub-item do kit sem custo — a linha sai dos totais. */
   subItemPending: boolean;
 }
 
@@ -220,8 +142,8 @@ function runColumns(
 
 /**
  * Escopo base das fórmulas — todos os valores JÁ estendidos (menos quantitativo).
- * `valor_unitario`/`debito` usam o TOTAL (item + satélites): uma taxa sobre o
- * valor instalado tem que cobrir a soleira e o rodapé também.
+ * `valor_unitario`/`debito` são o débito estendido da linha: uma taxa sobre o
+ * valor instalado incide sobre o custo completo (composição inclusa).
  */
 function baseScope(
   r: Pick<BaseRowResult, "custoDeTroca" | "debitoTotal" | "creditoTotal" | "qtdComRT">
@@ -243,11 +165,7 @@ function baseScope(
 export function calcBudgetRow(
   upg: RowSide,
   pad: RowSide | null,
-  comp: CompCalcInput,
-  prices: PriceLookup,
   cols: BudgetColumn[],
-  optionId: number | null,
-  padraoOptionId: number | null,
   rowOverrides: RowOverrides = {},
   // Empreendimentos que não usam débito/crédito zeram o lado do crédito: o
   // "Custo total" vira só o débito estendido, sem subtrair o padrão.
@@ -258,20 +176,12 @@ export function calcBudgetRow(
   const valUnUpg = upg.valUn;
   const valUnPad = pad.valUn;
 
-  const satUpg = resolveSatellites(comp, "upgrade", valUnUpg, prices, optionId);
-  // Sem crédito, os satélites do lado padrão não entram: não subtraem nem
-  // marcam a linha de upgrade como pendente por falta de custo do padrão.
-  const satPad = usaDebitoCredito
-    ? resolveSatellites(comp, "padrao", valUnPad, prices, padraoOptionId)
-    : [];
-  const satellites = [...satUpg, ...satPad];
-
   const debitoItem = valUnUpg * qtdComRT;
   // Crédito sem RT e na quantidade DO PADRÃO: a reserva técnica é perda extra do
   // upgrade, e o padrão pode ter quantitativo próprio (override da aplicação).
   const creditoItem = usaDebitoCredito ? valUnPad * pad.qtd : 0;
-  const debitoTotal = debitoItem + sumLines(satUpg);
-  const creditoTotal = creditoItem + sumLines(satPad);
+  const debitoTotal = debitoItem;
+  const creditoTotal = creditoItem;
   const custoDeTroca = trocaNaoNegativa(debitoTotal, creditoTotal);
 
   const scope = baseScope({ custoDeTroca, debitoTotal, creditoTotal, qtdComRT });
@@ -286,8 +196,6 @@ export function calcBudgetRow(
     debitoTotal,
     creditoTotal,
     custoDeTroca,
-    satellites,
-    satellitePending: satellites.some((s) => s.pending),
     colResults,
     sumFree,
     total: precoNaoNegativo(custoDeTroca, sumFree),
@@ -300,13 +208,11 @@ export function calcBudgetRow(
  */
 export function calcKitRow(
   kit: Kit,
-  comp: Componente,
+  comp: Pick<Componente, "kitQtds">,
   upg: KitSide,
   pad: RowSide | null,
   prices: PriceLookup,
   cols: BudgetColumn[],
-  optionId: number | null,
-  padraoOptionId: number | null,
   rowOverrides: RowOverrides = {},
   usaDebitoCredito = true
 ): KitRowResult {
@@ -324,18 +230,11 @@ export function calcKitRow(
   const kitTotal = subItems.reduce((a, s) => a + s.line, 0);
   const valUnPad = pad?.valUn ?? 0;
 
-  // Para um kit, o "espelho" acompanha o total do kit — não há valor unitário.
-  const satUpg = resolveSatellites(comp, "upgrade", kitTotal, prices, optionId);
-  const satPad = usaDebitoCredito
-    ? resolveSatellites(comp, "padrao", valUnPad, prices, padraoOptionId)
-    : [];
-  const satellites = [...satUpg, ...satPad];
-
   // O débito do "item" de um kit é a soma dos sub-itens: eles SÃO o item.
   const debitoItem = kitTotal;
   const creditoItem = usaDebitoCredito && pad ? valUnPad * pad.qtd : 0;
-  const debitoTotal = debitoItem + sumLines(satUpg);
-  const creditoTotal = creditoItem + sumLines(satPad);
+  const debitoTotal = debitoItem;
+  const creditoTotal = creditoItem;
   const custoDeTroca = trocaNaoNegativa(debitoTotal, creditoTotal);
 
   const scope = baseScope({ custoDeTroca, debitoTotal, creditoTotal, qtdComRT });
@@ -344,9 +243,7 @@ export function calcKitRow(
   return {
     isKit: true,
     subItems,
-    satellites,
     subItemPending: subItems.some((s) => s.pending),
-    satellitePending: satellites.some((s) => s.pending),
     qtdComRT,
     valUnUpg: debitoItem,
     debitoItem,

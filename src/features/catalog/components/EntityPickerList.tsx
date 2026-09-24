@@ -15,12 +15,12 @@ import { KitBadge } from "./KitBadge";
 import { CATALOG_PICKER_PAGE_SIZE, useCatalogEntities } from "../hooks/useCatalogEntities";
 
 // Corpo de lista compartilhado por TODAS as superfícies que escolhem um item de
-// catálogo (material padrão/upgrade, composição de kit, canvas, custo fixo).
+// catálogo (material padrão/upgrade, composição de kit, canvas).
 //
 // É uma lista, não um modal, de propósito: os call sites têm chrome e rodapé
-// incompatíveis entre si (wizard de 2 passos, formulário de kit, campo dentro
-// de um formulário de custo), e modal-dentro-de-modal no HeroUI empilha portais
-// sem necessidade. Cada modal embute este componente no seu corpo.
+// incompatíveis entre si (wizard de 2 passos, formulário de kit, picker do
+// canvas), e modal-dentro-de-modal no HeroUI empilha portais sem necessidade.
+// Cada modal embute este componente no seu corpo.
 //
 // Antes desta extração o mesmo bloco de HeroInput de busca estava copiado
 // verbatim em três arquivos, cada um refiltrando o catálogo inteiro no cliente.

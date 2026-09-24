@@ -48,7 +48,7 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
       listCategorias(organizationId),
     ]);
     // Escopo do link: só os BaseMaterials preenchíveis das tipologias liberadas
-    // (opções + sub-itens de kit + itens de custo "fixo") — não expõe o resto.
+    // (opções + sub-itens de kit) — não expõe o resto.
     // Os marcados "sem custo" (ex.: padrão "Não entregue") também saem: não há
     // o que o terceiro cotar, e o envio os ignora (submitPortalFills).
     const visiveis = custoRows.filter((r) => scopedIds.has(r.baseId) && r.custoMat !== 0);

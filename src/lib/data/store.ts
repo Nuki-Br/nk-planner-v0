@@ -4,6 +4,7 @@
 // envia org). Pendência não é mais uma tabela — deriva do custo (custo 0).
 import type { ProjectPayload } from "@/lib/api/handler";
 import { httpGet, httpSend } from "@/lib/api/http";
+import type { ComposicaoOp, CostItemLineInput, CostItemPatch } from "@/shared/types/costItems";
 import type {
   Ambiente,
   BudgetColumn,
@@ -11,8 +12,7 @@ import type {
   CategoriaCatalogo,
   Comment,
   Componente,
-  CostComponentKind,
-  CostComponentSide,
+  CostItemRow,
   CustoBase,
   CustoBaseRow,
   FillLink,
@@ -107,14 +107,67 @@ export interface CustoBaseInput {
   custoMO?: number;
 }
 
+/** O PATCH devolve só o que gravou — a composição (catálogo) não muda por aqui. */
+export type CustoBaseCore = Pick<CustoBase, "baseId" | "custoMat" | "custoMO">;
+
 export async function saveCustoBase(
   projectId: number,
   input: CustoBaseInput
-): Promise<CustoBase> {
-  return httpSend<CustoBase, CustoBaseInput>(
+): Promise<CustoBaseCore> {
+  return httpSend<CustoBaseCore, CustoBaseInput>(
     `/api/projects/${projectId}/custos-base`,
     "PATCH",
     input
+  );
+}
+
+// ─── Itens de custo (CostItem) + composição ─────────────────────────────
+
+/** Insumos da org com o preço deste empreendimento e onde são usados. */
+export async function listCostItems(projectId: number): Promise<CostItemRow[]> {
+  return httpGet<CostItemRow[]>(`/api/projects/${projectId}/itens-de-custo`);
+}
+
+/** Cria/atualiza vários insumos de uma vez (grade "Adicionar itens"). */
+export async function createCostItems(
+  projectId: number,
+  lines: CostItemLineInput[]
+): Promise<CostItemRow[]> {
+  return httpSend<CostItemRow[], { lines: CostItemLineInput[] }>(
+    `/api/projects/${projectId}/itens-de-custo`,
+    "POST",
+    { lines }
+  );
+}
+
+/** Identidade (org) e/ou preço (empreendimento) de um insumo — um campo por blur. */
+export async function updateCostItem(
+  projectId: number,
+  itemId: number,
+  patch: CostItemPatch
+): Promise<CostItemRow> {
+  return httpSend<CostItemRow, CostItemPatch>(
+    `/api/projects/${projectId}/itens-de-custo/${itemId}`,
+    "PATCH",
+    patch
+  );
+}
+
+/** Apaga o insumo da org — some de toda composição que o usa (a UI confirma antes). */
+export async function deleteCostItem(projectId: number, itemId: number): Promise<null> {
+  return httpSend<null>(`/api/projects/${projectId}/itens-de-custo/${itemId}`, "DELETE");
+}
+
+/** Operação sobre a composição de UM material do catálogo (ver ComposicaoOp). */
+export async function composicaoOp(
+  projectId: number,
+  baseId: number,
+  body: ComposicaoOp
+): Promise<null> {
+  return httpSend<null, ComposicaoOp>(
+    `/api/projects/${projectId}/custos-base/${baseId}/composicao`,
+    "POST",
+    body
   );
 }
 
@@ -481,129 +534,6 @@ export async function setKitQtds(
   qtds: Record<number, number>
 ): Promise<Componente> {
   return opcao(tipologiaId, ambienteId, componenteId, { op: "setKitQtds", qtds });
-}
-
-// ─── Componentes de custo (satélites) ────────────────────────────────
-
-/** Dados de um componente de custo (definição + quantidade, compartilhadas). */
-export interface CostComponentInput {
-  nome: string;
-  tipo: CostComponentKind;
-  baseId: number | null;
-  /** Opção (Material id) a que o item se prende; null = todas as opções. */
-  materialOptionId: number | null;
-  unidade: Unidade;
-  lado: CostComponentSide;
-  qtd: number;
-}
-
-type CustoBody =
-  | ({ op: "add" } & CostComponentInput)
-  | { op: "update"; costItemId: number; patch: Partial<CostComponentInput> }
-  | { op: "remove"; costItemId: number }
-  | { op: "reorder"; orderedIds: number[] };
-
-function custoComponente(
-  tipologiaId: number,
-  ambienteId: number,
-  componenteId: number,
-  body: CustoBody
-): Promise<Componente> {
-  return httpSend<Componente, CustoBody>(
-    `/api/tipologias/${tipologiaId}/ambientes/${ambienteId}/componentes/${componenteId}/componentes-custo`,
-    "POST",
-    body
-  );
-}
-
-export async function addCostComponent(
-  tipologiaId: number,
-  ambienteId: number,
-  componenteId: number,
-  input: CostComponentInput
-): Promise<Componente> {
-  return custoComponente(tipologiaId, ambienteId, componenteId, { op: "add", ...input });
-}
-
-/** Edita o item — vale para todas as tipologias que usam o ambiente. */
-export async function updateCostComponent(
-  tipologiaId: number,
-  ambienteId: number,
-  componenteId: number,
-  costItemId: number,
-  patch: Partial<CostComponentInput>
-): Promise<Componente> {
-  return custoComponente(tipologiaId, ambienteId, componenteId, { op: "update", costItemId, patch });
-}
-
-export async function removeCostComponent(
-  tipologiaId: number,
-  ambienteId: number,
-  componenteId: number,
-  costItemId: number
-): Promise<Componente> {
-  return custoComponente(tipologiaId, ambienteId, componenteId, { op: "remove", costItemId });
-}
-
-export async function reorderCostComponents(
-  tipologiaId: number,
-  ambienteId: number,
-  componenteId: number,
-  orderedIds: number[]
-): Promise<Componente> {
-  return custoComponente(tipologiaId, ambienteId, componenteId, { op: "reorder", orderedIds });
-}
-
-// ─── Registros de custo (linhas avulsas do ambiente) ─────────────────
-
-/** Dados de uma linha-registro (nome texto livre + valor unitário digitado). */
-export interface CostRegistroInput {
-  nome: string;
-  valorUnitario: number;
-  unidade: Unidade;
-  qtd: number;
-}
-
-type RegistroBody =
-  | ({ op: "add" } & CostRegistroInput)
-  | { op: "update"; registroId: number; patch: Partial<CostRegistroInput> }
-  | { op: "remove"; registroId: number };
-
-function costRegistro(
-  tipologiaId: number,
-  ambienteId: number,
-  body: RegistroBody
-): Promise<Ambiente> {
-  return httpSend<Ambiente, RegistroBody>(
-    `/api/tipologias/${tipologiaId}/ambientes/${ambienteId}/registros`,
-    "POST",
-    body
-  );
-}
-
-export async function addCostRegistro(
-  tipologiaId: number,
-  ambienteId: number,
-  input: CostRegistroInput
-): Promise<Ambiente> {
-  return costRegistro(tipologiaId, ambienteId, { op: "add", ...input });
-}
-
-export async function updateCostRegistro(
-  tipologiaId: number,
-  ambienteId: number,
-  registroId: number,
-  patch: Partial<CostRegistroInput>
-): Promise<Ambiente> {
-  return costRegistro(tipologiaId, ambienteId, { op: "update", registroId, patch });
-}
-
-export async function removeCostRegistro(
-  tipologiaId: number,
-  ambienteId: number,
-  registroId: number
-): Promise<Ambiente> {
-  return costRegistro(tipologiaId, ambienteId, { op: "remove", registroId });
 }
 
 // ─── Compartilhamento de ambientes entre tipologias ──────────────────

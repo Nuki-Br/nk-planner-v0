@@ -20,6 +20,9 @@ organização** (uma org de beta nunca vê o catálogo de outra):
 - **Kits** — agrupamentos nomeados de materiais. **Kit não tem custo próprio**: seu custo é a
   **soma dos sub-itens**.
 - **Categorias** — classificação dinâmica, colorida, criada livremente pela própria org.
+- **Itens de custo (insumos)** — argamassa, rejunte, assentamento, frete… que compõem o custo dos
+  materiais. São do catálogo da org (código, nome, unidade), mas **geridos no Construtor de Preço**
+  (aba "Itens de custo"), porque o preço é por empreendimento.
 
 **Decisão de produto que rege o módulo:** o catálogo captura **só identidade** — código,
 categoria, especificação, fabricante e imagem. **Custo (material e mão de obra) não é digitado no
@@ -57,6 +60,25 @@ Cada linha da composição de um kit: aponta para um material, e carrega **unida
 item**. As quantidades do item são definidas **por tipologia**, não no kit; o custo é o do material
 apontado, no empreendimento em questão.
 
+### Item de custo (insumo)
+| Campo | Significado |
+|---|---|
+| `codigo` | Código livre, opcional (o da planilha da construtora). Único por org quando preenchido. |
+| `nome` | Ex.: "Argamassa colante ACIII cinza", "Assentamento de piso em porcelanato 90×90". |
+| `unidade` | Unidade do insumo (kg, und, m², vb…). |
+
+**Sem preço no catálogo** — o preço é por empreendimento (`EnterpriseCostItemPrice`), como o custo
+do material. Apagar um insumo o tira de todas as composições (a interface confirma "usado em N
+materiais").
+
+### Composição de custo do material
+Linhas de **insumo × quantitativo por unidade do material** (`MaterialCompositionItem`) mais o
+**quantitativo do próprio material** (`custoQtd`, ex.: 1,2 = 20 % de quebra). Vale para todos os
+empreendimentos, como a composição de um kit; os **preços** vêm do empreendimento. Editada no
+painel da linha na aba "Custos base" do Construtor de Preço; "Aplicar composição em…" copia para
+outros materiais da mesma categoria. Kit não tem composição (soma os filhos). Ver
+`docs/features/pricing.md` §2.
+
 ### Categoria
 `nome` + `cor` (uma de 10: cinza, vermelho, laranja, amarelo, verde, teal, azul, ciano, roxo,
 rosa; padrão cinza) + `usos` (quantos materiais/kits a usam). **Não há lista fixa de categorias** —
@@ -70,7 +92,8 @@ se chamam "Material", o que confunde. **Na nova versão, dar nomes distintos** (
 catálogo × *Opção* do componente).
 
 ### Unidades
-`m² · ml · und · pç · cj · kg`.
+`m² · ml · und · pç · cj · kg · m³ · l · vb · dia · h · sc`. Grafias de planilha (M2, UN, KG, M3, VB)
+são normalizadas ao colar/importar.
 
 ---
 
@@ -136,7 +159,8 @@ regra de bloqueio quando em uso, mas não há botão hoje.)
   CSV) cria a categoria (cor cinza) na hora.
 - **Excluir categoria não apaga materiais** — eles ficam "sem categoria".
 - **Material/kit em uso não pode ser excluído** — quem está sendo usado como opção (ou como filho
-  de kit) é protegido; a mensagem orienta remover os usos antes.
+  de kit) é protegido; a mensagem orienta remover os usos antes. Apagar um material **leva a
+  composição junto**; apagar um insumo o remove de todas as composições.
 - **Editar a composição do kit substitui a lista inteira** (some as quantidades por tipologia do
   kit).
 - **Ordenação:** na listagem unificada, **kits aparecem antes de materiais**.
@@ -163,7 +187,8 @@ Tipologia / Ambiente / Componente / Função. Usado no modal "Onde é usado?" e 
 **Lacunas (confirmar na nova versão):**
 - **Só** conta uso como **opção de componente**.
 - **Não** conta material que só entra como **sub-item de kit**.
-- **Não** conta uso como **componente de custo / satélite**.
+- O uso de um **insumo** nas composições é contado à parte, na aba "Itens de custo" ("usado em N
+  materiais").
 - Por isso o "em uso" mostrado ao usuário e o "em uso" que bloqueia exclusão **podem discordar**.
 
 ---
@@ -181,5 +206,5 @@ Tipologia / Ambiente / Componente / Função. Usado no modal "Onde é usado?" e 
 4. **Custo nunca no catálogo:** resolvido em 2026-07-23 — as colunas de custo foram dropadas do
    `BaseMaterial`. O preenchimento é exclusivo da aba "Custos base" / portal.
 5. **Uso deve bloquear exclusão?** Qual o sinal de "posso excluir?" que o usuário deve ver, dado
-   que o "Uso" da interface ignora sub-itens de kit e componentes de custo?
+   que o "Uso" da interface ignora sub-itens de kit?
 6. **Nomear "material do catálogo" × "opção de componente"** com nomes distintos (ver §2).

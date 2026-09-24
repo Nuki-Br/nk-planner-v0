@@ -56,6 +56,26 @@ Caso motivador: padrão "Não entregue" — nada é entregue no padrão, mas há
 | **Preço negativo** | **Travado em zero**: `custo_troca = max(0, débito − crédito)` e o total da linha também nunca fica negativo. Vale para qualquer upgrade mais barato que o padrão, não só os "sem custo". |
 | **Portal do terceiro** | Materiais "sem custo" **somem** do portal e o envio do terceiro os ignora (não sobrescreve a decisão). |
 
+## Decisões travadas (Composição de custo, 2026-09-23)
+Caso motivador: incorporadora **com** construtora (BIOOS) custeia cada material como
+composição de insumos (planilha `insumo-EX` + `Comp PER`): porcelanato 1,2 m² × 98,45 +
+argamassa 8 kg × 1,64 + rejunte 0,07 kg × 10,05 + … + assentamento 1 × 106,88. As
+incorporadoras sem construtora seguem recebendo o custo "cheio" (mat + MO) — os dois
+casos convivem na mesma fórmula.
+
+| Tema | Decisão |
+|------|---------|
+| **Onde vive o item de custo** | **No material, não na tipologia.** O "item de custo" vira um **insumo** (`CostItem`: código, nome, unidade) do catálogo da org, e a **composição** (`MaterialCompositionItem`: insumo × quantitativo por unidade) fica no `BaseMaterial` — vale para todos os empreendimentos, como os kits. |
+| **Preço do insumo** | **Por empreendimento** (`EnterpriseCostItemPrice`, NULL = pendente), coerente com a decisão de 23/07 (custo é por obra). Edita-se na aba **"Itens de custo"** (3º segmento do Construtor de Preço) ou inline no painel de composição da aba "Custos base"; o preço é compartilhado por todas as composições daquele empreendimento. |
+| **Quantitativo do material** | `BaseMaterial.CostQuantity` (padrão 1): a primeira linha da composição é o próprio material (1,2 = 20 % de quebra). A RT por tipologia continua existindo e multiplica o valor unitário inteiro. |
+| **Fórmula** | `custo base = custoMat × custoQtd + custoMO + Σ(qtd × preço do insumo)` — única implementação em `src/shared/utils/custoBase.ts`, usada pela aba, pelo motor e pela publicação. |
+| **Pendência** | Custo de material **NULL** *ou* **qualquer insumo sem preço** neste empreendimento. "Sem custo" (0 marcado) só vale para material **sem** composição. Um override de "Valor un." > 0 continua resolvendo a pendência. |
+| **Satélites e registros removidos** | `RoomComponentCostItem` (espelho/fixo, padrão/upgrade, escopo por opção) e `RoomCostRegistro` **dropados sem conversão** — eram um workaround do modelo "custo cheio". Piso + rodapé + soleira é **kit** (a revisar depois). O diff mostra as linhas afetadas como "alterado" na primeira publicação depois da migration. |
+| **Cadastro em lote** | Grade multi-linha "Adicionar itens" (Cód, Nome, Unidade, Qtd, Valor) que aceita item existente ou novo e **colar do Excel** (TSV). "Aplicar composição em…" copia a composição para outros materiais da mesma categoria (substituir ou mesclar), ajustando só os quantitativos. |
+| **Unidades** | Lista ganha `m³ · l · vb · dia · h · sc` (planilha da construtora usa M3, VB, DIA). `normalizeUnidade` traduz grafias de planilha (M2, UN, KG…). |
+| **Portal do terceiro** | Inalterado: preenche mat/MO dos materiais. Preço de insumo é preenchido dentro do app — material pendente só por insumo continua pendente após o envio do terceiro (a aba Custos base aponta "insumo sem preço"). |
+| **Cascatas** | Apagar insumo → some das composições (a UI confirma "usado em N materiais"); apagar material → composição vai junto; apagar empreendimento → preços vão junto. |
+
 ## Questões em aberto (do módulo doc §7 — resolver quando pesarem)
 | # | Questão | Impacto | Resolver em |
 |---|---------|---------|-------------|

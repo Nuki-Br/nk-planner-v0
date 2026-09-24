@@ -3,8 +3,9 @@
 // Material/BaseMaterial); estes tipos TS são a camada interna do app: mantêm os
 // nomes de entidade do planner (Project/Tipologia/Ambiente/Componente/Material/
 // Kit) e mudam só os SHAPES forçados pela normalização — ids numéricos, opções
-// como linhas (não array polimórfico), quantidade por planta, custo no catálogo.
-// Os mappers do store traduzem DB↔domínio. Custos em BRL (número; 0 = pendente).
+// como linhas (não array polimórfico), quantidade por planta, custo por
+// empreendimento. Os mappers do store traduzem DB↔domínio. Custos em BRL
+// (número); pendência = custo de material NULL (ver CustoBase).
 import type { Unidade } from "@/shared/constants/unidades";
 
 export type { Unidade } from "@/shared/constants/unidades";
@@ -53,12 +54,60 @@ export interface Material {
   imagem?: ImagemVinculada | null;
 }
 
-// ─── Custo base (EnterpriseMaterialCost) ────────────────────────────────
+// ─── Itens de custo (CostItem) e composição ─────────────────────────────
+
+/**
+ * Insumo de composição de custo (CostItem): material auxiliar, serviço/MO ou
+ * frete que entra no custo base de um material. Catálogo da ORGANIZAÇÃO — só
+ * identidade; o preço é por empreendimento (ver CostItemRow.preco).
+ */
+export interface CostItem {
+  id: number;
+  /** Código livre (o da planilha da construtora); null = sem código. */
+  codigo: string | null;
+  nome: string;
+  unidade: Unidade;
+}
+
+/** Linha da aba "Itens de custo": insumo + preço NESTE empreendimento + uso. */
+export interface CostItemRow extends CostItem {
+  /** R$/unidade neste empreendimento; null = pendente. */
+  preco: number | null;
+  /** Quantos materiais do catálogo (org) usam o insumo na composição. */
+  usos: number;
+  /** Nomes dos primeiros materiais que usam (até 3), para a dica "usado em…". */
+  usadoEm: string[];
+}
+
+/**
+ * Linha da composição de um BaseMaterial (MaterialCompositionItem) já resolvida
+ * para um empreendimento: identidade do insumo + coeficiente + preço de lá.
+ */
+export interface CompositionLine {
+  /** MaterialCompositionItem id. */
+  id: number;
+  /** CostItem id. */
+  itemId: number;
+  codigo: string | null;
+  nome: string;
+  unidade: Unidade;
+  /** Coeficiente por unidade do material (ex.: 8 kg de argamassa por m²). */
+  qtd: number;
+  /** Preço unitário do insumo neste empreendimento; null = pendente. */
+  preco: number | null;
+  ordem: number;
+}
+
+// ─── Custo base (EnterpriseMaterialCost + composição) ───────────────────
 
 /**
  * Custo base de um BaseMaterial DENTRO de um empreendimento — compartilhado por
  * todas as aplicações dele ali. Uma aplicação pode sobrepor o valor final na
  * coluna "Valor un." do Construtor de Preço (ver MaterialPricing.valorUnitario).
+ *
+ *   total = custoMat × custoQtd + custoMO + Σ(linha.qtd × linha.preco)
+ *
+ * A fórmula (e a pendência) vive em shared/utils/custoBase.ts.
  */
 export interface CustoBase {
   /** BaseMaterial (material avulso ou sub-item de kit). */
@@ -70,8 +119,15 @@ export interface CustoBase {
    * campo volta a pendente, para um zero acidental não virar "grátis".
    */
   custoMat: number | null;
-  /** Custo de mão de obra (R$/unidade; 0 = pendente). */
+  /** Custo de mão de obra direto (R$/unidade; 0 = não informado). */
   custoMO: number;
+  /**
+   * Quantitativo do PRÓPRIO material na composição (BaseMaterial.CostQuantity,
+   * catálogo): 1,2 = 20 % de quebra. 1 quando não há composição.
+   */
+  custoQtd: number;
+  /** Linhas de insumo da composição (catálogo), com preço deste empreendimento. [] = custo "cheio". */
+  composicao: CompositionLine[];
 }
 
 /** baseId → custo base do empreendimento. Ausente = nunca preenchido. */
@@ -79,15 +135,18 @@ export type CustosBase = Record<number, CustoBase>;
 
 /** Linha da aba "Custos base": o custo + a identidade e onde é usado. */
 export interface CustoBaseRow extends CustoBase {
+  codigo: string;
   nome: string;
   fabricante: string;
   /** Nome da categoria ("" = sem categoria). */
   categoria: string;
+  /** Unidade do material (BaseMaterial.Unit, senão a do 1º componente); null = desconhecida. */
+  unidade: Unidade | null;
   /** Quantas aplicações no empreendimento dependem deste custo. */
   usos: number;
   /** Rótulos "Ambiente · Componente" das aplicações (para o subtítulo da linha). */
   usadoEm: string[];
-  /** Aparece só como sub-item de kit ou item de custo, nunca como opção. */
+  /** Aparece só como sub-item de kit, nunca como opção ofertada. */
   somenteIndireto: boolean;
 }
 
@@ -106,47 +165,6 @@ export interface Kit {
 export type CatalogEntity =
   | ({ isKit: false } & Material)
   | ({ isKit: true } & Kit);
-
-// ─── Estrutura: Componente / Ambiente / Tipologia (por planta) ──────────
-
-/** Como um componente de custo resolve seu preço unitário. */
-export type CostComponentKind = "espelho" | "fixo";
-/** Lado do cálculo: crédito (padrão) ou débito (toda opção de upgrade). */
-export type CostComponentSide = "padrao" | "upgrade";
-
-/**
- * Componente de custo ("satélite"): linha somada ao custo do componente que
- * NUNCA é ofertada ao cliente na personalização — SOLEIRA, RODAPÉ, RESERVA
- * TÉCNICA, ou apenas um registro de custo.
- *
- * Origem do preço:
- *  - "espelho": preço unitário = o da opção do SEU lado (a de upgrade, no lado
- *    upgrade; a padrão, no lado padrão). Ex.: SOLEIRA acompanha o porcelanato.
- *  - "fixo": preço unitário = um BaseMaterial do catálogo, igual em toda linha —
- *    a referência ABSOLUTA da planilha. Ex.: RODAPÉ de poliestireno.
- *
- * Escopo (materialOptionId):
- *  - null: vale para TODAS as opções do componente (upgrade) / linha padrão.
- *  - preenchido: avulso — só para aquela opção (Material id).
- *
- * Definição E quantidade são COMPARTILHADAS entre todas as plantas que usam o
- * ambiente (RoomComponentCostItem) — nada é local à planta.
- */
-export interface CostComponent {
-  /** RoomComponentCostItem id. */
-  id: number;
-  nome: string;
-  tipo: CostComponentKind;
-  /** BaseMaterial quando tipo = "fixo"; null quando "espelho". */
-  baseId: number | null;
-  /** Opção (Material id) a que o item está preso; null = todas as opções. */
-  materialOptionId: number | null;
-  unidade: Unidade;
-  lado: CostComponentSide;
-  /** Quantitativo — compartilhado entre plantas do ambiente. */
-  qtd: number;
-  ordem: number;
-}
 
 // ─── Precificação: rascunho (MaterialPricing) × publicado (Material) ────
 
@@ -219,6 +237,8 @@ export interface MaterialOption {
   publicado: PublishedPricing | null;
 }
 
+// ─── Estrutura: Componente / Ambiente / Tipologia (por planta) ──────────
+
 /**
  * Componente resolvido PARA UMA PLANTA: a paleta (opções + default) é
  * compartilhada (RoomComponent); a quantidade/RT vêm da instância por planta
@@ -245,8 +265,6 @@ export interface Componente {
   ordem: number;
   /** kitItemId → quantitativo do sub-item, nesta planta (era kitQtds). */
   kitQtds: Record<number, number>;
-  /** Componentes de custo (satélites) — definição e quantidade compartilhadas. */
-  custoComponentes: CostComponent[];
 }
 
 /** Posição de um ambiente na planta (rect/poly). */
@@ -279,30 +297,8 @@ export interface Ambiente {
   blueprintRoomId: number;
   nome: string;
   componentes: Componente[];
-  /** Linhas de custo avulsas (registro) do ambiente — ver CostRegistro. */
-  registros: CostRegistro[];
   icon?: string;
   local?: RoomShape | null;
-}
-
-/**
- * Linha de REGISTRO de custo: item avulso do AMBIENTE, com nome em texto livre
- * (não vinculado a nenhum componente). Só consta como custo na tabela — não é
- * ofertado ao cliente, não gera crédito nem afeta o custo de troca. Ex.: parede
- * com "Pintura látex" que a incorporadora só quer registrar. Compartilhado entre
- * as tipologias que usam o ambiente.
- */
-export interface CostRegistro {
-  /** RoomCostRegistro id. */
-  id: number;
-  /** Nome em texto livre (ex.: "Parede — Pintura látex"). */
-  nome: string;
-  /** Valor unitário digitado (R$). */
-  valorUnitario: number;
-  unidade: Unidade;
-  /** Quantitativo — compartilhado entre plantas do ambiente. */
-  qtd: number;
-  ordem: number;
 }
 
 export type TipologiaStatus = "completa" | "incompleta";

@@ -2,20 +2,19 @@
 
 import React from "react";
 
-import { Icon } from "@/components/ui";
 import { cn, fmtBRL, fmtNum } from "@/lib/utils";
 import type { BudgetColumn } from "@/shared/types/domain";
 
 /**
- * Forma comum em que um sub-item de kit e um componente de custo se projetam.
- * Um só componente renderiza os dois: eles são IRMÃOS em profundidade 1 sob a
- * linha mestre (o satélite pende do componente, não do kit — aninhá-lo sob o
- * kit afirmaria que o rodapé do Hall pertence ao Piso Barcelona).
+ * Forma comum em que um sub-item de kit e uma parcela da composição do custo
+ * base se projetam: um só componente renderiza os dois, em profundidade 1 sob
+ * a linha mestre. Só leitura — o kit vem do catálogo e a composição se edita
+ * na aba "Itens de custo".
  */
 export interface SubRowCells {
   key: string;
   nome: string;
-  /** Segunda linha: fabricante, ou de onde vem o preço do item de custo. */
+  /** Segunda linha: fabricante, código do insumo ou nota ("valor un. sobreposto"). */
   sub?: string;
   qtd: number;
   unidade: string;
@@ -23,12 +22,10 @@ export interface SubRowCells {
   /** valUn * qtd — já estendido. */
   line: number;
   pending: boolean;
-  /** Selo curto à direita do nome (ex.: "Item de custo"). */
+  /** Selo curto à direita do nome (ex.: "Insumo"). */
   badge?: string;
   /** Linha de crédito (lado padrão) em vez de débito. */
   credito?: boolean;
-  /** Id do item de custo — presente só quando a linha é editável. */
-  costItemId?: number;
 }
 
 function Td({
@@ -58,21 +55,19 @@ function Td({
 
 /**
  * Sub-linha indentada sob uma linha mestre. Só qtd, valor unitário e o valor da
- * linha: colunas de taxa e total são da mestre — o satélite já está somado nela.
+ * linha: colunas de taxa e total são da mestre — a parcela já está somada nela.
  */
-export function SubRow({ cells, isLast, cols, onEdit, onRemove, usaDebitoCredito = true }: {
+export function SubRow({ cells, isLast, cols, usaDebitoCredito = true, dimmed = false }: {
   cells: SubRowCells;
   isLast: boolean;
   cols: BudgetColumn[];
-  /** Só itens de custo são editáveis — sub-item de kit vem do catálogo. */
-  onEdit?: (costItemId: number) => void;
-  onRemove?: (costItemId: number) => void;
   /** Empreendimento usa débito/crédito? false esconde a coluna Déb./Créd. */
   usaDebitoCredito?: boolean;
+  /** Só informativa — ex.: o valor unitário da linha-pai foi sobreposto. */
+  dimmed?: boolean;
 }) {
-  const editable = cells.costItemId != null;
   return (
-    <tr className="group/sub">
+    <tr className={cn(dimmed && "opacity-60")}>
       <Td sticky className="bg-white !pl-0">
         <div className="flex items-stretch">
           {/* Conector em árvore: tronco vertical + cotovelo. No último filho o
@@ -110,26 +105,6 @@ export function SubRow({ cells, isLast, cols, onEdit, onRemove, usaDebitoCredito
               </code>
             )}
           </div>
-          {editable && (
-            <div className="ml-2 flex items-center gap-0.5 opacity-0 transition-opacity group-hover/sub:opacity-100 focus-within:opacity-100">
-              <button
-                type="button"
-                title="Editar item de custo"
-                onClick={() => cells.costItemId != null && onEdit?.(cells.costItemId)}
-                className="rounded p-1 text-neutral-gray-6 hover:bg-neutral-gray-3 hover:text-neutral-gray-9"
-              >
-                <Icon name="edit" size={12} />
-              </button>
-              <button
-                type="button"
-                title="Remover item de custo"
-                onClick={() => cells.costItemId != null && onRemove?.(cells.costItemId)}
-                className="rounded p-1 text-neutral-gray-6 hover:bg-functional-error-light hover:text-functional-error"
-              >
-                <Icon name="trash" size={12} />
-              </button>
-            </div>
-          )}
         </div>
       </Td>
       <Td right className="bg-white text-neutral-gray-7">

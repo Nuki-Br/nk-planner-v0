@@ -43,6 +43,7 @@ model Organization {
   enterprises   Enterprise[]
   baseMaterials BaseMaterial[]
   categories    MaterialCategory[]
+  costItems     CostItem[]
   mediaFiles    MediaFile[]
   mediaFolders  MediaFolder[]
   storageUsage  StorageUsage?
@@ -84,19 +85,6 @@ enum CommentAuthor {
   incorporadora
 }
 
-/// Como um componente de custo resolve seu preço unitário.
-/// espelho = acompanha o material da opção; fixo = BaseMaterial próprio.
-enum CostItemKind {
-  espelho
-  fixo
-}
-
-/// Lado do cálculo: crédito (padrão) ou débito (toda opção de upgrade).
-enum CostItemSide {
-  padrao
-  upgrade
-}
-
 // ─── Enterprise (era Project) ───────────────────────────────────────────
 
 model Enterprise {
@@ -122,11 +110,12 @@ model Enterprise {
   CreatedAt DateTime @default(now()) @db.Timestamptz()
   UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
 
-  Organization   Organization             @relation(fields: [OrganizationId], references: [id], onDelete: Cascade)
+  Organization   Organization              @relation(fields: [OrganizationId], references: [id], onDelete: Cascade)
   Blueprints     Blueprint[]
   Rooms          Room[]
   Materials      Material[]
   MaterialCosts  EnterpriseMaterialCost[]
+  CostItemPrices EnterpriseCostItemPrice[]
   Pricings       MaterialPricing[]
   Towers         Tower[]
   UnitGroups     UnitGroup[]
@@ -171,11 +160,10 @@ model Room {
   CreatedAt DateTime @default(now()) @db.Timestamptz()
   UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
 
-  Enterprise     Enterprise         @relation(fields: [EnterpriseId], references: [Id], onDelete: Cascade)
+  Enterprise     Enterprise      @relation(fields: [EnterpriseId], references: [Id], onDelete: Cascade)
   RoomComponents RoomComponent[]
   Materials      Material[]
   BlueprintRooms BlueprintRoom[]
-  CostRegistros  RoomCostRegistro[]
 
   @@index([EnterpriseId])
 }
@@ -216,7 +204,6 @@ model RoomComponent {
   Options            Material[]               @relation("ComponentOptions")
   DefaultMaterial    Material?                @relation("DefaultOption", fields: [DefaultMaterialId], references: [Id], onDelete: SetNull)
   BlueprintInstances BlueprintRoomComponent[]
-  CostItems          RoomComponentCostItem[]
 
   @@index([RoomId])
 }
@@ -266,18 +253,16 @@ model Material {
   CreatedAt DateTime @default(now()) @db.Timestamptz()
   UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
 
-  RoomComponent       RoomComponent           @relation("ComponentOptions", fields: [RoomComponentId], references: [Id], onDelete: Cascade)
-  DefaultForComponent RoomComponent[]         @relation("DefaultOption")
-  Room                Room                    @relation(fields: [RoomId], references: [Id], onDelete: Cascade)
-  Enterprise          Enterprise              @relation(fields: [EnterpriseId], references: [Id], onDelete: Cascade)
-  BaseMaterial        BaseMaterial            @relation(fields: [BaseMaterialId], references: [Id], onDelete: Restrict)
+  RoomComponent       RoomComponent    @relation("ComponentOptions", fields: [RoomComponentId], references: [Id], onDelete: Cascade)
+  DefaultForComponent RoomComponent[]  @relation("DefaultOption")
+  Room                Room             @relation(fields: [RoomId], references: [Id], onDelete: Cascade)
+  Enterprise          Enterprise       @relation(fields: [EnterpriseId], references: [Id], onDelete: Cascade)
+  BaseMaterial        BaseMaterial     @relation(fields: [BaseMaterialId], references: [Id], onDelete: Restrict)
   Comments            Comment[]
-  /// Itens de custo avulsos presos a esta opção (escopo do satélite).
-  ScopedCostItems     RoomComponentCostItem[] @relation("CostItemScope")
   /// Rascunho de precificação (1:1). Criado sob demanda no primeiro override.
   Pricing             MaterialPricing?
   /// SetNull: apagar a versão não desfaz a publicação — só perde a etiqueta.
-  PublishedVersion    BudgetVersion?          @relation(fields: [PublishedVersionId], references: [Id], onDelete: SetNull)
+  PublishedVersion    BudgetVersion?   @relation(fields: [PublishedVersionId], references: [Id], onDelete: SetNull)
 
   @@unique([RoomComponentId, BaseMaterialId])
   @@index([RoomComponentId])
@@ -338,6 +323,9 @@ model BaseMaterial {
   Name            String
   Manufacturer    String? // fabricante (null p/ kit)
   Unit            String? // unidade (null p/ kit)
+  /// Quantitativo do PRÓPRIO material na composição de custo (coeficiente por
+  /// unidade): 1,2 = 20 % de quebra. Só faz sentido em Type "single".
+  CostQuantity    Float   @default(1)
   /// URL legada — fallback quando MediaFileId é null (ver resolveMediaUrl).
   ImagePreviewUrl String?
   MediaFileId     Int?
@@ -345,15 +333,15 @@ model BaseMaterial {
   CreatedAt DateTime @default(now()) @db.Timestamptz()
   UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
 
-  Organization    Organization             @relation(fields: [OrganizationId], references: [id], onDelete: Cascade)
-  Category        MaterialCategory?        @relation(fields: [CategoryId], references: [Id], onDelete: SetNull)
-  MediaFile       MediaFile?               @relation("BaseMaterialPreviewMedia", fields: [MediaFileId], references: [Id], onDelete: SetNull)
+  Organization    Organization              @relation(fields: [OrganizationId], references: [id], onDelete: Cascade)
+  Category        MaterialCategory?         @relation(fields: [CategoryId], references: [Id], onDelete: SetNull)
+  MediaFile       MediaFile?                @relation("BaseMaterialPreviewMedia", fields: [MediaFileId], references: [Id], onDelete: SetNull)
   Options         Material[]
-  KitItems        MaterialKitItem[]        @relation("KitParent")
-  ParentKits      MaterialKitItem[]        @relation("KitChild")
+  KitItems        MaterialKitItem[]         @relation("KitParent")
+  ParentKits      MaterialKitItem[]         @relation("KitChild")
   PortalFills     PortalFill[]
-  CostItems       RoomComponentCostItem[]  @relation("CostItemMaterial")
   EnterpriseCosts EnterpriseMaterialCost[]
+  Composition     MaterialCompositionItem[]
 
   @@index([OrganizationId])
   @@index([OrganizationId, Type])
@@ -384,6 +372,70 @@ model EnterpriseMaterialCost {
 
   @@unique([EnterpriseId, BaseMaterialId])
   @@index([EnterpriseId])
+}
+
+// ─── Composição de custo (itens de custo / insumos) ──────────────────────
+//
+// Um material "single" pode ter uma COMPOSIÇÃO: linhas de insumo × coeficiente
+// por unidade do material (argamassa 8 kg/m², rejunte 0,07 kg/m², assentamento
+// 1 m²/m²…). O insumo (CostItem) é catálogo da ORGANIZAÇÃO, como o BaseMaterial;
+// o seu preço é POR EMPREENDIMENTO (EnterpriseCostItemPrice), como o custo do
+// material. A composição vale para todos os empreendimentos, como os kits.
+//   custo base = custoMat × CostQuantity + custoMO + Σ(Quantity × preço do insumo)
+
+/// Insumo de composição de custo (material auxiliar, serviço/MO ou frete).
+/// Sem preço aqui — o preço é por empreendimento (EnterpriseCostItemPrice).
+model CostItem {
+  Id             Int     @id @default(autoincrement())
+  OrganizationId String
+  /// Código livre (opcional) — o da planilha da construtora.
+  Code           String?
+  Name           String
+  Unit           String
+
+  CreatedAt DateTime @default(now()) @db.Timestamptz()
+  UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
+
+  Organization Organization              @relation(fields: [OrganizationId], references: [id], onDelete: Cascade)
+  Prices       EnterpriseCostItemPrice[]
+  Lines        MaterialCompositionItem[]
+
+  @@index([OrganizationId])
+  @@index([OrganizationId, Code])
+}
+
+/// Preço unitário do insumo POR EMPREENDIMENTO. NULL = pendente.
+model EnterpriseCostItemPrice {
+  Id               Int  @id @default(autoincrement())
+  EnterpriseId     Int
+  CostItemId       Int
+  UnitPriceInCents Int?
+
+  CreatedAt DateTime @default(now()) @db.Timestamptz()
+  UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
+
+  Enterprise Enterprise @relation(fields: [EnterpriseId], references: [Id], onDelete: Cascade)
+  CostItem   CostItem   @relation(fields: [CostItemId], references: [Id], onDelete: Cascade)
+
+  @@unique([EnterpriseId, CostItemId])
+  @@index([EnterpriseId])
+}
+
+/// Linha da composição de um BaseMaterial: insumo × coeficiente por unidade do
+/// material. Catálogo (org-level) — vale em todos os empreendimentos.
+model MaterialCompositionItem {
+  Id             Int   @id @default(autoincrement())
+  BaseMaterialId Int
+  CostItemId     Int
+  Quantity       Float @default(1)
+  Position       Int   @default(0)
+
+  BaseMaterial BaseMaterial @relation(fields: [BaseMaterialId], references: [Id], onDelete: Cascade)
+  /// Cascade de propósito: a UI confirma "usado em N materiais" antes de apagar o insumo.
+  CostItem     CostItem     @relation(fields: [CostItemId], references: [Id], onDelete: Cascade)
+
+  @@unique([BaseMaterialId, CostItemId])
+  @@index([CostItemId])
 }
 
 model MaterialCategory {
@@ -428,67 +480,6 @@ model MaterialKitUsage {
 
   @@unique([BlueprintRoomComponentId, KitItemId])
   @@index([BlueprintRoomComponentId])
-}
-
-// ─── Componente de custo ("satélite": SOLEIRA, RODAPÉ, RESERVA TÉCNICA) ──
-//
-// Linha somada ao custo do componente que NUNCA é ofertada na personalização.
-// Espelha o par MaterialKitItem/MaterialKitUsage: definição compartilhada no
-// RoomComponent + quantitativo por planta.
-
-/// Definição do componente de custo — COMPARTILHADA entre todas as plantas que
-/// usam o ambiente (definição E quantidade). O escopo é dado por MaterialId:
-/// NULL = vale para todas as opções do componente (upgrade) / linha padrão;
-/// preenchido = avulso, só para aquela opção.
-model RoomComponentCostItem {
-  Id              Int          @id @default(autoincrement())
-  RoomComponentId Int
-  Name            String
-  Kind            CostItemKind
-  Side            CostItemSide @default(upgrade)
-  /// BaseMaterial quando Kind = fixo; NULL quando espelho (segue a opção).
-  BaseMaterialId  Int?
-  /// Opção (Material) a que o item está preso. NULL = todas as opções.
-  MaterialId      Int?
-  Unit            String
-  /// Quantitativo — compartilhado entre todas as plantas do ambiente.
-  UsageQuantity   Float        @default(0)
-  Position        Int          @default(0)
-
-  CreatedAt DateTime @default(now()) @db.Timestamptz()
-  UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
-
-  RoomComponent RoomComponent @relation(fields: [RoomComponentId], references: [Id], onDelete: Cascade)
-  /// Restrict: apagar um material usado como satélite zeraria o custo de troca
-  /// de todas as opções do componente em silêncio.
-  BaseMaterial  BaseMaterial? @relation("CostItemMaterial", fields: [BaseMaterialId], references: [Id], onDelete: Restrict)
-  /// Cascade: apagar a opção apaga seus itens de custo avulsos.
-  Material      Material?     @relation("CostItemScope", fields: [MaterialId], references: [Id], onDelete: Cascade)
-
-  @@index([RoomComponentId])
-  @@index([BaseMaterialId])
-  @@index([MaterialId])
-}
-
-/// Linha de custo avulsa (registro) do AMBIENTE — nome em texto livre, sem
-/// vínculo a componente. Só consta como custo; não é ofertada nem gera crédito.
-/// Compartilhada entre as plantas que usam o Room.
-model RoomCostRegistro {
-  Id            Int    @id @default(autoincrement())
-  RoomId        Int
-  Name          String
-  /// Valor unitário digitado (R$) — a linha é só registro, sem material.
-  UnitCost      Float  @default(0)
-  Unit          String
-  UsageQuantity Float  @default(0)
-  Position      Int    @default(0)
-
-  CreatedAt DateTime @default(now()) @db.Timestamptz()
-  UpdatedAt DateTime @default(now()) @updatedAt @db.Timestamptz()
-
-  Room Room @relation(fields: [RoomId], references: [Id], onDelete: Cascade)
-
-  @@index([RoomId])
 }
 
 // ─── Features só do planner (re-escopadas a Enterprise, ids Int) ────────

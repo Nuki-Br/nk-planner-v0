@@ -75,6 +75,8 @@ async function main(): Promise<void> {
   // Enterprise cascateia Blueprints/Rooms/RoomComponents/Materials/BRC/versions/
   // columns/comments/portal/torres/unitgroups. Kits antes dos singles (FK Restrict).
   await prisma.enterprise.deleteMany({ where: { OrganizationId: ORG_ID } });
+  // Insumos cascateiam preços (já foram com o Enterprise) e linhas de composição.
+  await prisma.costItem.deleteMany({ where: { OrganizationId: ORG_ID } });
   await prisma.baseMaterial.deleteMany({ where: { OrganizationId: ORG_ID, Type: "kit" } });
   await prisma.baseMaterial.deleteMany({ where: { OrganizationId: ORG_ID, Type: "single" } });
   await prisma.materialCategory.deleteMany({ where: { OrganizationId: ORG_ID } });
@@ -111,6 +113,7 @@ async function main(): Promise<void> {
         Name: m.nome,
         Manufacturer: m.fabricante,
         Unit: m.unidade,
+        CostQuantity: m.custoQtd ?? 1,
       },
       select: { Id: true },
     });
@@ -140,6 +143,29 @@ async function main(): Promise<void> {
       if (dbKi) kitItemMap.set(it.id, dbKi.Id);
     }
   }
+
+  // ── Itens de custo (insumos) da org + composições dos materiais (catálogo) ──
+  const costItemMap = new Map<number, number>(); // seed CostItem id → db id
+  for (const it of seed.costItems) {
+    const row = await prisma.costItem.create({
+      data: { OrganizationId: ORG_ID, Code: it.codigo, Name: it.nome, Unit: it.unidade },
+      select: { Id: true },
+    });
+    costItemMap.set(it.id, row.Id);
+  }
+  const positions = new Map<number, number>();
+  await prisma.materialCompositionItem.createMany({
+    data: seed.composicoes.map((c) => {
+      const pos = positions.get(c.materialId) ?? 0;
+      positions.set(c.materialId, pos + 1);
+      return {
+        BaseMaterialId: catalogMap.get(c.materialId)!,
+        CostItemId: costItemMap.get(c.itemId)!,
+        Quantity: c.qtd,
+        Position: pos,
+      };
+    }),
+  });
 
   // ── Empreendimentos (Enterprise) — projects[0] é o âncora (mais antigo) ──
   const base = Date.now();
@@ -179,6 +205,15 @@ async function main(): Promise<void> {
         CostMaterialInCents: c.custoMat === null ? null : toCents(c.custoMat),
         CostLaborInCents: toCents(c.custoMO),
       })),
+  });
+
+  // Preço dos insumos no âncora (NULL = pendente, como o custo de material).
+  await prisma.enterpriseCostItemPrice.createMany({
+    data: seed.costItems.map((it) => ({
+      EnterpriseId: activeId,
+      CostItemId: costItemMap.get(it.id)!,
+      UnitPriceInCents: it.preco === null ? null : Math.round(it.preco * 100),
+    })),
   });
 
   // ── Colunas de orçamento do empreendimento âncora ──
@@ -251,37 +286,6 @@ async function main(): Promise<void> {
           if (defaultDbId != null) {
             await prisma.roomComponent.update({ where: { Id: rc.Id }, data: { DefaultMaterialId: defaultDbId } });
           }
-          // Componentes de custo (satélites) — definição E quantidade compartilhadas.
-          for (const cc of c.custoComponentes) {
-            await prisma.roomComponentCostItem.create({
-              data: {
-                RoomComponentId: rc.Id,
-                Name: cc.nome,
-                Kind: cc.tipo,
-                Side: cc.lado,
-                BaseMaterialId: cc.baseId != null ? catalogMap.get(cc.baseId)! : null,
-                MaterialId: cc.materialOptionId != null ? optMap.get(cc.materialOptionId)! : null,
-                Unit: cc.unidade,
-                UsageQuantity: cc.qtd,
-                Position: cc.ordem,
-              },
-              select: { Id: true },
-            });
-          }
-        }
-        // Registros de custo do ambiente (linhas avulsas, nível Room).
-        for (const r of amb.registros) {
-          await prisma.roomCostRegistro.create({
-            data: {
-              RoomId: dbRoom.Id,
-              Name: r.nome,
-              UnitCost: r.valorUnitario,
-              Unit: r.unidade,
-              UsageQuantity: r.qtd,
-              Position: r.ordem,
-            },
-            select: { Id: true },
-          });
         }
         cache = { dbRoomId: dbRoom.Id, compMap };
         roomCache.set(amb.id, cache);

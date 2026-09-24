@@ -17,6 +17,7 @@ import { getKit, getMaterial } from "@/lib/data/entities";
 import {
   EMPTY_PRICING,
   type Componente,
+  type CompositionLine,
   type CustosBase,
   type Kit,
   type Material,
@@ -24,6 +25,13 @@ import {
   type MaterialPricing,
   type Unidade,
 } from "@/shared/types/domain";
+import {
+  custoBasePendente,
+  custoBaseStatus,
+  custoBaseTotal,
+  linhasPendentes,
+  type CustoBaseStatus,
+} from "@/shared/utils/custoBase";
 
 /** optionId (Material id) → rascunho de precificação. */
 export type PricingMap = Record<number, MaterialPricing>;
@@ -39,30 +47,31 @@ export interface ResolveDeps {
   pricings: PricingMap;
 }
 
-/** Custo base efetivo de um BaseMaterial (material + mão de obra). Pendente conta 0. */
+/**
+ * Custo base efetivo de um BaseMaterial: material × coeficiente + MO + composição
+ * (fórmula em shared/utils/custoBase.ts). Pendente conta 0.
+ */
 export function custoBaseOf(custosBase: CustosBase, baseId: number): number {
-  const c = custosBase[baseId];
-  return c ? (c.custoMat ?? 0) + c.custoMO : 0;
+  return custoBaseTotal(custosBase[baseId]);
 }
 
 /**
- * "Pendente" é a AUSÊNCIA de custo de material (nunca preenchido), não do total:
- * um item com mão de obra preenchida e material vazio segue pendente. O "sem
- * custo" marcado (custoMat 0) NÃO é pendente — é um zero decidido.
+ * "Pendente" é a AUSÊNCIA de custo de material (nunca preenchido) ou de preço de
+ * algum insumo da composição — não um total zero. O "sem custo" marcado
+ * (custoMat 0) NÃO é pendente — é um zero decidido.
  */
 export function isBasePending(custosBase: CustosBase, baseId: number): boolean {
-  const c = custosBase[baseId];
-  return !c || c.custoMat === null;
+  return custoBasePendente(custosBase[baseId]);
 }
 
 /** Status do custo base para os selos: pendente, sem custo (0 marcado) ou preenchido. */
-export function baseCostStatus(
-  custosBase: CustosBase,
-  baseId: number
-): "pendente" | "sem_custo" | "preenchido" {
-  const mat = custosBase[baseId]?.custoMat ?? null;
-  if (mat === null) return "pendente";
-  return mat === 0 ? "sem_custo" : "preenchido";
+export function baseCostStatus(custosBase: CustosBase, baseId: number): CustoBaseStatus {
+  return custoBaseStatus(custosBase[baseId]);
+}
+
+/** Insumos da composição sem preço neste empreendimento (dica "insumo sem preço"). */
+export function linhasPendentesOf(custosBase: CustosBase, baseId: number): CompositionLine[] {
+  return linhasPendentes(custosBase[baseId]);
 }
 
 /** Rascunho de uma aplicação — nunca undefined, para o chamador não ramificar. */
@@ -125,9 +134,9 @@ export function rowSideOf(deps: ResolveDeps, comp: Componente, opt: MaterialOpti
 
 /**
  * Preços dos BaseMaterials que o motor pode precisar consultar num componente:
- * os satélites "fixo" e os sub-itens dos kits ofertados. São endereçados por
- * BaseMaterial (não por aplicação), então não têm override — vêm sempre do
- * custo base do empreendimento.
+ * os sub-itens dos kits ofertados. São endereçados por BaseMaterial (não por
+ * aplicação), então não têm override — vêm sempre do custo base do
+ * empreendimento (composição inclusa).
  */
 export function priceLookupFor(deps: ResolveDeps, comp: Componente): PriceLookup {
   const out = new Map<number, PricedEntity>();
@@ -141,9 +150,6 @@ export function priceLookupFor(deps: ResolveDeps, comp: Componente): PriceLookup
     });
   };
 
-  for (const cc of comp.custoComponentes ?? []) {
-    if (cc.tipo === "fixo" && cc.baseId != null) add(cc.baseId);
-  }
   for (const opt of comp.options) {
     if (!opt.isKit) continue;
     const kit = getKit(deps.kits, opt.baseId);

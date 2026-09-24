@@ -19,16 +19,7 @@ import {
   reorderAmbientes,
   replaceUpgrade,
   reorderComponentes,
-  addCostComponent,
-  removeCostComponent,
-  reorderCostComponents,
-  addCostRegistro,
-  removeCostRegistro,
-  updateCostRegistro,
-  type CostRegistroInput,
   setKitQtds,
-  updateCostComponent,
-  type CostComponentInput,
   setPadrao,
   updateAmbiente,
   updateComponente,
@@ -243,75 +234,5 @@ export function useSetKitQtds() {
       qtds,
     }: CompPath & { qtds: Record<number, number> }) =>
       setKitQtds(tipologiaId, ambienteId, componenteId, qtds)
-  );
-}
-
-// ─── Componentes de custo (satélites) ──────────────────────────────────
-// Definição E quantidade são compartilhadas por todas as tipologias que usam o
-// ambiente — add/update gravam tudo num único registro (save atômico).
-
-export function useAddCostComponent() {
-  return useTreeMutation(
-    ({ tipologiaId, ambienteId, componenteId, input }: CompPath & { input: CostComponentInput }) =>
-      addCostComponent(tipologiaId, ambienteId, componenteId, input)
-  );
-}
-
-export function useUpdateCostComponent() {
-  return useTreeMutation(
-    ({
-      tipologiaId,
-      ambienteId,
-      componenteId,
-      costItemId,
-      patch,
-    }: CompPath & {
-      costItemId: number;
-      patch: Partial<CostComponentInput>;
-    }) => updateCostComponent(tipologiaId, ambienteId, componenteId, costItemId, patch)
-  );
-}
-
-export function useRemoveCostComponent() {
-  return useTreeMutation(
-    ({ tipologiaId, ambienteId, componenteId, costItemId }: CompPath & { costItemId: number }) =>
-      removeCostComponent(tipologiaId, ambienteId, componenteId, costItemId)
-  );
-}
-
-export function useReorderCostComponents() {
-  return useTreeMutation(
-    ({ tipologiaId, ambienteId, componenteId, orderedIds }: CompPath & { orderedIds: number[] }) =>
-      reorderCostComponents(tipologiaId, ambienteId, componenteId, orderedIds)
-  );
-}
-
-// ─── Registros de custo (linhas avulsas do ambiente) ────────────────────
-
-type AmbPath = { tipologiaId: number; ambienteId: number };
-
-export function useAddCostRegistro() {
-  return useTreeMutation(
-    ({ tipologiaId, ambienteId, input }: AmbPath & { input: CostRegistroInput }) =>
-      addCostRegistro(tipologiaId, ambienteId, input)
-  );
-}
-
-export function useUpdateCostRegistro() {
-  return useTreeMutation(
-    ({
-      tipologiaId,
-      ambienteId,
-      registroId,
-      patch,
-    }: AmbPath & { registroId: number; patch: Partial<CostRegistroInput> }) =>
-      updateCostRegistro(tipologiaId, ambienteId, registroId, patch)
-  );
-}
-
-export function useRemoveCostRegistro() {
-  return useTreeMutation(
-    ({ tipologiaId, ambienteId, registroId }: AmbPath & { registroId: number }) =>
-      removeCostRegistro(tipologiaId, ambienteId, registroId)
   );
 }

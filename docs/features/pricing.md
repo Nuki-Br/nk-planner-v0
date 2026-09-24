@@ -19,6 +19,8 @@ Agora existem três camadas, cada uma com um dono:
 |---|---|---|---|
 | **Template** | `BaseMaterial` | Organização | Catálogo — só identidade, nunca preço |
 | **Custo base** | `EnterpriseMaterialCost` | Empreendimento × BaseMaterial | Aba "Custos base" e portal do terceiro |
+| **Composição** | `MaterialCompositionItem` + `BaseMaterial.CostQuantity` | Organização (catálogo) | Painel da linha na aba "Custos base" |
+| **Insumo (item de custo)** | `CostItem` + `EnterpriseCostItemPrice` | Org (identidade) × Empreendimento (preço) | Aba "Itens de custo" e painel de composição |
 | **Rascunho de preço** | `MaterialPricing` | Aplicação (1:1 com `Material`) | Aba "Preço final", livremente |
 | **Preço publicado** | `Material` (`PriceInCents` + snapshot) | Aplicação | Só o "Publicar orçamento" |
 
@@ -31,20 +33,50 @@ que aparece na tabela do Construtor de Preço, e é onde o preço publicado mora
 
 ---
 
-## 2. Custo base — por empreendimento
+## 2. Custo base — por empreendimento, com composição
 
-`EnterpriseMaterialCost` guarda **custo de material + custo de mão de obra** de um `BaseMaterial`
-dentro de **um** empreendimento. Compartilhado por todas as aplicações dele ali: preencher o
-porcelanato uma vez vale para a Sala, o Quarto e o Hall.
+O custo base de um `BaseMaterial` dentro de **um** empreendimento é:
 
-- **`NULL` ou custo de material `0` = pendente.** A pendência olha o custo **de material**: um item
-  com mão de obra preenchida e material zerado segue pendente — falta a cotação que a construtora
-  precisa devolver.
-- Uma linha pendente **sai dos totais** do orçamento (e o rodapé da tabela conta quantas).
-- Entram na lista três origens, de-duplicadas: **opções de componente**, **sub-itens de kit** (o kit
-  não tem custo próprio — quem tem é o material filho) e **itens de custo "fixo"** (satélites).
-- O **portal do terceiro** grava aqui, não no catálogo: o link é sempre de um empreendimento, e o
-  preço que a construtora daquela obra informou não vale para as outras obras da incorporadora.
+```
+custo base = custoMat × custoQtd + custoMO + Σ (qtd do insumo × preço do insumo)
+```
+
+- **`custoMat` / `custoMO`** (`EnterpriseMaterialCost`) — o custo "cheio" que as incorporadoras sem
+  construtora recebem. Compartilhado por todas as aplicações do material ali: preencher o porcelanato
+  uma vez vale para a Sala, o Quarto e o Hall.
+- **`custoQtd`** (`BaseMaterial.CostQuantity`, catálogo) — quantitativo do **próprio material** por
+  unidade: 1,2 = 20 % de quebra. Padrão 1.
+- **Composição** (`MaterialCompositionItem`, catálogo) — linhas de **insumo × quantitativo** por
+  unidade do material: argamassa 8 kg/m², rejunte 0,07 kg/m², assentamento 1 m²/m²… É a planilha da
+  construtora (`Comp PER`). Vale para **todos** os empreendimentos, como a composição de um kit.
+- **Insumo** (`CostItem`) — item de custo do catálogo da org (código, nome, unidade): material
+  auxiliar, serviço/MO ou frete. O **preço** é por empreendimento (`EnterpriseCostItemPrice`) e é
+  **compartilhado por todas as composições** daquele empreendimento — editar o preço da argamassa
+  muda o custo de todo porcelanato que a usa.
+
+**Pendência.** Custo de material **`NULL`** (nunca preenchido) *ou* **qualquer insumo da composição
+sem preço** neste empreendimento. Um material com mão de obra preenchida e material vazio segue
+pendente. `0` **não** é pendente: é "sem custo" marcado de propósito (só para material sem
+composição). Uma linha pendente **sai dos totais** do orçamento (o rodapé conta quantas).
+
+**Origens da lista "Custos base"**, de-duplicadas por material: **opções de componente** e
+**sub-itens de kit** (o kit não tem custo próprio — quem tem é o material filho). Os insumos não
+viram linha aqui: entram por dentro do material que os usa e têm a própria aba.
+
+**Aba "Itens de custo"** (3º segmento do Construtor de Preço): lista editável dos insumos da org
+com o preço deste empreendimento e "usado em N materiais". Remover um insumo o tira de todas as
+composições (a tela confirma). A grade **"Adicionar itens"** cadastra vários de uma vez — item
+existente (autocompleta e trava código/nome/unidade) ou novo — e aceita **colar do Excel** (Cód,
+Nome, Unidade, Qtd, Valor).
+
+**Painel de composição** (linha expandida na aba "Custos base"): a planilha da construtora por
+material — primeira linha é o próprio material (× `custoQtd`), depois cada insumo (qtd e preço
+editáveis inline), mão de obra e o total. **"Aplicar composição em…"** copia a composição para
+outros materiais da mesma categoria (substituir ou mesclar), ajustando só os quantitativos.
+
+- O **portal do terceiro** grava `custoMat`/`custoMO`, não no catálogo: o link é sempre de um
+  empreendimento, e o preço que a construtora daquela obra informou não vale para as outras obras da
+  incorporadora. Preço de insumo é preenchido dentro do app.
 
 ---
 
@@ -117,7 +149,7 @@ modal promete é o que o publish grava.
 
 ### Badge de status
 
-No topo da aba, ao lado do alternador Preço final ⇄ Custos base:
+No topo da aba, ao lado do alternador Preço final | Custos base | Itens de custo:
 
 | Estado | Quando |
 |---|---|
@@ -144,16 +176,18 @@ Tela, motor de cálculo e publicação leem pelo mesmo resolvedor, para que o pr
 somado e o preço publicado nunca divirjam:
 
 ```
+custo base     → custoMat × custoQtd + custoMO + Σ(qtd × preço do insumo)   (shared/utils/custoBase.ts)
 valor unitário → MaterialPricing.valorUnitario ?? custo base do empreendimento
 quantidade     → MaterialPricing.qtd            ?? quantidade da planta
 reserva téc.   → MaterialPricing.rt             ?? RT da planta
 unidade        → MaterialPricing.unidade        ?? unidade do componente
 célula livre   → MaterialPricing.colunas[colId] ?? expressão da coluna
-pendente       → custo unitário efetivo ≤ 0
+pendente       → custoMat NULL ou insumo sem preço (override de valor un. > 0 resolve)
 ```
 
 O motor de cálculo não conhece catálogo, custo base nem override: recebe tudo resolvido e só faz
-aritmética e fórmulas.
+aritmética e fórmulas. A linha de opção no "Preço final" expande para mostrar a composição
+(material × qtd, insumos, MO) **somente leitura** — a autoria é na aba "Custos base".
 
 ---
 
@@ -170,3 +204,6 @@ aritmética e fórmulas.
 | Quantidade só editável na tela de tipologias | Override na aba "Preço final" |
 | Tela `/revisao-custos` duplicava a grade de custo | Removida |
 | Catálogo e importação CSV pediam custo | Só identidade |
+| Itens de custo "satélites" presos ao componente da tipologia (espelho/fixo, padrão/upgrade) e registro avulso do ambiente | **Composição no material do catálogo** + insumos com preço por empreendimento (2026-09-23) |
+| Quebra do material só via RT da tipologia (multiplica material e MO) | Quantitativo do próprio material na composição (`custoQtd`, ex.: 1,2) |
+| Item de custo adicionado um a um por modal | Grade multi-linha com colar do Excel + "Aplicar composição em…" |

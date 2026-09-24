@@ -79,7 +79,7 @@ async function resolveEnterprise(
     listMateriais(organizationId),
     listKits(organizationId),
     getBudgetColumns(organizationId, projectId),
-    getEnterpriseCostMap(projectId),
+    getEnterpriseCostMap(organizationId, projectId),
     listPricing(organizationId, projectId),
   ]);
 
@@ -136,10 +136,7 @@ async function resolveEnterprise(
 
           const r = calcAnyRow(deps, comp, opt);
           const pendente =
-            r == null ||
-            (r.kind === "kit"
-              ? r.result.subItemPending || r.result.satellitePending
-              : isOptionPending(deps, comp, opt));
+            r == null || (r.kind === "kit" ? r.result.subItemPending : isOptionPending(deps, opt));
           if (pendente || !r) {
             rows.push({ ...base, total: null, snapshot: null });
             continue;

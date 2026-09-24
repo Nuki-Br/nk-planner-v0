@@ -68,7 +68,7 @@ describe("custo base do empreendimento", () => {
   it("pendência olha o custo de MATERIAL, não o total", () => {
     // Um item com MO preenchida e material vazio segue pendente: falta a
     // cotação do material, que é o que a construtora precisa devolver.
-    const soMO: CustosBase = { 1: { baseId: 1, custoMat: null, custoMO: 50 } };
+    const soMO: CustosBase = { 1: { baseId: 1, custoMat: null, custoMO: 50, custoQtd: 1, composicao: [] } };
     expect(isBasePending(soMO, 1)).toBe(true);
     expect(isBasePending({}, 1)).toBe(true);
     expect(baseCostStatus(soMO, 1)).toBe("pendente");
@@ -76,11 +76,48 @@ describe("custo base do empreendimento", () => {
 
   it("'sem custo' (material 0 marcado) não é pendente e vale 0", () => {
     // Ex.: padrão "Não entregue" — zero decidido, não esquecido.
-    const semCusto: CustosBase = { 1: { baseId: 1, custoMat: 0, custoMO: 0 } };
+    const semCusto: CustosBase = { 1: { baseId: 1, custoMat: 0, custoMO: 0, custoQtd: 1, composicao: [] } };
     expect(isBasePending(semCusto, 1)).toBe(false);
     expect(custoBaseOf(semCusto, 1)).toBe(0);
     expect(baseCostStatus(semCusto, 1)).toBe("sem_custo");
-    expect(baseCostStatus({ 1: { baseId: 1, custoMat: 10, custoMO: 0 } }, 1)).toBe("preenchido");
+    expect(baseCostStatus({ 1: { baseId: 1, custoMat: 10, custoMO: 0, custoQtd: 1, composicao: [] } }, 1)).toBe("preenchido");
+  });
+
+  it("composição entra no custo base: material × coeficiente + MO + Σ insumos", () => {
+    // 100 × 1,2 (20 % de quebra) + 10 de MO + argamassa 1,5 × 8,00 = 142
+    const comComposicao: CustosBase = {
+      1: {
+        baseId: 1,
+        custoMat: 100,
+        custoMO: 10,
+        custoQtd: 1.2,
+        composicao: [
+          { id: 7, itemId: 3, codigo: "ARG-01", nome: "Argamassa", unidade: "kg", qtd: 1.5, preco: 8, ordem: 0 },
+        ],
+      },
+    };
+    expect(custoBaseOf(comComposicao, 1)).toBeCloseTo(142, 10);
+    expect(isBasePending(comComposicao, 1)).toBe(false);
+    expect(baseCostStatus(comComposicao, 1)).toBe("preenchido");
+  });
+
+  it("insumo da composição sem preço neste empreendimento é pendência", () => {
+    // O material está cotado, mas a argamassa não: a linha não pode ir para o
+    // total com uma parcela faltando — mesmo critério do sub-item de kit.
+    const insumoPendente: CustosBase = {
+      1: {
+        baseId: 1,
+        custoMat: 100,
+        custoMO: 0,
+        custoQtd: 1,
+        composicao: [
+          { id: 7, itemId: 3, codigo: null, nome: "Argamassa", unidade: "kg", qtd: 1.5, preco: null, ordem: 0 },
+        ],
+      },
+    };
+    expect(isBasePending(insumoPendente, 1)).toBe(true);
+    expect(baseCostStatus(insumoPendente, 1)).toBe("pendente");
+    expect(custoBaseOf(insumoPendente, 1)).toBe(100); // insumo pendente conta 0
   });
 });
 
@@ -138,13 +175,16 @@ describe("rowSideOf", () => {
 });
 
 describe("priceLookupFor", () => {
-  it("cobre satélites fixos e sub-itens de kit, sem os espelhos", () => {
-    const hall = t1.ambientes.find((a) => a.nome === "Hall")!.componentes[0]!;
-    const lookup = priceLookupFor(deps(), hall);
-    // Rodapé é satélite FIXO do Hall — tem material próprio a precificar.
-    expect(lookup.get(mat("RDP-466-SL").id)?.valUn).toBeGreaterThan(0);
-    // A Soleira é espelho: acompanha a opção, não tem BaseMaterial próprio.
-    expect([...lookup.values()].some((p) => p.nome === "Soleira")).toBe(false);
+  it("cobre só os sub-itens dos kits ofertados — opções avulsas ficam de fora", () => {
+    // Sala t3 oferta o kit Piso Barcelona (3 sub-itens) ao lado de pisos avulsos.
+    const lookup = priceLookupFor(deps(), salaPisoT3);
+    const kitPB = seed.kits.find((k) => k.codigo === "KIT-PB")!;
+    for (const it of kitPB.itens) expect(lookup.has(it.materialId)).toBe(true);
+    expect(lookup.get(mat("PB-9090-AC").id)?.valUn).toBeCloseTo(180 + 28, 10);
+    // A opção avulsa resolve pelo rowSideOf (com override), não pelo lookup.
+    expect(lookup.has(mat("PP-6060-BI").id)).toBe(false);
+    // componente sem kit (Cozinha · Piso) → lookup vazio
+    expect(priceLookupFor(deps(), t1.ambientes[1]!.componentes[0]!).size).toBe(0);
   });
 
   it("sub-item de kit sem custo base entra como pendente", () => {
@@ -174,7 +214,7 @@ describe("publicado × rascunho", () => {
 
     const antes = valUnOf(deps(), opt);
     const depois = valUnOf(
-      deps({ custosBase: { ...seed.custosBase, [opt.baseId]: { baseId: opt.baseId, custoMat: 999, custoMO: 0 } } }),
+      deps({ custosBase: { ...seed.custosBase, [opt.baseId]: { baseId: opt.baseId, custoMat: 999, custoMO: 0, custoQtd: 1, composicao: [] } } }),
       opt
     );
     expect(antes).not.toBe(depois); // o rascunho acompanha o custo base…

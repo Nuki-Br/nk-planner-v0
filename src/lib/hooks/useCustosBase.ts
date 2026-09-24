@@ -22,7 +22,13 @@ export function useCustosBase(projectId: number | null) {
 export function toCustosBaseMap(rows: CustoBaseRow[] | undefined): CustosBase {
   const out: CustosBase = {};
   for (const r of rows ?? []) {
-    out[r.baseId] = { baseId: r.baseId, custoMat: r.custoMat, custoMO: r.custoMO };
+    out[r.baseId] = {
+      baseId: r.baseId,
+      custoMat: r.custoMat,
+      custoMO: r.custoMO,
+      custoQtd: r.custoQtd,
+      composicao: r.composicao,
+    };
   }
   return out;
 }

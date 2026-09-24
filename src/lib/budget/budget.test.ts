@@ -11,7 +11,6 @@ import {
   rowKey,
   type BudgetRowResult,
   type ColResult,
-  type CompCalcInput,
   type PriceLookup,
   type PricedEntity,
   type RowSide,
@@ -95,31 +94,10 @@ function mustCalc(r: BudgetRowResult | null): BudgetRowResult {
 const piso001 = mat("PO-6060-CR"); // padrão: 62.5 + 22 = 84.5
 const piso002 = mat("PP-6060-BI"); // upgrade: 98 + 22 = 120
 
-/** Componente sem satélites — o caso comum. Quantidade agora vive no RowSide. */
-const plain = (): CompCalcInput => ({ custoComponentes: [] });
-
-/** Preços dos satélites "fixo" de um componente do seed. */
-function satsOf(comp: Componente, override?: PriceLookup): PriceLookup {
-  if (override) return override;
-  const out = new Map<number, PricedEntity>();
-  for (const cc of comp.custoComponentes) {
-    if (cc.tipo !== "fixo" || cc.baseId == null) continue;
-    const m = seed.materiais.find((x) => x.id === cc.baseId);
-    if (m) out.set(cc.baseId, priced(m));
-  }
-  return out;
-}
-
-function sat(r: BudgetRowResult, nome: string) {
-  const s = r.satellites.find((x) => x.item.nome === nome);
-  if (!s) throw new Error(`satélite ${nome} não encontrado`);
-  return s;
-}
-
 describe("calcBudgetRow (material)", () => {
   // T-M1 — Sala/Living Piso: qtd 18.40, rt 15, padrão piso-001, upgrade piso-002
   it("T-M1: linha com colunas padrão do projeto (convenção estendida)", () => {
-    const r = mustCalc(calcBudgetRow(side(piso002, 18.4, 15)!, side(piso001, 18.4), plain(), new Map(), cols, null, null));
+    const r = mustCalc(calcBudgetRow(side(piso002, 18.4, 15)!, side(piso001, 18.4), cols));
     expect(r.qtdComRT).toBeCloseTo(21.16, 10); // 18.4 * 1.15
     expect(r.valUnUpg).toBe(120);
     expect(r.valUnPad).toBe(84.5);
@@ -137,8 +115,8 @@ describe("calcBudgetRow (material)", () => {
 
   // T-M1b — a reserva técnica é perda do UPGRADE: só o débito a carrega
   it("T-M1b: crédito usa a quantidade líquida, débito usa a quantidade com RT", () => {
-    const semRT = mustCalc(calcBudgetRow(side(piso002, 18.4, 0)!, side(piso001, 18.4), plain(), new Map(), cols, null, null));
-    const comRT = mustCalc(calcBudgetRow(side(piso002, 18.4, 15)!, side(piso001, 18.4), plain(), new Map(), cols, null, null));
+    const semRT = mustCalc(calcBudgetRow(side(piso002, 18.4, 0)!, side(piso001, 18.4), cols));
+    const comRT = mustCalc(calcBudgetRow(side(piso002, 18.4, 15)!, side(piso001, 18.4), cols));
     expect(semRT.creditoTotal).toBeCloseTo(comRT.creditoTotal, 10); // crédito não muda com a RT
     expect(comRT.debitoTotal).toBeGreaterThan(semRT.debitoTotal); // débito muda
   });
@@ -146,9 +124,9 @@ describe("calcBudgetRow (material)", () => {
   // T-M1c — empreendimento sem débito/crédito: o crédito zera, então o
   // "Custo total" (custoDeTroca) passa a ser o próprio débito estendido.
   it("T-M1c: sem débito/crédito, custoDeTroca = debitoTotal e crédito = 0", () => {
-    const comDC = mustCalc(calcBudgetRow(side(piso002, 18.4, 15)!, side(piso001, 18.4), plain(), new Map(), cols, null, null));
+    const comDC = mustCalc(calcBudgetRow(side(piso002, 18.4, 15)!, side(piso001, 18.4), cols));
     const semDC = mustCalc(
-      calcBudgetRow(side(piso002, 18.4, 15)!, side(piso001, 18.4), plain(), new Map(), cols, null, null, {}, false)
+      calcBudgetRow(side(piso002, 18.4, 15)!, side(piso001, 18.4), cols, {}, false)
     );
     expect(semDC.debitoTotal).toBeCloseTo(comDC.debitoTotal, 10); // débito não muda
     expect(semDC.creditoTotal).toBe(0);
@@ -171,7 +149,7 @@ describe("calcBudgetRow (material)", () => {
         visivel: true,
       },
     ];
-    const r = mustCalc(calcBudgetRow(side(piso002, 18.4, 15)!, side(piso001, 18.4), plain(), new Map(), colsComp, null, null));
+    const r = mustCalc(calcBudgetRow(side(piso002, 18.4, 15)!, side(piso001, 18.4), colsComp));
     expect(col(r, 101).value).toBeCloseTo(127.972, 10); // 78.752 + 49.22
     expect(r.sumFree).toBeCloseTo(78.752 + 49.22 + 127.972, 10);
   });
@@ -184,7 +162,7 @@ describe("calcBudgetRow (material)", () => {
       { id: 202, nome: "Subtotal", expr: "=taxa_construtora + dobro", visivel: true },
       { id: 203, nome: "Mais um", expr: "=subtotal + 1", visivel: true },
     ];
-    const r = mustCalc(calcBudgetRow(side(piso002, 18.4, 15)!, side(piso001, 18.4), plain(), new Map(), colsRef, null, null));
+    const r = mustCalc(calcBudgetRow(side(piso002, 18.4, 15)!, side(piso001, 18.4), colsRef));
     expect(col(r, 201).value).toBeCloseTo(157.504, 10); // 78.752 * 2
     expect(col(r, 202).value).toBeCloseTo(236.256, 10); // 78.752 + 157.504
     expect(col(r, 203).value).toBeCloseTo(237.256, 10); // subtotal + 1
@@ -193,7 +171,7 @@ describe("calcBudgetRow (material)", () => {
   // T-M4 — override por célula (keyed por String(col.id))
   it("T-M4: override por célula é um valor PLANO da linha, não por unidade", () => {
     const r = mustCalc(
-      calcBudgetRow(side(piso002, 18.4, 15)!, side(piso001, 18.4), plain(), new Map(), cols, null, null, { [String(cols[0]!.id)]: "10" })
+      calcBudgetRow(side(piso002, 18.4, 15)!, side(piso001, 18.4), cols, { [String(cols[0]!.id)]: "10" })
     );
     expect(col(r, 1).value).toBe(10);
     expect(col(r, 1).overridden).toBe(true);
@@ -209,7 +187,7 @@ describe("calcBudgetRow (material)", () => {
       { id: 301, nome: "Quebrada", expr: "=inexistente * 2", visivel: true },
       { id: 302, nome: "Dependente", expr: "=quebrada + 1", visivel: true },
     ];
-    const r = mustCalc(calcBudgetRow(side(piso002, 18.4, 15)!, side(piso001, 18.4), plain(), new Map(), colsErr, null, null));
+    const r = mustCalc(calcBudgetRow(side(piso002, 18.4, 15)!, side(piso001, 18.4), colsErr));
     expect(col(r, 301).error).toBe('coluna "inexistente" não encontrada');
     expect(col(r, 301).value).toBe(0);
     expect(col(r, 302).value).toBe(1); // quebrada = 0 no escopo
@@ -222,13 +200,13 @@ describe("calcBudgetRow (material)", () => {
     const nicho = findComp((c) => c.nome === "Nicho");
     expect(nicho.padrao).toBeNull();
     expect(padraoSide(nicho)).toBeNull();
-    expect(calcBudgetRow(side(piso002, 1)!, padraoSide(nicho), nicho, new Map(), cols, null, null)).toBeNull();
+    expect(calcBudgetRow(side(piso002, 1)!, padraoSide(nicho), cols)).toBeNull();
   });
 
   // T-M7 — upgrade mais barato que o padrão: o crédito abate no máximo o débito
   it("T-M7: custo de troca e preço travam em zero (nunca negativos)", () => {
     // Invertido: "upgrade" piso-001 (84.5) sobre "padrão" piso-002 (120).
-    const r = mustCalc(calcBudgetRow(side(piso001, 18.4)!, side(piso002, 18.4), plain(), new Map(), cols, null, null));
+    const r = mustCalc(calcBudgetRow(side(piso001, 18.4)!, side(piso002, 18.4), cols));
     expect(r.debitoTotal).toBeCloseTo(1554.8, 10);
     expect(r.creditoTotal).toBeCloseTo(2208, 10);
     expect(r.custoDeTroca).toBe(0); // seria −653,20
@@ -237,7 +215,7 @@ describe("calcBudgetRow (material)", () => {
 
     // Coluna livre que não parte de custo_troca não fura a trava final.
     const colsNeg: BudgetColumn[] = [{ id: 401, nome: "Dif", expr: "=debito - credito", visivel: true }];
-    const n = mustCalc(calcBudgetRow(side(piso001, 18.4)!, side(piso002, 18.4), plain(), new Map(), colsNeg, null, null));
+    const n = mustCalc(calcBudgetRow(side(piso001, 18.4)!, side(piso002, 18.4), colsNeg));
     expect(col(n, 401).value).toBeCloseTo(-653.2, 10);
     expect(n.total).toBe(0);
   });
@@ -245,7 +223,7 @@ describe("calcBudgetRow (material)", () => {
   // T-M8 — padrão "sem custo" (ex.: "Não entregue"): crédito zero, upgrade cheio
   it("T-M8: padrão sem custo credita zero e o upgrade sai pelo débito", () => {
     const naoEntregue: RowSide = { valUn: 0, qtd: 18.4, rt: 0, pending: false };
-    const r = mustCalc(calcBudgetRow(side(piso002, 18.4, 15)!, naoEntregue, plain(), new Map(), cols, null, null));
+    const r = mustCalc(calcBudgetRow(side(piso002, 18.4, 15)!, naoEntregue, cols));
     expect(r.creditoTotal).toBe(0);
     expect(r.custoDeTroca).toBeCloseTo(r.debitoTotal, 10);
   });
@@ -262,7 +240,7 @@ describe("calcKitRow (kit)", () => {
 
   // T-K1 — agrega sub-itens e credita o padrão
   it("T-K1: agrega sub-itens e credita o padrão", () => {
-    const r = calcKitRow(bronze, metaisComp, { qtd: metaisComp.qtd, rt: metaisComp.rt }, padraoSide(metaisComp), kitPrices(bronze), cols, null, null);
+    const r = calcKitRow(bronze, metaisComp, { qtd: metaisComp.qtd, rt: metaisComp.rt }, padraoSide(metaisComp), kitPrices(bronze), cols);
     expect(r.debitoTotal).toBe(1240); // 170*2 + 520*1 + 280*1 + 100*1
     expect(r.qtdComRT).toBe(1);
     expect(r.creditoTotal).toBe(850); // met-001 (850) * 1
@@ -277,7 +255,7 @@ describe("calcKitRow (kit)", () => {
 
   // T-K2 — kit NÃO multiplica por qtdComRT (extensão já está nos sub-itens)
   it("T-K2: total do kit não é multiplicado por qtdComRT", () => {
-    const r = calcKitRow(barcelona, salaPisoT1, { qtd: salaPisoT1.qtd, rt: salaPisoT1.rt }, padraoSide(salaPisoT1), kitPrices(barcelona), cols, null, null);
+    const r = calcKitRow(barcelona, salaPisoT1, { qtd: salaPisoT1.qtd, rt: salaPisoT1.rt }, padraoSide(salaPisoT1), kitPrices(barcelona), cols);
     // piso-bcn 208 * 18.40 + sol-bcn 115 * 2 + rt-bcn (pendente, 0) * 1.84
     expect(r.debitoTotal).toBeCloseTo(4057.2, 10);
     expect(r.qtdComRT).toBeCloseTo(21.16, 10);
@@ -292,7 +270,7 @@ describe("calcKitRow (kit)", () => {
 
   // T-P1 — pendência é derivada do custo (custoMat <= 0), não mais de um Set
   it("T-P1: sub-item sem custo base marca a linha como pendente", () => {
-    const r = calcKitRow(barcelona, salaPisoT1, { qtd: salaPisoT1.qtd, rt: salaPisoT1.rt }, padraoSide(salaPisoT1), kitPrices(barcelona), cols, null, null);
+    const r = calcKitRow(barcelona, salaPisoT1, { qtd: salaPisoT1.qtd, rt: salaPisoT1.rt }, padraoSide(salaPisoT1), kitPrices(barcelona), cols);
     const rtBcn = r.subItems.find((s) => s.item.nome === "Reserva Técnica Porcelanato Barcelona");
     expect(rtBcn?.valUn).toBe(0);
     expect(rtBcn?.pending).toBe(true);
@@ -300,7 +278,7 @@ describe("calcKitRow (kit)", () => {
 
     // kit todo precificado → sem pendência; zerar um sub-item reintroduz a pendência
     expect(
-      calcKitRow(bronze, metaisComp, { qtd: metaisComp.qtd, rt: metaisComp.rt }, padraoSide(metaisComp), kitPrices(bronze), cols, null, null)
+      calcKitRow(bronze, metaisComp, { qtd: metaisComp.qtd, rt: metaisComp.rt }, padraoSide(metaisComp), kitPrices(bronze), cols)
         .subItemPending
     ).toBe(false);
     // Zerar o custo BASE de um sub-item reintroduz a pendência: o kit não tem
@@ -312,159 +290,10 @@ describe("calcKitRow (kit)", () => {
       { qtd: metaisComp.qtd, rt: metaisComp.rt },
       padraoSide(metaisComp),
       kitPrices(bronze, { [primeiro.materialId]: 0 }),
-      cols,
-      null,
-      null
+      cols
     );
     expect(rz.subItems[0]?.pending).toBe(true);
     expect(rz.subItemPending).toBe(true);
-  });
-});
-
-// Fixture do Hall — planilha do cliente (Maison Diogo 166m², linhas 41-57).
-// PISO é UMA escolha para o cliente; no custo carrega Soleira (espelho),
-// Rodapé (fixo) e, no lado padrão, Rodapé Munari RS + 2 Soleiras de granito.
-describe("componentes de custo (Hall)", () => {
-  const hall = findComp((c, amb) => amb === "Hall" && c.nome === "Piso");
-  const sats = satsOf(hall);
-  const upgrades = hall.options.filter((o) => !o.isDefault);
-  const calc = (baseId: number, mats = sats) =>
-    mustCalc(
-      calcBudgetRow(
-        side(seed.materiais.find((m) => m.id === baseId), hall.qtd, hall.rt)!,
-        padraoSide(hall),
-        hall,
-        mats,
-        cols,
-        null,
-        null
-      )
-    );
-  const bcn = calc(mat("MS-BCN-120").id);
-
-  // H51 = SUM(G51 + G52 + $G$57) − $H$41
-  it("reproduz o custo de troca da planilha", () => {
-    expect(bcn.qtdComRT).toBeCloseTo(3.375, 10); // 2,25 × 1,50
-    expect(bcn.debitoTotal).toBeCloseTo(1998.915, 6); // 1106,217 + 327,768 + 564,93
-    expect(bcn.creditoTotal).toBeCloseTo(826.2175, 6); // H41 = SUM(G41:G44)
-    expect(bcn.custoDeTroca).toBeCloseTo(1172.6975, 6);
-    expect(col(bcn, 1).value).toBeCloseTo(93.8158, 6); // 8% (o projeto usa 8%, a planilha 10%)
-    expect(bcn.total).toBeCloseTo(bcn.custoDeTroca + bcn.sumFree, 10);
-    // não re-multiplica
-    expect(bcn.total).not.toBeCloseTo((bcn.custoDeTroca + bcn.sumFree) * bcn.qtdComRT, 0);
-  });
-
-  // debitoItem é G51 (só o item); debitoTotal é H51, que soma os satélites e é o
-  // que a coluna "Déb./Créd." exibe na linha-pai.
-  it("débito do item é qtd × valor unitário; total soma os satélites", () => {
-    expect(bcn.debitoItem).toBeCloseTo(1106.217, 6); // 327,768 × 3,375
-    expect(bcn.debitoItem).toBeCloseTo(bcn.valUnUpg * bcn.qtdComRT, 6);
-    // o total é o item + soleira (327,768) + rodapé (564,93)
-    expect(bcn.debitoTotal).toBeCloseTo(bcn.debitoItem + 327.768 + 564.93, 6);
-    expect(bcn.debitoTotal).toBeGreaterThan(bcn.debitoItem);
-  });
-
-  it("crédito do item é qtd líquida × valor unitário, sem os satélites", () => {
-    expect(bcn.creditoItem).toBeCloseTo(355.1175, 6); // 157,83 × 2,25
-    expect(bcn.creditoTotal).toBeCloseTo(826.2175, 6); // + 283 + 188,10
-  });
-
-  it("o crédito do grupo soma os satélites do lado padrão", () => {
-    // 157,83×2,25 (piso, SEM RT) + 56,60×5 (rodapé RS) + 94,05×2 (soleiras)
-    expect(bcn.creditoTotal).toBeCloseTo(157.83 * 2.25 + 56.6 * 5 + 94.05 * 2, 6);
-    expect(sat(bcn, "Rodapé Munari RS").line).toBeCloseTo(283, 6);
-    expect(sat(bcn, "Soleiras Granito").line).toBeCloseTo(188.1, 6);
-  });
-
-  it("espelho acompanha a opção; fixo é o mesmo em todas", () => {
-    for (const opt of upgrades) {
-      const r = calc(opt.baseId);
-      // soleira: mesmo valor unitário da opção escolhida, 1 und
-      expect(sat(r, "Soleira").valUn).toBeCloseTo(r.valUnUpg, 10);
-      expect(sat(r, "Soleira").line).toBeCloseTo(r.valUnUpg, 10);
-      // rodapé: a referência absoluta $G$57 — idêntico em toda opção
-      expect(sat(r, "Rodapé").line).toBeCloseTo(564.93, 6);
-    }
-    // e as opções realmente têm valores unitários diferentes
-    const vals = upgrades.map((o) => calc(o.baseId).valUnUpg);
-    expect(new Set(vals).size).toBe(upgrades.length);
-  });
-
-  it("satélite fixo sem custo torna TODAS as opções pendentes", () => {
-    const rodape = mat("RDP-466-SL");
-    const semCusto = new Map(sats);
-    semCusto.set(rodape.id, priced(rodape, 0));
-    for (const opt of upgrades) {
-      expect(calc(opt.baseId, semCusto).satellitePending).toBe(true);
-    }
-    // com custo, nenhuma pendência
-    for (const opt of upgrades) expect(calc(opt.baseId).satellitePending).toBe(false);
-  });
-});
-
-// Escopo do item de custo: avulso (materialOptionId) só entra na sua opção;
-// materialOptionId null vale para todas.
-describe("escopo do item de custo (avulso vs todas as opções)", () => {
-  const RODAPE_BASE = 999999; // baseId de fabricação, sem custo → fixo pendente
-  const item = (
-    materialOptionId: number | null,
-    tipo: "espelho" | "fixo",
-    lado: "padrao" | "upgrade" = "upgrade"
-  ): Componente["custoComponentes"][number] => ({
-    id: 1,
-    nome: tipo === "fixo" ? "RodapéAvulso" : "SoleiraAvulsa",
-    tipo,
-    baseId: tipo === "fixo" ? RODAPE_BASE : null,
-    materialOptionId,
-    unidade: "und",
-    lado,
-    qtd: 2,
-    ordem: 0,
-  });
-  const comp = (cc: Componente["custoComponentes"][number]): CompCalcInput => ({
-    custoComponentes: [cc],
-  });
-  const OPT_A = 500;
-  const OPT_B = 700;
-
-  it("espelho avulso entra só na opção presa", () => {
-    // preso a OPT_A: aparece quando a linha é OPT_A…
-    const naOpcao = mustCalc(
-      calcBudgetRow(side(piso002, 10)!, side(piso001, 10), comp(item(OPT_A, "espelho")), new Map(), cols, OPT_A, null)
-    );
-    expect(naOpcao.satellites).toHaveLength(1);
-    // espelho: valUn = valUnUpg (120), qtd 2 → 240
-    expect(naOpcao.satellites[0]!.valUn).toBeCloseTo(naOpcao.valUnUpg, 10);
-    expect(naOpcao.satellites[0]!.line).toBeCloseTo(naOpcao.valUnUpg * 2, 10);
-    // …e some numa outra opção
-    const outraOpcao = mustCalc(
-      calcBudgetRow(side(piso002, 10)!, side(piso001, 10), comp(item(OPT_A, "espelho")), new Map(), cols, OPT_B, null)
-    );
-    expect(outraOpcao.satellites).toHaveLength(0);
-  });
-
-  it("materialOptionId null entra em qualquer opção", () => {
-    for (const optId of [OPT_A, OPT_B]) {
-      const r = mustCalc(
-        calcBudgetRow(side(piso002, 10)!, side(piso001, 10), comp(item(null, "espelho")), new Map(), cols, optId, null)
-      );
-      expect(r.satellites).toHaveLength(1);
-    }
-  });
-
-  it("fixo avulso pendente derruba SÓ a sua opção", () => {
-    const cc = item(OPT_A, "fixo"); // sem custo em satelliteMats → pendente
-    // na opção presa: presente e pendente
-    const naOpcao = mustCalc(
-      calcBudgetRow(side(piso002, 10)!, side(piso001, 10), comp(cc), new Map(), cols, OPT_A, null)
-    );
-    expect(naOpcao.satellitePending).toBe(true);
-    // em outra opção: nem aparece → não derruba a linha
-    const outraOpcao = mustCalc(
-      calcBudgetRow(side(piso002, 10)!, side(piso001, 10), comp(cc), new Map(), cols, OPT_B, null)
-    );
-    expect(outraOpcao.satellites).toHaveLength(0);
-    expect(outraOpcao.satellitePending).toBe(false);
   });
 });
 

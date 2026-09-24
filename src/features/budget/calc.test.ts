@@ -6,13 +6,11 @@ import type { Componente, MaterialOption } from "@/shared/types/domain";
 
 import {
   ambTotal,
-  ambienteRegistros,
   buildScopeRefs,
   calcAnyRow,
   isOptionOwnPending,
   isOptionPending,
   padroesPendentes,
-  pendingCostItems,
   qtdOf,
   unidadeOf,
   valUnOf,
@@ -32,7 +30,21 @@ const deps = (extra?: Partial<BudgetDeps>): BudgetDeps => ({
 /** Custo base do empreendimento com um material sobrescrito. */
 const comCusto = (baseId: number, custoMat: number | null, custoMO: number) => ({
   ...seed.custosBase,
-  [baseId]: { baseId, custoMat, custoMO },
+  [baseId]: { baseId, custoMat, custoMO, custoQtd: 1, composicao: [] },
+});
+
+/** Custo base com uma composição de um insumo (preço null = insumo pendente). */
+const comComposicao = (baseId: number, custoMat: number, preco: number | null) => ({
+  ...seed.custosBase,
+  [baseId]: {
+    baseId,
+    custoMat,
+    custoMO: 0,
+    custoQtd: 1,
+    composicao: [
+      { id: 1, itemId: 1, codigo: null, nome: "Argamassa", unidade: "kg" as const, qtd: 8, preco, ordem: 0 },
+    ],
+  },
 });
 
 const t1 = seed.tipologias[0]!;
@@ -54,13 +66,20 @@ function optByCodigo(comp: Componente, codigo: string): MaterialOption {
 describe("custo base do empreendimento", () => {
   it("preencher o custo tira a pendência da opção", () => {
     const optPiso004 = optByCodigo(salaPisoT1, "MC-NAT-CA");
-    expect(isOptionPending(deps(), salaPisoT1, optPiso004)).toBe(true); // sem custo no projeto
-    expect(
-      isOptionPending(deps({ custosBase: comCusto(piso004.id, 310, 50) }), salaPisoT1, optPiso004)
-    ).toBe(false);
+    expect(isOptionPending(deps(), optPiso004)).toBe(true); // sem custo no projeto
+    expect(isOptionPending(deps({ custosBase: comCusto(piso004.id, 310, 50) }), optPiso004)).toBe(false);
 
     const optPiso002 = optByCodigo(salaPisoT1, "PP-6060-BI");
-    expect(isOptionPending(deps(), salaPisoT1, optPiso002)).toBe(false); // já precificado
+    expect(isOptionPending(deps(), optPiso002)).toBe(false); // já precificado
+  });
+
+  it("insumo da composição sem preço deixa a opção pendente, mesmo com material cotado", () => {
+    const optPiso002 = optByCodigo(salaPisoT1, "PP-6060-BI");
+    expect(isOptionPending(deps({ custosBase: comComposicao(optPiso002.baseId, 98, null) }), optPiso002)).toBe(true);
+    // com o insumo precificado, a composição entra no valor unitário
+    const d = deps({ custosBase: comComposicao(optPiso002.baseId, 98, 1.5) });
+    expect(isOptionPending(d, optPiso002)).toBe(false);
+    expect(valUnOf(d, optPiso002)).toBeCloseTo(98 + 8 * 1.5, 10);
   });
 
   it("valor unitário efetivo é material + mão de obra do empreendimento", () => {
@@ -129,43 +148,6 @@ describe("calcAnyRow", () => {
   });
 });
 
-describe("pendência de item de custo", () => {
-  const hall = t1.ambientes.find((a) => a.nome === "Hall")!;
-  const hallPiso = hall.componentes[0]!;
-  const rodape = seed.materiais.find((m) => m.codigo === "RDP-466-SL")!;
-  /** Deixa o rodapé (satélite fixo do Hall) sem cotação — pendente. */
-  const semRodape = deps({ custosBase: comCusto(rodape.id, null, 0) });
-
-  it("derruba todas as opções do componente afetado", () => {
-    for (const opt of hallPiso.options.filter((o) => !o.isDefault)) {
-      expect(isOptionPending(semRodape, hallPiso, opt)).toBe(true);
-    }
-  });
-
-  it("NÃO acusa a opção em si — o material dela está preenchido", () => {
-    for (const opt of hallPiso.options.filter((o) => !o.isDefault)) {
-      expect(isOptionOwnPending(semRodape, opt)).toBe(false);
-    }
-    const upg = hallPiso.options.find((o) => !o.isDefault)!;
-    expect(pendingCostItems(semRodape, hallPiso, upg.id).map((c) => c.nome)).toEqual(["Rodapé"]);
-  });
-
-  it("rodapé marcado 'sem custo' (0) NÃO derruba as opções", () => {
-    const rodapeSemCusto = deps({ custosBase: comCusto(rodape.id, 0, 0) });
-    for (const opt of hallPiso.options.filter((o) => !o.isDefault)) {
-      expect(isOptionPending(rodapeSemCusto, hallPiso, opt)).toBe(false);
-    }
-  });
-
-  it("não vaza para outros componentes nem outros ambientes", () => {
-    // A Sala não tem itens de custo: um rodapé sem preço no Hall não pode
-    // marcar as opções dela como pendentes.
-    const salaOpt = optByCodigo(salaPisoT1, "PP-6060-BI");
-    expect(isOptionPending(semRodape, salaPisoT1, salaOpt)).toBe(false);
-    expect(pendingCostItems(semRodape, salaPisoT1, salaOpt.id)).toEqual([]);
-  });
-});
-
 describe("ambTotal", () => {
   it("soma só os upgrades não pendentes do ambiente (Sala t1)", () => {
     // Sala t1: Piso (piso-002 ok; piso-003/004 e kit pendentes) + Rodapé (rod-002 ok)
@@ -178,25 +160,6 @@ describe("ambTotal", () => {
     const semPendentes = ambTotal(deps(), amb);
     const preenchido = ambTotal(deps({ custosBase: comCusto(piso004.id, 310, 50) }), amb);
     expect(preenchido).toBeGreaterThan(semPendentes);
-  });
-});
-
-describe("ambienteRegistros", () => {
-  function findHall() {
-    for (const tip of seed.tipologias) {
-      const a = tip.ambientes.find((x) => x.nome === "Hall");
-      if (a) return a;
-    }
-    throw new Error("ambiente Hall não encontrado");
-  }
-
-  it("resolve a linha-registro do ambiente (Parede — Pintura látex)", () => {
-    const regs = ambienteRegistros(deps(), findHall());
-    expect(regs).toHaveLength(1);
-    expect(regs[0]!.registro.nome).toBe("Parede — Pintura látex");
-    expect(regs[0]!.valUn).toBe(60); // valor unitário digitado
-    expect(regs[0]!.line).toBeCloseTo(60 * 24, 6);
-    expect(regs[0]!.pending).toBe(false);
   });
 });
 

@@ -13,10 +13,7 @@ import type {
   BudgetVersion,
   Comment,
   Componente,
-  CostComponent,
-  CostComponentKind,
-  CostComponentSide,
-  CostRegistro,
+  CompositionLine,
   CustosBase,
   Kit,
   KitItem,
@@ -39,7 +36,26 @@ export type SeedMaterial = Material & {
   /** Custo base a semear no empreendimento âncora. 0 = pendente. */
   custoMat: number;
   custoMO: number;
+  /** Quantitativo do próprio material na composição (BaseMaterial.CostQuantity). Ausente = 1. */
+  custoQtd?: number;
 };
+
+/** Item de custo (insumo) do catálogo da org, com o preço no empreendimento âncora. */
+export interface SeedCostItem {
+  id: number;
+  codigo: string | null;
+  nome: string;
+  unidade: Unidade;
+  /** Preço no empreendimento âncora; null = pendente (demonstra "insumo sem preço"). */
+  preco: number | null;
+}
+
+/** Linha de composição: insumo × quantitativo por unidade do material (catálogo). */
+export interface SeedComposicao {
+  materialId: number;
+  itemId: number;
+  qtd: number;
+}
 
 export interface SeedData {
   materiais: SeedMaterial[];
@@ -54,7 +70,11 @@ export interface SeedData {
   comments: Record<string, Comment[]>;
   /** String(baseMaterialId) → custos/comentário do terceiro. */
   portalFills: Record<string, PortalFill>;
-  /** Custo base do empreendimento âncora (baseId → mat/MO), derivado de materiais. */
+  /** Insumos da org (planilha da construtora: argamassa, rejunte, assentamento, frete…). */
+  costItems: SeedCostItem[];
+  /** Composições dos porcelanatos do Hall — a receita de assentar 120×120. */
+  composicoes: SeedComposicao[];
+  /** Custo base do empreendimento âncora (baseId → mat/MO/composição), derivado de materiais. */
   custosBase: CustosBase;
 }
 
@@ -116,8 +136,8 @@ export function createSeed(): SeedData {
     mat("piso-bcn", "PB-9090-AC", "Porcelanato Barcelona Acetinado 90×90", "Portinari", "Piso", "m²", 180.0, 28.0),
     mat("sol-bcn", "SL-GR-BCN", "Soleira Granito Barcelona Polida", "Minaspedras", "Piso", "und", 95.0, 20.0),
     mat("rt-bcn", "RT-9090-AC", "Reserva Técnica Porcelanato Barcelona", "Portinari", "Piso", "m²", 0, 0), // pendente
-    // Hall — valores verbatim da planilha do cliente (Maison Diogo, 166m²).
-    // Servem de fixture para os componentes de custo: ver o teste do Hall.
+    // Hall — valores verbatim da planilha do cliente (Maison Diogo, 166m²):
+    // fixture da decisão "crédito sem RT" (padrão 59x59 × upgrade 120x120).
     mat("hall-piso-pad", "MC-5959-EL", "Porcelanato Munari Cimento AC 59x59", "Eliane", "Piso", "m²", 157.83, 0),
     mat("hall-rod-pad", "MC-RS-EL", "Porcelanato Munari Cimento AC RS 9,5x59", "Eliane", "Rodapé", "ml", 56.6, 0),
     mat("hall-ped-pad", "GB-SIE-SOL", "Soleira Granito Branco Siena Polido", "Minaspedras", "Pedra", "und", 94.05, 0),
@@ -126,6 +146,42 @@ export function createSeed(): SeedData {
     mat("hall-piso-brc", "BR-MAN-120", "Porcelanato Breccia Mandorla da Milano ST 120x120 NAT", "Portobello", "Piso", "m²", 362.868, 0),
     mat("hall-rod-pol", "RDP-466-SL", "Rodapé de poliestireno 466 branco 30mm", "Santa Luzia", "Rodapé", "ml", 75.324, 0),
   ];
+  // Porcelanato 120×120 do Hall: 20 % de quebra, como na planilha da construtora.
+  for (const k of ["hall-piso-bcn", "hall-piso-avo", "hall-piso-brc"]) M[k]!.custoQtd = 1.2;
+
+  // ── Itens de custo (insumos) — valores verbatim da planilha "Comp PER" ──
+  const CI: Record<string, SeedCostItem> = {};
+  function ci(key: string, codigo: string | null, nome: string, unidade: Unidade, preco: number | null): SeedCostItem {
+    const it: SeedCostItem = { id: nid(), codigo, nome, unidade, preco };
+    CI[key] = it;
+    return it;
+  }
+  const costItems: SeedCostItem[] = [
+    ci("argamassa", "6495", "Argamassa colante ACIII cinza", "kg", 1.63875),
+    ci("rejunte", "5707", "Rejunte flexível", "kg", 10.04625),
+    ci("espacador", "5061", "Espaçador plástico 2mm para assentamento", "und", 0.627),
+    ci("nivelador", "5544", "Nivelador de piso", "und", 0.09975),
+    ci("frete", null, "Frete porcelanato", "m²", 7.7037),
+    ci("assent-90", "364", "Assentamento de piso em porcelanato 90x90cm", "m²", 106.875),
+    ci("assent-120", null, "Assentamento de piso em porcelanato 120x120", "m²", 150),
+    ci("manta", "5720", "Manta de proteção de pisos tipo papel kraft laminado c/ plástico bolha", "m²", null), // pendente
+  ];
+
+  // ── Composições: a receita do porcelanato 120×120 nos três upgrades do Hall ──
+  const RECEITA_120: [string, number][] = [
+    ["argamassa", 8],
+    ["rejunte", 0.07],
+    ["espacador", 8],
+    ["nivelador", 8],
+    ["frete", 1],
+    ["assent-120", 1],
+  ];
+  const composicoes: SeedComposicao[] = [];
+  for (const mk of ["hall-piso-bcn", "hall-piso-avo", "hall-piso-brc"]) {
+    for (const [ik, qtd] of RECEITA_120) composicoes.push({ materialId: M[mk]!.id, itemId: CI[ik]!.id, qtd });
+  }
+  // Um insumo SEM preço num único upgrade: exercita "insumo sem preço" na aba.
+  composicoes.push({ materialId: M["hall-piso-brc"]!.id, itemId: CI.manta!.id, qtd: 1.05 });
 
   // ── Catálogo: kits (key → Kit) ──
   const K: Record<string, Kit> = {};
@@ -164,26 +220,13 @@ export function createSeed(): SeedData {
     options: MaterialOption[];
     ghost: boolean;
     ordem: number;
-    custoComponentes: CostComponent[];
-  }
-  /** Descrição de um componente de custo no seed (baseKey resolve p/ baseId). */
-  interface CostTpl {
-    nome: string;
-    tipo: CostComponentKind;
-    /** Chave de catálogo — só para tipo "fixo". */
-    baseKey: string | null;
-    unidade: Unidade;
-    lado: CostComponentSide;
-    /** Quantitativo — compartilhado entre plantas. */
-    qtd: number;
   }
   function comp(
     nome: string,
     unidade: Unidade,
     padraoKey: string | null,
     upgradeKeys: string[],
-    ordem: number,
-    costItems: CostTpl[] = []
+    ordem: number
   ): CompTpl {
     const rcId = nid();
     const optionKeys = padraoKey ? [padraoKey, ...upgradeKeys] : upgradeKeys;
@@ -202,48 +245,16 @@ export function createSeed(): SeedData {
       };
     });
     const padrao = options.find((o) => o.isDefault)?.id ?? null;
-    const custoComponentes: CostComponent[] = costItems.map((c, i) => ({
-      id: nid(),
-      nome: c.nome,
-      tipo: c.tipo,
-      baseId: c.baseKey ? ref(c.baseKey).baseId : null,
-      materialOptionId: null,
-      unidade: c.unidade,
-      lado: c.lado,
-      qtd: c.qtd,
-      ordem: i,
-    }));
-    return { id: rcId, nome, unidade, padrao, options, ghost: false, ordem, custoComponentes };
-  }
-
-  /** Descrição de uma linha-registro do ambiente (valor unitário digitado). */
-  interface RegistroTpl {
-    nome: string;
-    valorUnitario: number;
-    unidade: Unidade;
-    qtd: number;
+    return { id: rcId, nome, unidade, padrao, options, ghost: false, ordem };
   }
 
   interface RoomTpl {
     id: number;
     nome: string;
     components: CompTpl[];
-    registros: CostRegistro[];
   }
-  function room(nome: string, components: CompTpl[], registros: RegistroTpl[] = []): RoomTpl {
-    return {
-      id: nid(),
-      nome,
-      components,
-      registros: registros.map((r, i) => ({
-        id: nid(),
-        nome: r.nome,
-        valorUnitario: r.valorUnitario,
-        unidade: r.unidade,
-        qtd: r.qtd,
-        ordem: i,
-      })),
-    };
+  function room(nome: string, components: CompTpl[]): RoomTpl {
+    return { id: nid(), nome, components };
   }
 
   /** Quantitativos de kit desta planta (keyed por KitItem id), alinhado à ordem do kit. */
@@ -275,9 +286,8 @@ export function createSeed(): SeedData {
       ghost: ct.ghost,
       ordem: ct.ordem,
       kitQtds: perComp[i]!.kitQtds ?? {},
-      custoComponentes: ct.custoComponentes,
     }));
-    return { id: tpl.id, blueprintRoomId: nid(), nome: tpl.nome, componentes, registros: tpl.registros };
+    return { id: tpl.id, blueprintRoomId: nid(), nome: tpl.nome, componentes };
   }
 
   // ── Sala/Living COMPARTILHADA (1 Room, 3 plantas) ──
@@ -298,35 +308,15 @@ export function createSeed(): SeedData {
     { qtd: 28.4, rt: 5 },
   ]);
 
-  // ── Hall — fixture dos COMPONENTES DE CUSTO (planilha do cliente) ──
+  // ── Hall — fixture da planilha do cliente ──
   //
-  // Um único componente PISO ofertado ao cliente; no custo ele carrega:
-  //   · SOLEIRA  (espelho) → acompanha o porcelanato escolhido, 1 und
-  //   · RODAPÉ   (fixo)    → poliestireno, 7,5 mL, igual em toda opção ($G$57)
-  //   · no lado PADRÃO, o rodapé Munari RS e 2 soleiras de granito, que somam
-  //     ao crédito do grupo (H41 = SUM(G41:G44) = 826,2175)
-  //
-  // qtd 2,25 m² com RT 50%: o padrão é Munari 59x59 (pouca perda) e o upgrade
-  // é 120x120 (3,375 m²) — é daí que sai a decisão "crédito sem RT".
-  const hallPiso = comp(
-    "Piso",
-    "m²",
-    "hall-piso-pad",
-    ["hall-piso-bcn", "hall-piso-avo", "hall-piso-brc"],
-    0,
-    [
-      { nome: "Soleira", tipo: "espelho", baseKey: null, unidade: "und", lado: "upgrade", qtd: 1 },
-      { nome: "Rodapé", tipo: "fixo", baseKey: "hall-rod-pol", unidade: "ml", lado: "upgrade", qtd: 7.5 },
-      { nome: "Rodapé Munari RS", tipo: "fixo", baseKey: "hall-rod-pad", unidade: "ml", lado: "padrao", qtd: 5 },
-      { nome: "Soleiras Granito", tipo: "fixo", baseKey: "hall-ped-pad", unidade: "und", lado: "padrao", qtd: 2 },
-    ]
-  );
-  // Linha-registro do ambiente: a incorporadora só quer registrar o custo da
-  // pintura da parede, sem ofertar ao cliente. Nome em texto livre, sem vínculo
-  // a componente — só consta como custo, não gera crédito.
-  const hall = room("Hall", [hallPiso], [
-    { nome: "Parede — Pintura látex", valorUnitario: 60, unidade: "m²", qtd: 24 },
-  ]);
+  // Um único componente PISO ofertado ao cliente, qtd 2,25 m² com RT 50%: o
+  // padrão é Munari 59x59 (pouca perda) e o upgrade é 120x120 (3,375 m²) — é
+  // daí que sai a decisão "crédito sem RT". Soleira, rodapé e reserva técnica
+  // da planilha entram hoje pela COMPOSIÇÃO do custo base de cada material
+  // (aba "Itens de custo"), não como linhas do componente.
+  const hallPiso = comp("Piso", "m²", "hall-piso-pad", ["hall-piso-bcn", "hall-piso-avo", "hall-piso-brc"], 0);
+  const hall = room("Hall", [hallPiso]);
   const hallT1 = inst(hall, [{ qtd: 2.25, rt: 50 }]);
 
   // ── Tipologia 1 — Planta A (86m²) ──
@@ -503,12 +493,30 @@ export function createSeed(): SeedData {
   // Custo base do empreendimento âncora, derivado do catálogo do seed: no
   // modelo novo o custo não mora no material, mas o demo precisa começar com os
   // mesmos valores do protótipo (0 = pendente, aguardando a construtora).
+  const costItemById = new Map(costItems.map((it) => [it.id, it]));
   const custosBase: CustosBase = {};
   for (const m of materiais) {
+    const composicao: CompositionLine[] = composicoes
+      .filter((c) => c.materialId === m.id)
+      .map((c, i) => {
+        const it = costItemById.get(c.itemId)!;
+        return {
+          id: nid(),
+          itemId: it.id,
+          codigo: it.codigo,
+          nome: it.nome,
+          unidade: it.unidade,
+          qtd: c.qtd,
+          preco: it.preco,
+          ordem: i,
+        };
+      });
     custosBase[m.id] = {
       baseId: m.id,
       custoMat: m.custoMat > 0 ? m.custoMat : null,
       custoMO: m.custoMO,
+      custoQtd: m.custoQtd ?? 1,
+      composicao,
     };
   }
 
@@ -522,6 +530,8 @@ export function createSeed(): SeedData {
     projects,
     comments,
     portalFills: {},
+    costItems,
+    composicoes,
     custosBase,
   };
 }

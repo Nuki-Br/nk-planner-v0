@@ -17,8 +17,6 @@ import type {
 
 /** "" = todos. */
 type StatusFilter = "" | "pendente" | "preenchido";
-/** "" = todos; "opcao" = ofertável; "item" = só sub-item de kit / item de custo. */
-type TipoFilter = "" | "opcao" | "item";
 
 const EMPTY_FILL: PortalFill = { mat: "", mo: "", comment: "" };
 
@@ -104,7 +102,6 @@ export function PortalCostList({
   const debouncedSearch = useDebounce(search, 250);
   const [catFilters, setCatFilters] = React.useState<string[]>([]);
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>("");
-  const [tipoFilter, setTipoFilter] = React.useState<TipoFilter>("");
   const [grouped, setGrouped] = React.useState(true);
   const [collapsed, setCollapsed] = React.useState<Set<string>>(new Set());
 
@@ -120,7 +117,6 @@ export function PortalCostList({
     setSearch("");
     setCatFilters([]);
     setStatusFilter("");
-    setTipoFilter("");
   };
 
   const fillOf = React.useCallback(
@@ -163,11 +159,9 @@ export function PortalCostList({
         const filled = isFilled(r);
         if (statusFilter === "pendente" && filled) return false;
         if (statusFilter === "preenchido" && !filled) return false;
-        if (tipoFilter === "item" && !r.somenteIndireto) return false;
-        if (tipoFilter === "opcao" && r.somenteIndireto) return false;
         return true;
       }),
-    [rows, q, catFilters, statusFilter, tipoFilter, isFilled]
+    [rows, q, catFilters, statusFilter, isFilled]
   );
 
   const groups = React.useMemo(() => {
@@ -192,8 +186,7 @@ export function PortalCostList({
 
   const pendentesFiltrados = filtered.filter((r) => !isFilled(r)).length;
   const totalInformado = subtotalOf(filtered);
-  const hasFilters =
-    search !== "" || catFilters.length > 0 || statusFilter !== "" || tipoFilter !== "";
+  const hasFilters = search !== "" || catFilters.length > 0 || statusFilter !== "";
 
   // Colunas dependem do escopo do link (campos).
   const colSpan =
@@ -253,7 +246,7 @@ export function PortalCostList({
             )}
             {row.somenteIndireto && (
               <span className="rounded bg-neutral-gray-3 px-1 py-px text-[9px] font-bold uppercase tracking-wide text-neutral-gray-7">
-                Item de custo
+                Sub-item de kit
               </span>
             )}
             {row.usadoEm.length > 0 && (
@@ -358,17 +351,6 @@ export function PortalCostList({
             value={statusFilter}
             onChange={(v) => setStatusFilter(v as StatusFilter)}
           />
-          <FilterMenu
-            label="Tipo"
-            icon="tune"
-            options={[
-              { value: "", label: "Todos" },
-              { value: "opcao", label: "Opções de acabamento" },
-              { value: "item", label: "Itens de custo" },
-            ]}
-            value={tipoFilter}
-            onChange={(v) => setTipoFilter(v as TipoFilter)}
-          />
         </div>
         <label className="ml-auto flex cursor-pointer items-center gap-2 text-[12px] font-medium text-neutral-gray-8">
           <Switch size="sm" isSelected={grouped} onValueChange={setGrouped} />
@@ -391,12 +373,6 @@ export function PortalCostList({
             <ActiveChip
               label={statusFilter === "pendente" ? "Sem custo" : "Com custo"}
               onRemove={() => setStatusFilter("")}
-            />
-          )}
-          {tipoFilter !== "" && (
-            <ActiveChip
-              label={tipoFilter === "opcao" ? "Opções de acabamento" : "Itens de custo"}
-              onRemove={() => setTipoFilter("")}
             />
           )}
           <button
