@@ -6,14 +6,22 @@
 import { getKit } from "@/lib/data/entities";
 import type { Ambiente, Componente, Kit, KitItem, Tipologia } from "@/shared/types/domain";
 
-/** Geometria do plano (coordenadas do canvas). */
+/**
+ * Geometria do plano (coordenadas do canvas). As colunas de opção e de sub-item
+ * são largas e as linhas comportam o nome em DUAS linhas: nomes de catálogo
+ * como "166m² - Aduela Elevador Social - Mármore Travertino Resignado
+ * Levigado" não cabem numa linha só, e cortados não dá para saber qual é o
+ * material.
+ */
 export const CV = {
   x1: 48, w1: 150, // L1 ambiente
   x2: 278, w2: 176, // L2 componente
-  x3: 552, w3: 252, // L3 opção
-  x4: 872, w4: 200, // L4 sub-item
+  x3: 552, w3: 320, // L3 opção
+  x4: 940, w4: 320, // L4 sub-item
   rowH3: 66, gap3: 16,
-  rowH4: 34, gap4: 10,
+  /** Linha de opção na visão "Detalhado" (fabricante + preço sob o nome). */
+  rowH3Detailed: 86,
+  rowH4: 42, gap4: 10,
   compGap: 26, ambGap: 48,
   pad: 56,
 } as const;
@@ -105,8 +113,11 @@ function orderedOptions(comp: Componente): { optId: number; baseId: number; isKi
 export function buildLayout(
   tip: Tipologia,
   expanded: ReadonlySet<string>,
-  kits: Kit[]
+  kits: Kit[],
+  /** Visão "Detalhado": o nó de opção é mais alto, a linha acompanha. */
+  detailed = false
 ): CanvasLayout {
+  const rowH3 = detailed ? CV.rowH3Detailed : CV.rowH3;
   let y: number = CV.pad;
   const ambNodes: AmbNode[] = [];
   const compNodes: CompNode[] = [];
@@ -122,18 +133,18 @@ export function buildLayout(
     const cCys: number[] = [];
 
     if (amb.componentes.length === 0) {
-      const cy = y + CV.rowH3 / 2;
+      const cy = y + rowH3 / 2;
       placeholders.push({ ambId: amb.blueprintRoomId, cy });
       cCys.push(cy);
-      y += CV.rowH3 + CV.gap3;
+      y += rowH3 + CV.gap3;
     } else {
       amb.componentes.forEach((comp, ci) => {
         if (ci > 0) y += CV.compGap;
         const options = orderedOptions(comp);
 
         if (options.length === 0) {
-          const cy = y + CV.rowH3 / 2;
-          y += CV.rowH3 + CV.gap3;
+          const cy = y + rowH3 / 2;
+          y += rowH3 + CV.gap3;
           compNodes.push({ comp, ambId: amb.blueprintRoomId, cy, empty: true });
           compCy[comp.id] = cy;
           cCys.push(cy);
@@ -159,11 +170,11 @@ export function buildLayout(
             oCys.push(ocy);
             y += CV.gap3;
           } else {
-            const ocy = y + CV.rowH3 / 2;
+            const ocy = y + rowH3 / 2;
             optNodes.push({ ...opt, key, comp, ambId: amb.blueprintRoomId, kit, isOpen: false, cy: ocy });
             optCy[key] = ocy;
             oCys.push(ocy);
-            y += CV.rowH3 + CV.gap3;
+            y += rowH3 + CV.gap3;
           }
         });
         y -= CV.gap3;

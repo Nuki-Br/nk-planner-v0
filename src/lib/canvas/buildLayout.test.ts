@@ -71,7 +71,17 @@ describe("buildLayout — contagens e posições (seed t1)", () => {
   it("altura e largura do plano", () => {
     expect(layout.height).toBeGreaterThan(0);
     expect(layout.addAmbY).toBe(layout.height - CV.pad - 60 + 20);
-    expect(PLANE_W).toBe(CV.x4 + CV.w4 + CV.pad); // 1128
+    expect(PLANE_W).toBe(CV.x4 + CV.w4 + CV.pad); // 1316
+  });
+});
+
+describe("buildLayout — visão detalhada", () => {
+  it("usa a linha de opção mais alta e cresce o plano na mesma proporção", () => {
+    const compacto = buildLayout(t1, none, seed.kits);
+    const detalhado = buildLayout(t1, none, seed.kits, true);
+    expect(detalhado.optNodes[0]?.cy).toBe(CV.pad + CV.rowH3Detailed / 2);
+    const { opts } = walk(t1);
+    expect(detalhado.height - compacto.height).toBe(opts * (CV.rowH3Detailed - CV.rowH3));
   });
 });
 
@@ -100,9 +110,9 @@ describe("buildLayout — expansão de kit", () => {
     const subs = expanded.subNodes.map((s) => s.cy);
     expect(optE.cy).toBe(((subs[0] ?? 0) + (subs[subs.length - 1] ?? 0)) / 2);
 
-    // bloco do kit: n*(rowH4+gap4) - gap4 vs rowH3 → +100 para n=4
+    // bloco do kit: n*(rowH4+gap4) - gap4 vs rowH3 → +132 para n=4
     const delta = n * (CV.rowH4 + CV.gap4) - CV.gap4 - CV.rowH3;
-    expect(delta).toBe(100);
+    expect(delta).toBe(132);
     expect(expanded.height - collapsed.height).toBe(delta);
 
     // arestas tracejadas opção→sub-item

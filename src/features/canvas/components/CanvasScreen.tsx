@@ -149,8 +149,8 @@ export function CanvasScreen({ tipologiaId }: { tipologiaId: string }) {
   const view = useCanvasView((id, nx, ny) => changeNote(id, { x: nx, y: ny }));
 
   const layout = React.useMemo(
-    () => (tip ? buildLayout(tip, expanded, kits) : null),
-    [tip, expanded, kits]
+    () => (tip ? buildLayout(tip, expanded, kits, detailed) : null),
+    [tip, expanded, kits, detailed]
   );
 
   // fitView na montagem e na troca de tipologia (comportamento do protótipo).

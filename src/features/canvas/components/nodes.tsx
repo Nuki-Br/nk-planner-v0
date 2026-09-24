@@ -168,7 +168,9 @@ export function ComponenteNode({
                   style={{ background: padEnt ? "#025259" : "#f5f5f5" }}
                 />
               )}
-              <span className="truncate">{padEnt ? padEnt.nome : "sem material padrão"}</span>
+              <span className="truncate" title={padEnt?.nome}>
+                {padEnt ? padEnt.nome : "sem material padrão"}
+              </span>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="rounded-full bg-neutral-gray-2 px-[7px] py-px text-[10px] font-semibold text-neutral-gray-9">
@@ -281,12 +283,15 @@ export function OptionNode({
   const mat = isKit ? null : getMaterial(materiais, baseId);
   const kitCount = isKit && kit ? kit.itens.length : 0;
   const price = mat ? custoBaseOf(custosBase, mat.id) : 0;
+  const nome = isKit ? (kit?.nome ?? "—") : (mat?.nome ?? "—");
 
   return (
     <div
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
-      style={{ left: CV.x3, top: node.cy - 31, width: CV.w3, transition: NODE_TRANSITION, zIndex: hov ? 45 : 7 }}
+      // Centrado no cy (não ancorado no topo): o nome pode ocupar duas linhas
+      // e a aresta tem que continuar chegando no meio do card.
+      style={{ left: CV.x3, top: node.cy, transform: "translateY(-50%)", width: CV.w3, transition: NODE_TRANSITION, zIndex: hov ? 45 : 7 }}
       className="absolute"
     >
       <div
@@ -336,8 +341,11 @@ export function OptionNode({
               </span>
             )}
           </div>
-          <span className="block truncate text-xs font-semibold leading-tight text-neutral-gray-11">
-            {isKit ? (kit?.nome ?? "—") : (mat?.nome ?? "—")}
+          <span
+            title={nome}
+            className="line-clamp-2 break-words text-xs font-semibold leading-tight text-neutral-gray-11"
+          >
+            {nome}
           </span>
           {detailed && (
             <div className="mt-[3px] flex flex-wrap items-center gap-1.5">
@@ -397,23 +405,24 @@ export function SubItemNode({
   // Quantidade desta planta (gravada ou herdada do componente); a edição é no
   // Construtor de Preço. Sem quantidade o kit fica fora do orçamento — o nó avisa.
   const { qtd, herdada } = kitItemQtd(node.comp, item);
+  const nome = m?.nome ?? item.nome;
   return (
     <div
-      style={{ left: CV.x4, top: cy - 16, width: CV.w4, height: 32, transition: NODE_TRANSITION }}
+      style={{ left: CV.x4, top: cy, transform: "translateY(-50%)", width: CV.w4, minHeight: 32, transition: NODE_TRANSITION }}
       title={
         qtd === null
-          ? "Sem quantidade nesta tipologia — informe no Construtor de Preço"
+          ? `${nome} — sem quantidade nesta tipologia; informe no Construtor de Preço`
           : herdada
-            ? "Quantidade herdada do componente"
-            : undefined
+            ? `${nome} — quantidade herdada do componente`
+            : nome
       }
       className={cn(
-        "absolute z-[4] flex items-center gap-1.5 rounded-md bg-neutral-gray-2 px-2.5",
+        "absolute z-[4] flex items-center gap-1.5 rounded-md bg-neutral-gray-2 px-2.5 py-1",
         pending ? "border-[1.5px] border-functional-error" : "border border-neutral-gray-4"
       )}
     >
-      <span className="flex-1 truncate text-[11.5px] font-medium text-neutral-gray-9">
-        {m?.nome ?? item.nome}
+      <span className="line-clamp-2 flex-1 break-words text-[11.5px] font-medium leading-tight text-neutral-gray-9">
+        {nome}
       </span>
       <span
         className={cn(
