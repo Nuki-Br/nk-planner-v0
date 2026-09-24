@@ -19,6 +19,7 @@ import type {
   Kit,
   Material,
   MaterialPricing,
+  MetragemInput,
   PricingDiff,
   Project,
   Tipologia,
@@ -449,6 +450,15 @@ export async function updateComponente(
     `/api/tipologias/${tipologiaId}/ambientes/${ambienteId}/componentes/${componenteId}`,
     "PATCH",
     patch
+  );
+}
+
+/** "Editar metragens": qtd/RT de vários componentes da tipologia num request só. */
+export async function updateMetragens(tipologiaId: number, itens: MetragemInput[]): Promise<void> {
+  await httpSend<null, { itens: MetragemInput[] }>(
+    `/api/tipologias/${tipologiaId}/metragens`,
+    "PATCH",
+    { itens }
   );
 }
 

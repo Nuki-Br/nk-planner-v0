@@ -49,10 +49,12 @@ import type { Ambiente, Componente, Material, Tipologia } from "@/shared/types/d
 
 import { guessAmbIcon } from "../ambIcons";
 import { AmbienteAccordion, type SharedBadgeInfo } from "./AmbienteAccordion";
+import { EditTipSplitButton } from "./EditTipSplitButton";
 import { AddAmbienteChooser } from "./modals/AddAmbienteChooser";
 import { AddComponenteModal } from "./modals/AddComponenteModal";
 import { AmbienteModal, type AmbienteFormValue } from "./modals/AmbienteModal";
 import { EditComponentModal, type ComponentEditValue } from "./modals/EditComponentModal";
+import { EditMetragensModal } from "./modals/EditMetragensModal";
 import { EditTypologyModal } from "./modals/EditTypologyModal";
 import { LinkAmbienteModal } from "./modals/LinkAmbienteModal";
 import { NewTipologiaModal } from "./modals/NewTipologiaModal";
@@ -100,6 +102,7 @@ export function TypologiesScreen() {
   // Modais
   const [showAddTip, setShowAddTip] = React.useState(false);
   const [showEditTip, setShowEditTip] = React.useState(false);
+  const [showMetragens, setShowMetragens] = React.useState(false);
   const [showUnitGroups, setShowUnitGroups] = React.useState(false);
   const [ambModal, setAmbModal] = React.useState<{ mode: "add" | "edit"; amb: Ambiente | null } | null>(null);
   const [deleteAmb, setDeleteAmb] = React.useState<Ambiente | null>(null);
@@ -366,9 +369,10 @@ export function TypologiesScreen() {
               >
                 Duplicar
               </Button>
-              <Button variant="ghost" size="sm" icon="edit" onPress={() => setShowEditTip(true)}>
-                Editar
-              </Button>
+              <EditTipSplitButton
+                onEdit={() => setShowEditTip(true)}
+                onEditMetragens={() => setShowMetragens(true)}
+              />
             </div>
           </div>
 
@@ -473,6 +477,11 @@ export function TypologiesScreen() {
         tip={tip}
         unitGroups={unitGroups.map((g) => g.nome)}
       />
+
+      {/* Montada só aberta: o rascunho nasce da árvore no momento de abrir. */}
+      {showMetragens && (
+        <EditMetragensModal key={tip.id} tip={tip} onClose={() => setShowMetragens(false)} />
+      )}
 
       <AddAmbienteChooser
         open={addChooser}

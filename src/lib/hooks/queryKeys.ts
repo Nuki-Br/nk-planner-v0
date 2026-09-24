@@ -44,6 +44,8 @@ export const queryKeys = {
   pricing: (projectId: number) => ["pricing", projectId] as const,
   /** Diff rascunho × publicado — badge de status e modal de publicar. */
   pricingDiff: (projectId: number) => ["pricing-diff", projectId] as const,
+  /** Raiz do diff — para quem muda preço sem saber o empreendimento (metragens). */
+  pricingDiffRoot: ["pricing-diff"] as const,
   sharedAmbientes: (projectId: number) => ["shared-ambientes", projectId] as const,
   sharedAmbientesRoot: ["shared-ambientes"] as const,
   versions: (projectId: number) => ["versions", projectId] as const,

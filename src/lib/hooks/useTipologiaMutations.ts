@@ -23,12 +23,13 @@ import {
   setPadrao,
   updateAmbiente,
   updateComponente,
+  updateMetragens,
   updateTipologia,
   type AmbienteInput,
   type ComponenteInput,
   type TipologiaInput,
 } from "@/lib/data/store";
-import type { Tipologia } from "@/shared/types/domain";
+import type { MetragemInput, Tipologia } from "@/shared/types/domain";
 
 import { queryKeys } from "./queryKeys";
 
@@ -165,6 +166,18 @@ export function useCreateComponente() {
 export function useUpdateComponente() {
   return useTreeMutation(({ tipologiaId, ambienteId, componenteId, patch }: CompPath & { patch: Partial<ComponenteInput> }) =>
     updateComponente(tipologiaId, ambienteId, componenteId, patch)
+  );
+}
+
+/**
+ * "Editar metragens" (qtd/RT em lote). A quantidade move o preço, então o diff
+ * rascunho × publicado também é recarregado.
+ */
+export function useUpdateMetragens() {
+  return useTreeMutation(
+    ({ tipologiaId, itens }: { tipologiaId: number; itens: MetragemInput[] }) =>
+      updateMetragens(tipologiaId, itens),
+    [queryKeys.pricingDiffRoot]
   );
 }
 

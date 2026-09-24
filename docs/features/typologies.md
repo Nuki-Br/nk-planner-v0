@@ -91,6 +91,12 @@ tipologia — ver `docs/features/pricing.md` §2.
   persistidos**.
 - **Editar** — só `nome` e `descricao` persistem. Quartos/suítes são **derivados por regex** dos
   nomes dos ambientes, só para exibição.
+- **Editar metragens** (menu ▾ do "Editar") — `qtd`/`rt` de **todos** os componentes da tipologia
+  numa tabela por ambiente, gravados num request só (`PATCH /api/tipologias/[id]/metragens`, um
+  `INSERT … ON CONFLICT` em `BlueprintRoomComponent`). Por planta, como no "Editar" do
+  componente: ambiente compartilhado não muda nas outras tipologias. Unidade não entra (é da
+  paleta, compartilhada). Enter/↓ desce de linha; colar do Excel preenche a coluna (Qtd, ou Qtd e
+  RT) a partir da célula focada.
 - **Duplicar** — **cópia profunda e totalmente independente** (`"{nome} (cópia)"`): clona todos os
   ambientes em **novos** rooms/componentes/opções. **Ambientes
   compartilhados na origem viram independentes na cópia** (o compartilhamento não é preservado).

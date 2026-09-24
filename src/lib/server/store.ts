@@ -52,6 +52,7 @@ import type {
   Material,
   MaterialOption,
   MaterialPricing,
+  MetragemInput,
   PortalFill,
   Project,
   PublishedPricing,
@@ -1869,6 +1870,61 @@ export async function updateComponente(
     });
   }
   return reloadComponente(organizationId, blueprintRoomId, componenteId);
+}
+
+/**
+ * "Editar metragens": quantidade e RT de N componentes de UMA tipologia numa
+ * gravação só. A árvore é validada numa leitura (ambientes desta planta com os
+ * componentes de cada sala) e a escrita é um INSERT … ON CONFLICT — o pooler
+ * remoto custa ~1 s por ida ao banco, N PATCHes seriam N segundos. É por
+ * planta (BlueprintRoomComponent): ambiente compartilhado não muda na outra
+ * tipologia. Linha ausente é criada (componente que ainda não tinha BRC aqui).
+ */
+export async function updateMetragens(
+  organizationId: string,
+  tipologiaId: number,
+  itens: MetragemInput[]
+): Promise<void> {
+  if (!Array.isArray(itens)) throw new Error("Lista de metragens inválida.");
+  if (itens.length === 0) return;
+  for (const it of itens) {
+    if (!Number.isInteger(it.ambienteId) || !Number.isInteger(it.componenteId)) {
+      throw new Error("Componente não encontrado.");
+    }
+    if (typeof it.qtd !== "number" || !Number.isFinite(it.qtd) || it.qtd < 0) {
+      throw new Error("Quantidade inválida — use um número maior ou igual a zero.");
+    }
+    if (typeof it.rt !== "number" || !Number.isFinite(it.rt) || it.rt < 0) {
+      throw new Error("RT inválida — use um percentual maior ou igual a zero.");
+    }
+  }
+
+  const brs = await prisma.blueprintRoom.findMany({
+    where: { BlueprintId: tipologiaId, Blueprint: { Enterprise: { OrganizationId: organizationId } } },
+    select: { Id: true, Room: { select: { RoomComponents: { select: { Id: true } } } } },
+  });
+  const compsByBr = new Map(brs.map((br) => [br.Id, new Set(br.Room.RoomComponents.map((c) => c.Id))]));
+
+  // Par repetido: o último vence (o Postgres recusa afetar a mesma linha duas
+  // vezes no mesmo INSERT … ON CONFLICT).
+  const byPair = new Map<string, MetragemInput>();
+  for (const it of itens) {
+    if (!compsByBr.get(it.ambienteId)?.has(it.componenteId)) {
+      throw new Error("Componente não encontrado nesta tipologia.");
+    }
+    byPair.set(`${it.ambienteId}:${it.componenteId}`, it);
+  }
+
+  const values = [...byPair.values()].map(
+    (it) =>
+      Prisma.sql`(${it.ambienteId}, ${it.componenteId}, ${it.qtd}::double precision, ${it.rt}::double precision)`
+  );
+  await prisma.$executeRaw`
+    INSERT INTO "BlueprintRoomComponent" ("BlueprintRoomId", "RoomComponentId", "UsageQuantity", "TechnicalReservePct")
+    VALUES ${Prisma.join(values)}
+    ON CONFLICT ("BlueprintRoomId", "RoomComponentId")
+    DO UPDATE SET "UsageQuantity" = EXCLUDED."UsageQuantity",
+                  "TechnicalReservePct" = EXCLUDED."TechnicalReservePct"`;
 }
 
 async function assertComponentInRoom(roomComponentId: number, roomId: number): Promise<void> {

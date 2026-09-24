@@ -267,6 +267,22 @@ export interface Componente {
   kitQtds: Record<number, number>;
 }
 
+/**
+ * Metragem de um componente NESTA planta — a linha do "Editar metragens".
+ * Quantidade e RT são por planta (BlueprintRoomComponent): mudar aqui não mexe
+ * na mesma sala em outra tipologia.
+ */
+export interface MetragemInput {
+  /** BlueprintRoom id (o ambiente nesta planta). */
+  ambienteId: number;
+  /** RoomComponent id. */
+  componenteId: number;
+  /** Quantidade líquida (sem RT). */
+  qtd: number;
+  /** Reserva técnica (%). */
+  rt: number;
+}
+
 /** Posição de um ambiente na planta (rect/poly). */
 export type RoomShape =
   | { type: "rect"; x: number; y: number; w: number; h: number }
