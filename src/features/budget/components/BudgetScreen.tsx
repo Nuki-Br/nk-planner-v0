@@ -286,7 +286,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   const [deleteCol, setDeleteCol] = React.useState<BudgetColumn | null>(null);
   const [dragId, setDragId] = React.useState<number | null>(null);
   const [dragTarget, setDragTarget] = React.useState<number | null>(null);
-  const [collapsedRows, setCollapsedRows] = React.useState<Set<string>>(new Set());
+  const [expandedRows, setExpandedRows] = React.useState<Set<string>>(new Set());
   const [showDrawer, setShowDrawer] = React.useState(false);
   const [showLinkModal, setShowLinkModal] = React.useState(false);
   const [showPublishModal, setShowPublishModal] = React.useState(false);
@@ -486,11 +486,11 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
   const markSemCusto = (baseId: number) =>
     saveCustoBase.mutate({ baseId, custoMat: 0, custoMO: 0 });
 
-  // Guarda os COLAPSADOS (não os expandidos) para que o default seja expandido.
-  // Três namespaces de chave: rowKey(opção) para kit e material, `pad-<compId>`
-  // para a linha de padrão.
+  // Guarda os EXPANDIDOS: composição e sub-itens de kit começam fechados, para
+  // a tabela abrir enxuta (uma linha por opção). Chaves: rowKey(opção) para kit
+  // e material, `pad-<compId>` para a linha de padrão.
   const toggleRow = (key: string) =>
-    setCollapsedRows((prev) => {
+    setExpandedRows((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -929,7 +929,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                             cols={cols}
                             usaDC={usaDC}
                             tipologia={tip.nome}
-                            expanded={!collapsedRows.has(key)}
+                            expanded={expandedRows.has(key)}
                             onToggle={() => toggleRow(key)}
                             onSaveQtd={(v) => saveQtd(def.id, v)}
                             onSaveItemQtd={(itemId, q) =>
@@ -982,7 +982,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                       ).map((c) => ({ ...c, credito: true }));
                       const padChildren = padOverridden ? noteOverride(padComposicao) : padComposicao;
                       const padKey = `pad-${comp.id}`;
-                      const padExpanded = !collapsedRows.has(padKey);
+                      const padExpanded = expandedRows.has(padKey);
                       return (
                         <React.Fragment key={padKey}>
                           <tr className="group/row">
@@ -1256,7 +1256,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                               cols={cols}
                               usaDC={usaDC}
                               tipologia={tip.nome}
-                              expanded={!collapsedRows.has(rk)}
+                              expanded={expandedRows.has(rk)}
                               onToggle={() => toggleRow(rk)}
                               result={r}
                               configCells={cols.map((col, colIdx) =>
@@ -1320,7 +1320,7 @@ export function BudgetScreen({ pendingFill = "inline" }: { pendingFill?: Pending
                           unidadeOf(deps, comp, opt.id)
                         );
                         const matChildren = overridden ? noteOverride(composicao) : composicao;
-                        const matExpanded = !collapsedRows.has(rk);
+                        const matExpanded = expandedRows.has(rk);
 
                         return (
                           <React.Fragment key={rk}>
