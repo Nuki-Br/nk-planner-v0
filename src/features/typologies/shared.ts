@@ -17,3 +17,13 @@ export const PLANTA_CARACTERISTICAS = [
   "Suíte ampliada",
   "Lavabo opcional",
 ];
+
+/**
+ * Unidades de uma planta a partir dos grupos vinculados — números distintos
+ * por torre ("101" da Torre A e da Torre B são duas). Mesma regra do servidor
+ * (toTipologia); aqui roda sobre o cache dos grupos, então o contador acompanha
+ * o vincular/desvincular na hora, sem esperar o refetch da tipologia.
+ */
+export function contarUnidades(groups: readonly { torre: string; unidades: string[] }[]): number {
+  return new Set(groups.flatMap((g) => g.unidades.map((u) => `${g.torre}:${u.trim()}`))).size;
+}

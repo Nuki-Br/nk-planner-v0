@@ -28,10 +28,12 @@ import {
   type AmbienteInput,
   type ComponenteInput,
   type TipologiaInput,
+  type TipologiaPatch,
 } from "@/lib/data/store";
 import type { MetragemInput, Tipologia } from "@/shared/types/domain";
 
 import { queryKeys } from "./queryKeys";
+import { patchCachedUnitGroups } from "./useUnitGroups";
 
 // Toda mutação na árvore de tipologias invalida o prefixo ["tipologias"]
 // (cobre a lista e cada ["tipologias", id]); vínculos também invalidam o
@@ -54,19 +56,46 @@ function useTreeMutation<TArgs, TResult>(
 
 // ─── Tipologias ───────────────────────────────────────────────────────
 
+// Criar/editar/excluir tipologia pode mexer no vínculo dos grupos de unidades
+// (lista `unitGroupIds`; excluir solta os grupos) — os chips vêm de lá.
 export function useCreateTipologia(projectId: number) {
-  return useTreeMutation((input: TipologiaInput) => createTipologia(projectId, input));
-}
-
-export function useUpdateTipologia() {
   return useTreeMutation(
-    ({ id, patch }: { id: number; patch: Partial<TipologiaInput & Pick<Tipologia, "status">> }) =>
-      updateTipologia(id, patch)
+    (input: TipologiaInput) => createTipologia(projectId, input),
+    [queryKeys.unitGroupsRoot]
   );
 }
 
+/**
+ * O resultado já entra no cache (tipologia e vínculo dos grupos) antes do
+ * refetch: no banco remoto ele leva segundos, e a modal fecha na hora.
+ */
+export function useUpdateTipologia() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: number; patch: TipologiaPatch }) => updateTipologia(id, patch),
+    onSuccess: (tip, { id, patch }) => {
+      queryClient.setQueriesData<Tipologia[]>({ queryKey: queryKeys.tipologiasLists }, (prev) =>
+        prev?.map((t) => (t.id === id ? tip : t))
+      );
+      queryClient.setQueryData<Tipologia>(queryKeys.tipologia(id), (prev) => (prev ? tip : prev));
+      const ids = patch.unitGroupIds;
+      if (ids) {
+        patchCachedUnitGroups(queryClient, (g) =>
+          ids.includes(g.id)
+            ? { ...g, tipologiaId: id }
+            : g.tipologiaId === id
+              ? { ...g, tipologiaId: null }
+              : g
+        );
+      }
+      void queryClient.invalidateQueries({ queryKey: queryKeys.tipologiasRoot });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.unitGroupsRoot });
+    },
+  });
+}
+
 export function useDeleteTipologia() {
-  return useTreeMutation((id: number) => deleteTipologia(id));
+  return useTreeMutation((id: number) => deleteTipologia(id), [queryKeys.unitGroupsRoot]);
 }
 
 export function useDuplicateTipologia() {

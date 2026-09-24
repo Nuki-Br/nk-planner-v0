@@ -370,6 +370,8 @@ const BLUEPRINT_INCLUDE = {
       Components: { include: BRC_INCLUDE },
     },
   },
+  // Só para contar as unidades da planta (ver toTipologia).
+  UnitGroups: { select: { TowerId: true, UnitNumbers: true } },
 } satisfies Prisma.BlueprintInclude;
 type BlueprintRow = Prisma.BlueprintGetPayload<{ include: typeof BLUEPRINT_INCLUDE }>;
 type BlueprintRoomRow = BlueprintRow["BlueprintRooms"][number];
@@ -498,7 +500,11 @@ function toTipologia(bp: BlueprintRow): Tipologia {
     nome: bp.Name,
     metragem: bp.AreaSqM ?? 0,
     descricao: bp.Description,
-    unidades: bp.UnitCount,
+    // Unidades distintas dos grupos vinculados — "101" da Torre A e da Torre B
+    // são duas. O antigo UnitCount não tinha tela que o preenchesse.
+    unidades: new Set(
+      bp.UnitGroups.flatMap((g) => g.UnitNumbers.map((u) => `${g.TowerId ?? ""}:${u.trim()}`))
+    ).size,
     status: bp.Status,
     ambientes: [...bp.BlueprintRooms].sort((a, b) => a.Position - b.Position).map(toAmbiente),
   };
@@ -1443,7 +1449,40 @@ export async function deleteKit(organizationId: string, id: number): Promise<voi
 
 // ─── Tipologias (Blueprint) ─────────────────────────────────────────────
 
-export type TipologiaInput = Pick<Tipologia, "nome" | "metragem" | "descricao" | "unidades">;
+export type TipologiaInput = Pick<Tipologia, "nome" | "metragem" | "descricao"> & {
+  /** Grupos de unidades vinculados — a lista completa (substitui a atual). */
+  unitGroupIds?: number[];
+};
+export type TipologiaPatch = Partial<TipologiaInput & { status: TipologiaStatus }>;
+
+/**
+ * Vincula à tipologia EXATAMENTE os grupos da lista: os da lista passam a
+ * apontar para ela — um grupo que estava em outra planta MUDA de planta (as
+ * unidades de um grupo são de uma planta só) — e os que apontavam para ela e
+ * saíram da lista ficam sem tipologia.
+ */
+async function setTipologiaUnitGroups(
+  enterpriseId: number,
+  blueprintId: number,
+  ids: number[]
+): Promise<void> {
+  // Vem do JSON do request: o tipo não garante nada em runtime.
+  if (!Array.isArray(ids) || ids.some((id) => !Number.isInteger(id))) {
+    throw new Error("Lista de grupos de unidades inválida.");
+  }
+  const unique = [...new Set(ids)];
+  if (unique.length > 0) {
+    const n = await prisma.unitGroup.count({ where: { Id: { in: unique }, EnterpriseId: enterpriseId } });
+    if (n !== unique.length) throw new Error("Grupo de unidades não encontrado.");
+  }
+  await prisma.$transaction([
+    prisma.unitGroup.updateMany({
+      where: { BlueprintId: blueprintId, Id: { notIn: unique } },
+      data: { BlueprintId: null },
+    }),
+    prisma.unitGroup.updateMany({ where: { Id: { in: unique } }, data: { BlueprintId: blueprintId } }),
+  ]);
+}
 
 export async function listTipologias(
   organizationId: string,
@@ -1481,26 +1520,30 @@ export async function createTipologia(
       Name: input.nome,
       Description: input.descricao,
       AreaSqM: input.metragem,
-      UnitCount: input.unidades,
       Status: "incompleta",
       Position: await nextPosition(agg._max.Position),
     },
     include: BLUEPRINT_INCLUDE,
   });
-  return toTipologia(row);
+  if (input.unitGroupIds === undefined || input.unitGroupIds.length === 0) return toTipologia(row);
+  await setTipologiaUnitGroups(enterpriseId, row.Id, input.unitGroupIds);
+  return toTipologia(await findBlueprintRow(organizationId, row.Id));
 }
 
 export async function updateTipologia(
   organizationId: string,
   id: number,
-  patch: Partial<TipologiaInput & { status: TipologiaStatus }>
+  patch: TipologiaPatch
 ): Promise<Tipologia> {
-  await assertBlueprint(organizationId, id);
+  const enterpriseId = await assertBlueprint(organizationId, id);
+  // Antes do update: o row devolvido já traz a contagem de unidades nova.
+  if (patch.unitGroupIds !== undefined) {
+    await setTipologiaUnitGroups(enterpriseId, id, patch.unitGroupIds);
+  }
   const data: Prisma.BlueprintUpdateInput = {};
   if (patch.nome !== undefined) data.Name = patch.nome;
   if (patch.descricao !== undefined) data.Description = patch.descricao;
   if (patch.metragem !== undefined) data.AreaSqM = patch.metragem;
-  if (patch.unidades !== undefined) data.UnitCount = patch.unidades;
   if (patch.status !== undefined) data.Status = patch.status;
   const row = await prisma.blueprint.update({
     where: { Id: id },
@@ -2244,7 +2287,24 @@ export async function linkAmbiente(
 
 // ─── Unit groups / Torres (Enterprise) ──────────────────────────────────
 
-export type UnitGroupInput = Omit<UnitGroup, "id">;
+export type UnitGroupInput = Omit<UnitGroup, "id" | "tipologiaId"> & {
+  /** null desvincula; ausente não mexe. */
+  tipologiaId?: number | null;
+};
+
+/** Tipologia do mesmo empreendimento do grupo (ou null = desvincular). */
+async function resolveUnitGroupBlueprint(
+  enterpriseId: number,
+  tipologiaId: number | null
+): Promise<number | null> {
+  if (tipologiaId === null) return null;
+  const bp = await prisma.blueprint.findFirst({
+    where: { Id: tipologiaId, EnterpriseId: enterpriseId },
+    select: { Id: true },
+  });
+  if (!bp) throw new Error("Tipologia não encontrada.");
+  return bp.Id;
+}
 
 async function resolveTowerId(enterpriseId: number, name: string): Promise<number | null> {
   const trimmed = name.trim();
@@ -2264,7 +2324,13 @@ async function resolveTowerId(enterpriseId: number, name: string): Promise<numbe
 
 type UnitGroupRow = Prisma.UnitGroupGetPayload<{ include: { Tower: true } }>;
 function toUnitGroup(row: UnitGroupRow): UnitGroup {
-  return { id: row.Id, nome: row.Name, torre: row.Tower?.Name ?? "", unidades: row.UnitNumbers };
+  return {
+    id: row.Id,
+    nome: row.Name,
+    torre: row.Tower?.Name ?? "",
+    unidades: row.UnitNumbers,
+    tipologiaId: row.BlueprintId,
+  };
 }
 
 export async function listUnitGroups(
@@ -2286,8 +2352,15 @@ export async function createUnitGroup(
 ): Promise<UnitGroup> {
   const enterpriseId = projectId;
   const towerId = await resolveTowerId(enterpriseId, input.torre);
+  const blueprintId = await resolveUnitGroupBlueprint(enterpriseId, input.tipologiaId ?? null);
   const row = await prisma.unitGroup.create({
-    data: { EnterpriseId: enterpriseId, Name: input.nome, TowerId: towerId, UnitNumbers: input.unidades },
+    data: {
+      EnterpriseId: enterpriseId,
+      Name: input.nome,
+      TowerId: towerId,
+      BlueprintId: blueprintId,
+      UnitNumbers: input.unidades,
+    },
     include: { Tower: true },
   });
   return toUnitGroup(row);
@@ -2309,6 +2382,10 @@ export async function updateUnitGroup(
   if (patch.torre !== undefined) {
     const towerId = await resolveTowerId(exists.EnterpriseId, patch.torre);
     data.Tower = towerId == null ? { disconnect: true } : { connect: { Id: towerId } };
+  }
+  if (patch.tipologiaId !== undefined) {
+    const blueprintId = await resolveUnitGroupBlueprint(exists.EnterpriseId, patch.tipologiaId);
+    data.Blueprint = blueprintId == null ? { disconnect: true } : { connect: { Id: blueprintId } };
   }
   const row = await prisma.unitGroup.update({ where: { Id: id }, data, include: { Tower: true } });
   return toUnitGroup(row);

@@ -39,7 +39,7 @@ import {
   useUpdateComponente,
 } from "@/lib/hooks/useTipologiaMutations";
 import { useTipologias } from "@/lib/hooks/useTipologias";
-import { useUnitGroups } from "@/lib/hooks/useUnitGroups";
+import { useUnitGroups, useUpdateUnitGroup } from "@/lib/hooks/useUnitGroups";
 import { useSelection } from "@/lib/store/selection";
 import { cn } from "@/lib/utils";
 import { useRequireActiveProject } from "@/lib/hooks/useRequireActiveProject";
@@ -48,8 +48,10 @@ import { UnitGroupsDrawer } from "@/features/unit-groups/components/UnitGroupsDr
 import type { Ambiente, Componente, Material, Tipologia } from "@/shared/types/domain";
 
 import { guessAmbIcon } from "../ambIcons";
+import { contarUnidades } from "../shared";
 import { AmbienteAccordion, type SharedBadgeInfo } from "./AmbienteAccordion";
 import { EditTipSplitButton } from "./EditTipSplitButton";
+import { UnitGroupChip, UnitGroupLinkMenu } from "./UnitGroupLinks";
 import { AddAmbienteChooser } from "./modals/AddAmbienteChooser";
 import { AddComponenteModal } from "./modals/AddComponenteModal";
 import { AmbienteModal, type AmbienteFormValue } from "./modals/AmbienteModal";
@@ -77,7 +79,7 @@ export function TypologiesScreen() {
   const { data: tipologias = [], isLoading: tipsLoading } = useTipologias(activeProjectId);
   const { data: materiais = [] } = useMateriais();
   const { data: kits = [] } = useKits();
-  const { data: unitGroups = [] } = useUnitGroups(activeProjectId);
+  const { data: unitGroups = [], isSuccess: unitGroupsLoaded } = useUnitGroups(activeProjectId);
   const { data: sharedInfo } = useSharedInfo(activeProjectId);
   const setSelectedTipologia = useSelection((s) => s.setSelectedTipologia);
   const { data: project } = useProject(activeProjectId);
@@ -126,6 +128,7 @@ export function TypologiesScreen() {
   const updateComponente = useUpdateComponente();
   const deleteComponente = useDeleteComponente();
   const linkAmbiente = useLinkAmbiente();
+  const updateUnitGroup = useUpdateUnitGroup();
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
@@ -209,6 +212,18 @@ export function TypologiesScreen() {
       otherNames: reg.tips.filter((id) => id !== String(tip.id)).map(tipNameById),
     };
   };
+  // ── Grupos de unidades vinculados (as unidades da tipologia vêm deles) ──
+  const tipNome = (id: number) => tipologias.find((t) => t.id === id)?.nome ?? "outra tipologia";
+  const linkedGroups = unitGroups.filter((g) => g.tipologiaId === tip.id);
+  // Do cache dos grupos (acompanha o vincular/desvincular otimista); até ele
+  // chegar, o valor que o servidor derivou na tipologia.
+  const unidadesDe = (t: Tipologia) =>
+    unitGroupsLoaded ? contarUnidades(unitGroups.filter((g) => g.tipologiaId === t.id)) : t.unidades;
+  // Grupo com mutação em voo (vincular ou desvincular) — o chip/menu mostra o spinner.
+  const groupBusy = updateUnitGroup.isPending ? (updateUnitGroup.variables?.id ?? null) : null;
+  const setGroupTipologia = (groupId: number, tipologiaId: number | null) =>
+    updateUnitGroup.mutate({ id: groupId, patch: { tipologiaId } });
+
   const linkedShareIds = new Set(
     tip.ambientes
       .map((a) => ambShared[String(a.id)])
@@ -331,7 +346,7 @@ export function TypologiesScreen() {
                 <p className="mb-2 text-[11px] leading-snug text-neutral-gray-7">{t.descricao}</p>
                 <div className="mb-2 flex gap-3 text-[11px] text-neutral-gray-7">
                   <span>
-                    <strong className="text-neutral-gray-11">{t.unidades}</strong> unidades
+                    <strong className="text-neutral-gray-11">{unidadesDe(t)}</strong> unidades
                   </span>
                   <span>
                     <strong className="text-neutral-gray-11">
@@ -357,7 +372,7 @@ export function TypologiesScreen() {
               <p className="mt-[3px] text-xs text-neutral-gray-7">{tip.descricao}</p>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-xs text-neutral-gray-7">{tip.unidades} unidades</span>
+              <span className="text-xs text-neutral-gray-7">{unidadesDe(tip)} unidades</span>
               <Button
                 variant="bordered"
                 size="sm"
@@ -380,21 +395,26 @@ export function TypologiesScreen() {
             <span className="text-[11px] font-semibold text-neutral-gray-7">
               Grupos de unidades:
             </span>
-            {unitGroups.map((g) => (
-              <span
+            {linkedGroups.length === 0 && (
+              <span className="text-[11px] text-neutral-gray-6">nenhum vinculado</span>
+            )}
+            {linkedGroups.map((g) => (
+              <UnitGroupChip
                 key={g.id}
-                className="rounded-full border border-neutral-gray-5 bg-neutral-gray-2 px-2.5 py-[3px] text-[11px] text-neutral-gray-8"
-              >
-                {g.nome}
-              </span>
+                group={g}
+                removing={groupBusy === g.id}
+                onRemove={() => setGroupTipologia(g.id, null)}
+              />
             ))}
-            <button
-              type="button"
-              onClick={() => setShowUnitGroups(true)}
-              className="rounded-full border border-dashed border-neutral-gray-5 px-2.5 py-[3px] text-[11px] text-neutral-gray-7 transition-colors hover:border-primary-7 hover:text-primary-7"
-            >
-              + Novo grupo
-            </button>
+            <UnitGroupLinkMenu
+              options={unitGroups.filter((g) => g.tipologiaId !== tip.id)}
+              vinculadoA={(g) => (g.tipologiaId !== null ? tipNome(g.tipologiaId) : null)}
+              linking={
+                updateUnitGroup.isPending && updateUnitGroup.variables?.patch.tipologiaId === tip.id
+              }
+              onPick={(g) => setGroupTipologia(g.id, tip.id)}
+              onManage={() => setShowUnitGroups(true)}
+            />
           </div>
 
           <div className="px-5 py-3">
@@ -470,13 +490,16 @@ export function TypologiesScreen() {
         onCreated={(t) => setSelectedId(t.id)}
       />
 
-      <EditTypologyModal
-        key={tip.id}
-        open={showEditTip}
-        onClose={() => setShowEditTip(false)}
-        tip={tip}
-        unitGroups={unitGroups.map((g) => g.nome)}
-      />
+      {/* Montada só aberta: o rascunho nasce da tipologia no momento de abrir. */}
+      {showEditTip && (
+        <EditTypologyModal
+          key={tip.id}
+          onClose={() => setShowEditTip(false)}
+          tip={tip}
+          unitGroups={unitGroups}
+          tipNome={tipNome}
+        />
+      )}
 
       {/* Montada só aberta: o rascunho nasce da árvore no momento de abrir. */}
       {showMetragens && (

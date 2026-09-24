@@ -145,6 +145,7 @@ model Blueprint {
 
   Enterprise     Enterprise      @relation(fields: [EnterpriseId], references: [Id], onDelete: Cascade)
   BlueprintRooms BlueprintRoom[]
+  UnitGroups     UnitGroup[]
 
   @@index([EnterpriseId])
 }
@@ -588,14 +589,19 @@ model UnitGroup {
   Id           Int      @id @default(autoincrement())
   EnterpriseId Int
   TowerId      Int?
+  /// Tipologia (planta) das unidades do grupo — um grupo tem uma planta só;
+  /// null = ainda não vinculado. As "unidades" da tipologia derivam daqui.
+  BlueprintId  Int?
   Name         String
   UnitNumbers  String[] @default([])
 
   Enterprise Enterprise @relation(fields: [EnterpriseId], references: [Id], onDelete: Cascade)
   Tower      Tower?     @relation(fields: [TowerId], references: [Id], onDelete: SetNull)
+  Blueprint  Blueprint? @relation(fields: [BlueprintId], references: [Id], onDelete: SetNull)
 
   @@index([EnterpriseId])
   @@index([TowerId])
+  @@index([BlueprintId])
 }
 
 // ─── Media Center ───────────────────────────────────────────────────────

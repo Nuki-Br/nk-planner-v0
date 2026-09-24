@@ -2,29 +2,43 @@
 
 import React from "react";
 
-import { Button, Icon, Input, Modal, Textarea } from "@/components/ui";
+import { Button, Input, Modal, Textarea } from "@/components/ui";
 import { useUpdateTipologia } from "@/lib/hooks/useTipologiaMutations";
-import type { Tipologia } from "@/shared/types/domain";
+import type { Tipologia, UnitGroup } from "@/shared/types/domain";
 
+import { UnitGroupsField } from "../UnitGroupLinks";
 import { CaracteristicasPicker } from "./CaracteristicasPicker";
 
 interface EditTypologyModalProps {
-  open: boolean;
   onClose: () => void;
   tip: Tipologia;
-  /** Identificadores de grupos vinculados exibidos como chips (mock). */
-  unitGroups: string[];
+  /** Todos os grupos de unidades do empreendimento. */
+  unitGroups: UnitGroup[];
+  tipNome: (tipologiaId: number) => string;
 }
 
-// Modal Editar tipologia. Persiste nome/descrição via store; quartos/suítes
-// (derivados por regex), características e grupos vinculados são locais como no
-// protótipo (o domínio ainda não os comporta).
+const mesmosIds = (a: readonly number[], b: readonly number[]) =>
+  a.length === b.length && a.every((id) => b.includes(id));
+
+// Modal Editar tipologia. Persiste nome/descrição e os grupos de unidades
+// vinculados (a lista inteira, `unitGroupIds`); quartos/suítes (derivados por
+// regex) e características são locais como no protótipo (o domínio ainda não
+// os comporta).
+//
+// Montada só aberta (TypologiesScreen): o rascunho nasce da tipologia no
+// momento de abrir. Antes um efeito o reiniciava a cada render — a lista de
+// grupos chegava como array novo a cada vez —, e o que se removia sumia antes
+// do salvar.
 //
 // A seção "Imagem da planta" foi REMOVIDA: além de imagem de planta ser assunto
 // do Personaliza (docs/context/product.md), o campo era um mock morto — o
 // handleSave nunca enviou a imagem, então ela sumia em silêncio ao salvar.
-export function EditTypologyModal({ open, onClose, tip, unitGroups }: EditTypologyModalProps) {
+export function EditTypologyModal({ onClose, tip, unitGroups, tipNome }: EditTypologyModalProps) {
   const updateTipologia = useUpdateTipologia();
+  const vinculados = React.useMemo(
+    () => unitGroups.filter((g) => g.tipologiaId === tip.id).map((g) => g.id),
+    [unitGroups, tip.id]
+  );
 
   const defaults = React.useMemo(
     () => ({
@@ -40,34 +54,23 @@ export function EditTypologyModal({ open, onClose, tip, unitGroups }: EditTypolo
   const [descricao, setDescricao] = React.useState(tip.descricao);
   const [quartos, setQuartos] = React.useState(String(defaults.quartos));
   const [suites, setSuites] = React.useState(String(defaults.suites));
-  const [grupos, setGrupos] = React.useState<string[]>(unitGroups);
-  const [grupoInput, setGrupoInput] = React.useState("");
+  const [grupos, setGrupos] = React.useState<number[]>(vinculados);
   const [caracts, setCaracts] = React.useState<string[]>([]);
 
-  React.useEffect(() => {
-    if (!open) return;
-    setNome(tip.nome);
-    setDescricao(tip.descricao);
-    setQuartos(String(defaults.quartos));
-    setSuites(String(defaults.suites));
-    setGrupos(unitGroups);
-    setGrupoInput("");
-    setCaracts([]);
-  }, [open, tip, defaults, unitGroups]);
-
-  const addGrupo = () => {
-    const g = grupoInput.trim();
-    if (g && !grupos.includes(g)) {
-      setGrupos((gs) => [...gs, g]);
-      setGrupoInput("");
-    }
-  };
   const toggleCaract = (c: string) =>
     setCaracts((cs) => (cs.includes(c) ? cs.filter((x) => x !== c) : [...cs, c]));
 
   const handleSave = () => {
     updateTipologia.mutate(
-      { id: tip.id, patch: { nome: nome.trim() || tip.nome, descricao } },
+      {
+        id: tip.id,
+        patch: {
+          nome: nome.trim() || tip.nome,
+          descricao,
+          // Só quando mudou: poupa duas idas ao banco no salvar comum.
+          ...(mesmosIds(grupos, vinculados) ? {} : { unitGroupIds: grupos }),
+        },
+      },
       { onSuccess: onClose }
     );
   };
@@ -81,7 +84,7 @@ export function EditTypologyModal({ open, onClose, tip, unitGroups }: EditTypolo
 
   return (
     <Modal
-      open={open}
+      open
       onClose={onClose}
       title="Editar tipologia"
       width={680}
@@ -112,43 +115,16 @@ export function EditTypologyModal({ open, onClose, tip, unitGroups }: EditTypolo
         </div>
 
         <div className="border-t border-neutral-gray-4 pt-4">
-          <SectionTitle sub="Vincule ou desvincule grupos de unidades desta tipologia.">
+          <SectionTitle sub="Grupos de unidades desta planta — as unidades da tipologia são as desses grupos.">
             Grupos de unidades vinculados
           </SectionTitle>
-          <div className="mb-2.5 flex flex-wrap gap-1.5">
-            {grupos.length === 0 && (
-              <span className="text-xs text-neutral-gray-6">Nenhum grupo vinculado.</span>
-            )}
-            {grupos.map((g) => (
-              <span
-                key={g}
-                className="inline-flex items-center gap-1.5 rounded-full bg-primary-1 px-2.5 py-1 text-xs font-semibold text-primary-7"
-              >
-                {g}
-                <button
-                  type="button"
-                  onClick={() => setGrupos((gs) => gs.filter((x) => x !== g))}
-                  className="flex text-primary-7"
-                >
-                  <Icon name="close" size={11} />
-                </button>
-              </span>
-            ))}
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="flex-1">
-              <Input
-                label="Vincular grupo"
-                value={grupoInput}
-                onValueChange={setGrupoInput}
-                placeholder="Ex: UG-AP-A-03 ou Vista Mar"
-                small
-              />
-            </div>
-            <Button variant="bordered" icon="plus" onPress={addGrupo}>
-              Vincular
-            </Button>
-          </div>
+          <UnitGroupsField
+            value={grupos}
+            onChange={setGrupos}
+            groups={unitGroups}
+            tipologiaId={tip.id}
+            tipNome={tipNome}
+          />
         </div>
 
         <div className="border-t border-neutral-gray-4 pt-4">

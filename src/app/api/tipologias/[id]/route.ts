@@ -5,9 +5,8 @@ import {
   deleteTipologia,
   getTipologia,
   updateTipologia,
-  type TipologiaInput,
+  type TipologiaPatch,
 } from "@/lib/server/store";
-import type { TipologiaStatus } from "@/shared/types/domain";
 
 interface Params {
   params: { id: string };
@@ -18,7 +17,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
 }
 
 export async function PATCH(req: NextRequest, { params }: Params) {
-  const patch = (await req.json()) as Partial<TipologiaInput & { status: TipologiaStatus }>;
+  const patch = (await req.json()) as TipologiaPatch;
   return withOrg((org) => updateTipologia(org, toInt(params.id), patch));
 }
 

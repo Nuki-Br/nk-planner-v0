@@ -47,7 +47,8 @@ num componente compartilhado é **qtd/RT**.
 ### Tipologia
 Variação de planta, do empreendimento. Campos: `nome`, `descricao`, `metragem`, `unidades`,
 `status` (`completa | incompleta`), `ambientes[]`.
-- `metragem` e `unidades` **nascem 0** e saíram da interface de criação.
+- `metragem` **nasce 0** e saiu da interface de criação.
+- `unidades` é **derivada** dos grupos de unidades vinculados (ver Fluxos → Grupos de unidades).
 
 ### Ambiente
 Um cômodo. Pertence ao empreendimento (compartilhável). Campos: `nome`, `icon` (compartilhados),
@@ -86,11 +87,18 @@ tipologia — ver `docs/features/pricing.md` §2.
 ## 3. Fluxos do usuário
 
 ### Tipologia
-- **Criar** — exige só o `nome`. Nasce `incompleta`, com `metragem/unidades = 0`. *Atenção:* os
-  campos quartos/suítes, "características da planta" e "grupos" do modal são **mock local — não são
-  persistidos**.
-- **Editar** — só `nome` e `descricao` persistem. Quartos/suítes são **derivados por regex** dos
-  nomes dos ambientes, só para exibição.
+- **Criar** — exige só o `nome`. Nasce `incompleta`, com `metragem = 0`. Os grupos de unidades
+  escolhidos são vinculados na criação. *Atenção:* os campos quartos/suítes e "características da
+  planta" do modal são **mock local — não são persistidos**.
+- **Editar** — persistem `nome`, `descricao` e os **grupos de unidades vinculados** (lista inteira,
+  `unitGroupIds`). Quartos/suítes são **derivados por regex** dos nomes dos ambientes, só para
+  exibição.
+- **Grupos de unidades** (desde 2026-09-24) — um grupo pertence a **uma** tipologia
+  (`UnitGroup.BlueprintId`, nullable; excluir a tipologia solta o grupo). Vincular um grupo que
+  está em outra planta o **move**. As `unidades` da tipologia são **derivadas**: números distintos
+  (por torre) dos grupos vinculados — o antigo `Blueprint.UnitCount` não é mais lido. No cabeçalho
+  da tipologia, o chip tem "x" (desvincula na hora) e "Vincular grupo" abre a lista do
+  empreendimento; nas modais de criar/editar, a lista vai no salvar.
 - **Editar metragens** (menu ▾ do "Editar") — `qtd`/`rt` de **todos** os componentes da tipologia
   numa tabela por ambiente, gravados num request só (`PATCH /api/tipologias/[id]/metragens`, um
   `INSERT … ON CONFLICT` em `BlueprintRoomComponent`). Por planta, como no "Editar" do
@@ -207,5 +215,5 @@ ajusta quantidades de sub-itens de kit por planta. (Detalhado no spec de Materia
    desejado?
 6. **Semântica de "Duplicar":** duplicar tipologia **quebra todo compartilhamento** (cópia
    profunda). É o esperado, ou ambientes compartilhados deveriam continuar compartilhados na cópia?
-7. **Campos mock:** quartos/suítes, "características da planta" e "grupos" nos modais **não
-   persistem**. Implementar de verdade ou remover na nova versão?
+7. **Campos mock:** quartos/suítes e "características da planta" nos modais **não
+   persistem** (os grupos de unidades persistem desde 2026-09-24). Implementar de verdade ou remover na nova versão?

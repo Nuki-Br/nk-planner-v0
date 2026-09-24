@@ -12,6 +12,8 @@ export const queryKeys = {
   /** O discriminante "list"/"detail" evita que ["tipologias", projectId] e
    *  ["tipologias", id] virem a MESMA key com formas incompatíveis. */
   tipologias: (projectId: number) => ["tipologias", "list", projectId] as const,
+  /** Prefixo de todas as listas (para escrever no cache sem saber o empreendimento). */
+  tipologiasLists: ["tipologias", "list"] as const,
   tipologia: (id: number) => ["tipologias", "detail", id] as const,
   materiais: ["materiais"] as const,
   kits: ["kits"] as const,

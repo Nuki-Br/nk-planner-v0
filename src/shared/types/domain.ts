@@ -325,6 +325,10 @@ export interface Tipologia {
   nome: string;
   metragem: number;
   descricao: string;
+  /**
+   * Unidades da planta — DERIVADO: números distintos (por torre) dos grupos de
+   * unidades vinculados. Não é editável; muda vinculando/desvinculando grupos.
+   */
   unidades: number;
   status: TipologiaStatus;
   ambientes: Ambiente[];
@@ -342,6 +346,8 @@ export interface UnitGroup {
   /** Nome da torre ("" = sem torre) — o vínculo real é por FK no banco. */
   torre: string;
   unidades: string[];
+  /** Tipologia (planta) das unidades do grupo; null = não vinculado. */
+  tipologiaId: number | null;
 }
 
 /**

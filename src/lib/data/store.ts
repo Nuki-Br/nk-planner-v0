@@ -301,7 +301,11 @@ export async function deleteCategoria(id: number): Promise<void> {
 
 // ─── Tipologias (Blueprint) ─────────────────────────────────────────────
 
-export type TipologiaInput = Pick<Tipologia, "nome" | "metragem" | "descricao" | "unidades">;
+export type TipologiaInput = Pick<Tipologia, "nome" | "metragem" | "descricao"> & {
+  /** Grupos de unidades vinculados — a lista completa (substitui a atual). */
+  unitGroupIds?: number[];
+};
+export type TipologiaPatch = Partial<TipologiaInput & { status: TipologiaStatus }>;
 
 export async function listTipologias(projectId: number): Promise<Tipologia[]> {
   return httpGet<Tipologia[]>(`/api/tipologias?projectId=${projectId}`);
@@ -323,9 +327,9 @@ export async function createTipologia(
 
 export async function updateTipologia(
   id: number,
-  patch: Partial<TipologiaInput & Pick<Tipologia, "status">>
+  patch: TipologiaPatch
 ): Promise<Tipologia> {
-  return httpSend<Tipologia, Partial<TipologiaInput & { status: TipologiaStatus }>>(
+  return httpSend<Tipologia, TipologiaPatch>(
     `/api/tipologias/${id}`,
     "PATCH",
     patch
@@ -579,7 +583,10 @@ export async function linkAmbiente(
 
 // ─── Unit groups / Torres ─────────────────────────────────────────────
 
-export type UnitGroupInput = Omit<UnitGroup, "id">;
+export type UnitGroupInput = Omit<UnitGroup, "id" | "tipologiaId"> & {
+  /** null desvincula; ausente não mexe. */
+  tipologiaId?: number | null;
+};
 
 export async function listUnitGroups(projectId: number): Promise<UnitGroup[]> {
   return httpGet<UnitGroup[]>(`/api/unit-groups?projectId=${projectId}`);
