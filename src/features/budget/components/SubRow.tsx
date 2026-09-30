@@ -30,6 +30,14 @@ export interface SubRowCells {
   credito?: boolean;
 }
 
+/**
+ * Faixa teal na borda esquerda da linha do material/kit padrão. O fundo teal
+ * claro já distingue o padrão dos upgrades, mas some quando a linha fica
+ * pendente (fundo âmbar) — a faixa continua. Sombra interna, não borda: com
+ * border-collapse uma borda mais grossa desalinharia a coluna.
+ */
+export const PADRAO_MARK = "shadow-[inset_3px_0_0_#05b1b1]";
+
 export function Td({
   children,
   right = false,

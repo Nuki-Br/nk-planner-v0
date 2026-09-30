@@ -42,7 +42,7 @@ export interface ExportItemRow {
   lado: Lado;
   /** 0 = a opção (material ou kit); 1 = sub-linha (composição / sub-item de kit). */
   nivel: 0 | 1;
-  /** Primeira linha de um componente dentro da seção — onde a separação é desenhada. */
+  /** Primeira linha de um componente (o padrão, ou o 1º upgrade sem padrão) — onde a separação é desenhada. */
   inicioGrupo: boolean;
   /** Linha de kit (o kit em si; os sub-itens são nivel 1). */
   isKit: boolean;
@@ -68,7 +68,6 @@ export interface ExportItemRow {
 
 export type ExportRow =
   | { kind: "ambiente"; nome: string }
-  | { kind: "secao"; lado: Lado; titulo: string }
   | { kind: "vazio"; titulo: string }
   | ExportItemRow
   | { kind: "totalAmbiente"; nome: string; total: number };
@@ -83,18 +82,6 @@ export interface PrecoFinalSheet {
 
 function plural(n: number, um: string, varios: string): string {
   return `${n} ${n === 1 ? um : varios}`;
-}
-
-/** Títulos das faixas de seção — os mesmos da tabela. */
-export function secaoTitulo(lado: Lado, usaDC: boolean): string {
-  if (lado === "padrao") {
-    return usaDC
-      ? "Acabamentos padrão — crédito incluído no preço"
-      : "Acabamentos padrão — inclusos no preço base";
-  }
-  return usaDC
-    ? "Acabamentos personalizados — débito cobrado do cliente"
-    : "Acabamentos personalizados — custo cobrado do cliente";
 }
 
 /** Dica de pendência de um material: sem cotação e/ou insumo da composição sem preço. */
@@ -344,53 +331,57 @@ function kitRows(
   return [main, ...subRows];
 }
 
-function ambienteRows(
-  deps: BudgetDeps,
-  amb: Ambiente,
-  usaDC: boolean,
-  total: number
-): ExportRow[] {
-  const { materiais, kits } = deps;
+/** O padrão do componente (o crédito) — vazio se não houver padrão resolvido. */
+function padraoRows(deps: BudgetDeps, comp: Componente): ExportItemRow[] {
+  const def = comp.options.find((o) => o.id === comp.padrao);
+  if (!def) return [];
+  if (def.isKit) {
+    const kit = getKit(deps.kits, def.baseId);
+    return kit ? kitRows(deps, "padrao", comp, def, kit, true) : [];
+  }
+  const mat = getMaterial(deps.materiais, def.baseId);
+  return mat ? padraoMaterialRows(deps, comp, def, mat) : [];
+}
+
+/** As opções de upgrade do componente (o débito); a primeira abre o grupo se não houver padrão. */
+function upgradeRows(deps: BudgetDeps, comp: Componente, abreGrupo: boolean): ExportItemRow[] {
+  const out: ExportItemRow[] = [];
+  for (const opt of comp.options) {
+    if (opt.isDefault) continue;
+    const inicio = abreGrupo && out.length === 0;
+    if (opt.isKit) {
+      const kit = getKit(deps.kits, opt.baseId);
+      if (kit) out.push(...kitRows(deps, "upgrade", comp, opt, kit, inicio));
+    } else {
+      const mat = getMaterial(deps.materiais, opt.baseId);
+      if (mat) out.push(...upgradeMaterialRows(deps, comp, opt, mat, inicio));
+    }
+  }
+  return out;
+}
+
+function ambienteRows(deps: BudgetDeps, amb: Ambiente, total: number): ExportRow[] {
   const rows: ExportRow[] = [{ kind: "ambiente", nome: amb.nome }];
 
-  // ── padrão: uma linha por componente (o crédito) ──
-  rows.push({ kind: "secao", lado: "padrao", titulo: secaoTitulo("padrao", usaDC) });
-  const padrao: ExportItemRow[] = [];
+  // Um grupo por componente, como na tabela: o padrão (crédito) primeiro e os
+  // upgrades (débito) logo abaixo.
+  let vazio = true;
   for (const comp of amb.componentes) {
-    const def = comp.options.find((o) => o.id === comp.padrao);
-    if (!def) continue;
-    if (def.isKit) {
-      const kit = getKit(kits, def.baseId);
-      if (kit) padrao.push(...kitRows(deps, "padrao", comp, def, kit, true));
-      continue;
+    const padrao = padraoRows(deps, comp);
+    const upgrades = upgradeRows(deps, comp, padrao.length === 0);
+    const primeira = upgrades[0];
+    if (padrao.length === 0 && primeira) {
+      // Sem padrão os upgrades saem sem crédito — o aviso que na tabela fica
+      // no cabeçalho do componente vai na primeira linha do grupo.
+      upgrades[0] = {
+        ...primeira,
+        obs: ["Sem material padrão", primeira.obs].filter(Boolean).join(" · "),
+      };
     }
-    const mat = getMaterial(materiais, def.baseId);
-    if (mat) padrao.push(...padraoMaterialRows(deps, comp, def, mat));
+    if (padrao.length > 0 || upgrades.length > 0) vazio = false;
+    rows.push(...padrao, ...upgrades);
   }
-  if (padrao.length === 0) rows.push({ kind: "vazio", titulo: "Nenhum material padrão definido" });
-  rows.push(...padrao);
-
-  // ── personalizados: as opções agrupadas por componente ──
-  rows.push({ kind: "secao", lado: "upgrade", titulo: secaoTitulo("upgrade", usaDC) });
-  const upgrades: ExportItemRow[] = [];
-  for (const comp of amb.componentes) {
-    let inicio = true;
-    for (const opt of comp.options) {
-      if (opt.isDefault) continue;
-      let linhas: ExportItemRow[] = [];
-      if (opt.isKit) {
-        const kit = getKit(kits, opt.baseId);
-        if (kit) linhas = kitRows(deps, "upgrade", comp, opt, kit, inicio);
-      } else {
-        const mat = getMaterial(materiais, opt.baseId);
-        if (mat) linhas = upgradeMaterialRows(deps, comp, opt, mat, inicio);
-      }
-      if (linhas.length > 0) inicio = false;
-      upgrades.push(...linhas);
-    }
-  }
-  if (upgrades.length === 0) rows.push({ kind: "vazio", titulo: "Nenhum upgrade cadastrado" });
-  rows.push(...upgrades);
+  if (vazio) rows.push({ kind: "vazio", titulo: "Nenhum material neste ambiente" });
 
   rows.push({ kind: "totalAmbiente", nome: amb.nome, total });
   return rows;
@@ -398,13 +389,12 @@ function ambienteRows(
 
 /** A tabela "Preço final" de uma tipologia, linha a linha. */
 export function buildPrecoFinalSheet(deps: BudgetDeps, tip: Tipologia): PrecoFinalSheet {
-  const usaDC = deps.usaDebitoCredito ?? true;
   const rows: ExportRow[] = [];
   let totalGeral = 0;
   let pendentes = 0;
   for (const amb of tip.ambientes) {
     const total = ambTotal(deps, amb);
-    rows.push(...ambienteRows(deps, amb, usaDC, total));
+    rows.push(...ambienteRows(deps, amb, total));
     totalGeral += total;
     for (const comp of amb.componentes) {
       for (const opt of comp.options) {

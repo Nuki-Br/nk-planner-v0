@@ -20,7 +20,7 @@ import { kitSubRow } from "../subRows";
 import { CostFillPopover } from "./CostFillPopover";
 import { KitItemQtyPopover } from "./KitItemQtyPopover";
 import { QtyPopover, type QtyValue } from "./QtyPopover";
-import { SubRow, Td } from "./SubRow";
+import { PADRAO_MARK, SubRow, Td } from "./SubRow";
 
 interface KitOptionRowsProps {
   /** "padrao" = linha de crédito; "upgrade" = linha de débito, com colunas e total. */
@@ -110,7 +110,7 @@ export function KitOptionRows({
   return (
     <>
       <tr className="group/row">
-        <Td sticky className={bg}>
+        <Td sticky className={cn(bg, padrao && PADRAO_MARK)}>
           <div className="flex items-start gap-1.5">
             <button
               type="button"

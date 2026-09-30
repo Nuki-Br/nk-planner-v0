@@ -65,14 +65,18 @@ describe("buildPrecoFinalSheet", () => {
         for (const r of sheet.rows.filter(isItem)) expect(r.colunas).toHaveLength(d.cols.length);
       });
 
-      it("upgrades agrupados por componente: um início de grupo por componente, em sequência", () => {
+      it("agrupado por componente: um início de grupo por componente, padrão primeiro", () => {
         for (const bloco of porAmbiente(sheet.rows)) {
-          const upg = bloco.filter(isItem).filter((r) => r.lado === "upgrade" && r.nivel === 0);
-          const inicios = upg.filter((r) => r.inicioGrupo).map((r) => r.componente);
+          const linhas = bloco.filter(isItem).filter((r) => r.nivel === 0);
+          const inicios = linhas.filter((r) => r.inicioGrupo).map((r) => r.componente);
           // cada componente abre um grupo só, e as linhas dele vêm juntas
           expect(new Set(inicios).size).toBe(inicios.length);
-          const ordem = upg.map((r) => r.componente).filter((c, i, arr) => c !== arr[i - 1]);
+          const ordem = linhas.map((r) => r.componente).filter((c, i, arr) => c !== arr[i - 1]);
           expect(ordem).toEqual(inicios);
+          // o padrão, quando existe, é a linha que abre o grupo
+          for (const [i, r] of linhas.entries()) {
+            if (r.lado === "padrao") expect(r.inicioGrupo, `${r.componente}#${i}`).toBe(true);
+          }
         }
       });
 
@@ -82,10 +86,32 @@ describe("buildPrecoFinalSheet", () => {
     });
   }
 
-  it("sem débito/crédito, os títulos de seção mudam", () => {
-    const sheet = buildPrecoFinalSheet(deps({ usaDebitoCredito: false }), seed.tipologias[0]!);
-    const titulos = sheet.rows.flatMap((r) => (r.kind === "secao" ? [r.titulo] : []));
-    expect(titulos).toContain("Acabamentos personalizados — custo cobrado do cliente");
+  it("componente sem padrão: o 1º upgrade abre o grupo e avisa", () => {
+    const tip = seed.tipologias[0]!;
+    // Nomes de componente se repetem entre ambientes ("Piso"): localiza o
+    // ambiente também, e lê só o bloco dele.
+    const ambIdx = tip.ambientes.findIndex((a) =>
+      a.componentes.some((c) => c.padrao !== null && c.options.some((o) => !o.isDefault))
+    );
+    const alvo = tip.ambientes[ambIdx]?.componentes.find(
+      (c) => c.padrao !== null && c.options.some((o) => !o.isDefault)
+    );
+    expect(alvo).toBeDefined();
+    const semPadrao = {
+      ...tip,
+      ambientes: tip.ambientes.map((a) => ({
+        ...a,
+        componentes: a.componentes.map((c) => (c === alvo ? { ...c, padrao: null } : c)),
+      })),
+    };
+    const bloco = porAmbiente(buildPrecoFinalSheet(deps(), semPadrao).rows)[ambIdx] ?? [];
+    const grupo = bloco
+      .filter(isItem)
+      .filter((r) => r.componente === alvo!.nome && r.nivel === 0);
+    const primeira = grupo[0];
+    expect(primeira?.lado).toBe("upgrade");
+    expect(primeira?.inicioGrupo).toBe(true);
+    expect(primeira?.obs.startsWith("Sem material padrão")).toBe(true);
   });
 });
 

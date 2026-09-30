@@ -1,6 +1,6 @@
 // Exportação da aba "Preço final" para Excel (.xlsx) — uma planilha por
-// tipologia, com a mesma leitura da tela: faixa do ambiente, seções padrão /
-// personalizados, separação por componente, sub-linhas recuadas e totais. As
+// tipologia, com a mesma leitura da tela: faixa do ambiente, um grupo por
+// componente (padrão e depois os upgrades), sub-linhas recuadas e totais. As
 // linhas vêm prontas de ./precoFinalExport.ts; aqui é só formatação.
 //
 // O exceljs é carregado sob demanda (import dinâmico) para não pesar no bundle
@@ -23,10 +23,10 @@ const C = {
   cinza8: "FF595959",
   teal: "FF047676",
   tealClaro: "FFE6FAFA",
+  tealMedio: "FF05B1B1",
   padraoBg: "FFF4FFFE",
   kitBg: "FFFBF6FF",
   laranja: "FFC2410C",
-  laranjaClaro: "FFFFF7ED",
   pendenteBg: "FFFFFBE6",
   pendenteFg: "FFB45309",
 } as const;
@@ -85,7 +85,7 @@ function layoutOf(cols: BudgetColumn[], usaDC: boolean): Layout {
   };
 }
 
-/** Linha que atravessa a tabela inteira (ambiente, seção, vazio, aviso). */
+/** Linha que atravessa a tabela inteira (ambiente, vazio, aviso). */
 function faixa(
   ws: Worksheet,
   L: Layout,
@@ -162,6 +162,11 @@ function itemRow(ws: Worksheet, L: Layout, it: ExportItemRow): void {
       const cell = row.getCell(c);
       cell.border = { ...linha(C.cinza4), top: { style: "thin", color: { argb: C.cinza5 } } };
     }
+  }
+  // Faixa teal à esquerda da linha do padrão, como na tela: o fundo teal claro
+  // some quando a linha está pendente, a faixa não.
+  if (it.lado === "padrao" && !sub) {
+    comp.border = { ...comp.border, left: { style: "thick", color: { argb: C.tealMedio } } };
   }
 
   const esp = row.getCell(idx.especificacao);
@@ -369,16 +374,6 @@ export async function buildPrecoFinalWorkbook({
       switch (r.kind) {
         case "ambiente":
           faixa(ws, L, r.nome.toUpperCase(), C.preto, { bold: true, color: { argb: C.branco } }, 20);
-          break;
-        case "secao":
-          faixa(
-            ws,
-            L,
-            r.titulo.toUpperCase(),
-            r.lado === "padrao" ? C.tealClaro : C.laranjaClaro,
-            { bold: true, size: 9, color: { argb: r.lado === "padrao" ? C.teal : C.laranja } },
-            16
-          );
           break;
         case "vazio":
           faixa(ws, L, r.titulo, C.branco, { italic: true, size: 9, color: { argb: C.cinza7 } });
