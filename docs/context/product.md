@@ -7,7 +7,7 @@
 Plataforma SaaS B2B para construtoras/incorporadoras que centraliza o ciclo completo de
 personalização de acabamentos das unidades — do planejamento de custos à validação em obra.
 Três módulos: **Planner** (antes da venda) → **Personaliza** (durante a venda) → **Inspetor**
-(após a obra). Modelo de recorrência por empreendimento ativo.
+(após a obra).
 
 ## O módulo Planner
 Ponto de entrada do ciclo. Digitaliza a definição de materiais, composição de custos e
